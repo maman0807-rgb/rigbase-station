@@ -952,6 +952,30 @@
       }
     }
 
+    // ============================================================
+    // 7b. TELEGRAM ALERT HELPER
+    // Fire-and-forget call ke Edge Function. Gagal silent (gak block flow).
+    // ============================================================
+    async function sendTelegramAlert(message) {
+      if (!state.supabase || !message) return;
+      try {
+        const { error } = await state.supabase.functions.invoke('send-telegram-alert', {
+          body: { message }
+        });
+        if (error) console.warn('Telegram alert error:', error.message);
+        // Log ke alert_log
+        await state.supabase.from('alert_log').insert({
+          alert_type: 'real-time',
+          message: message.slice(0, 500),
+          sent_to: 'group',
+          status: error ? 'failed' : 'sent',
+        }).then(() => {}).catch(() => {});
+      } catch (err) {
+        console.warn('Telegram alert failed:', err.message);
+      }
+    }
+    window.sendTelegramAlert = sendTelegramAlert;
+
     async function logout() {
       await state.supabase.auth.signOut();
       state.user = null;
@@ -2545,12 +2569,37 @@
 
       try {
         let saved;
+        const prevEq = isEdit ? window.__currentEq : null;
         if (isEdit) {
           saved = await updateEquipment(state.currentEquipmentId, payload);
           toast('Equipment berhasil di-update.', 'success');
         } else {
           saved = await createEquipment(payload);
           toast('Equipment baru berhasil dibuat.', 'success');
+        }
+        // 🔔 Telegram alert untuk perubahan critical
+        if (isEdit && prevEq) {
+          const statusChanged = prevEq.status_operasi !== saved.status_operasi;
+          const isCritical = ['Down', 'Scrap'].includes(saved.status_operasi);
+          if (statusChanged && isCritical) {
+            sendTelegramAlert(
+              `🛑 <b>Status Equipment Berubah</b>\n` +
+              `<b>${saved.tag_number}</b> — ${saved.nama_equipment}\n` +
+              `📍 ${getParentUnitName(saved.assigned_unit_id)}\n` +
+              `Status: ${prevEq.status_operasi} → <b>${saved.status_operasi}</b>\n` +
+              `👤 ${state.profile.full_name || state.profile.email}`
+            );
+          }
+        } else if (!isEdit) {
+          // Equipment baru
+          sendTelegramAlert(
+            `➕ <b>Equipment Baru Ditambahkan</b>\n` +
+            `<b>${saved.tag_number}</b> — ${saved.nama_equipment}\n` +
+            `Kategori: ${getCategoryName(saved.kategori_id)}\n` +
+            `📍 ${getParentUnitName(saved.assigned_unit_id)}\n` +
+            `Status: ${saved.status_operasi} / ${saved.tipe_kepemilikan}\n` +
+            `👤 ${state.profile.full_name || state.profile.email}`
+          );
         }
         setEquipmentView('detail', saved.id);
       } catch (err) {
@@ -2700,8 +2749,19 @@
           }
         }
 
+        const eq = window.__currentEq;
         toast(`Mutasi berhasil${cascade ? ' (cascade ' + children.length + ' komponen)' : children.length > 0 ? ' (komponen di-detach)' : ''} — lihat tab History.`, 'success');
         closeModal();
+        // 🔔 Telegram alert
+        sendTelegramAlert(
+          `↔ <b>Mutasi Equipment</b>\n` +
+          `<b>${eq?.tag_number || equipment_id}</b>${eq ? ' — ' + eq.nama_equipment : ''}\n` +
+          `${getParentUnitName(from_unit_id)} → <b>${getParentUnitName(to_unit_id)}</b>\n` +
+          (cascade && children.length > 0 ? `🧩 +${children.length} komponen ikut\n` : '') +
+          `📅 ${mutation_date}\n` +
+          (reason ? `📝 ${reason}\n` : '') +
+          `👤 ${state.profile.full_name || state.profile.email}`
+        );
         setEquipmentView('detail', equipment_id, 'history');
       } catch (err) {
         toast('Gagal mutasi: ' + err.message, 'error');
@@ -2967,6 +3027,15 @@
         if (e4) throw new Error('Log mutasi baru gagal: ' + e4.message);
 
         toast(`Penggantian berhasil. ${newEq.tag_number} aktif di ${oldUnitName}. Lihat tab History.`, 'success');
+        // 🔔 Telegram alert
+        sendTelegramAlert(
+          `🔄 <b>Penggantian Equipment</b>\n` +
+          `🟢 Aktif: <b>${newEq.tag_number}</b> @ ${oldUnitName}\n` +
+          `🟡 Standby (${old_status}): <b>${oldEq.tag_number}</b> → Independent\n` +
+          `📅 ${replace_date}\n` +
+          (reason ? `📝 ${reason}\n` : '') +
+          `👤 ${state.profile.full_name || state.profile.email}`
+        );
         // Langsung pindah ke equipment BARU's History tab
         setEquipmentView('detail', newId, 'history');
       } catch (err) {
@@ -3109,8 +3178,20 @@
           borrower_equipment_id: borrowerEquipmentId,
           loan_date, reason,
         });
+        const borrower = window.__currentEq;
+        const { data: lenderEq } = await state.supabase.from('equipment').select('tag_number, nama_equipment, assigned_unit_id').eq('id', lender_id).maybeSingle();
         toast('Pinjaman berhasil dicatat.', 'success');
         closeModal();
+        // 🔔 Telegram alert
+        sendTelegramAlert(
+          `🤝 <b>Pinjam Equipment</b>\n` +
+          `Yang dipinjam: <b>${lenderEq?.tag_number || lender_id}</b>${lenderEq ? ' — ' + lenderEq.nama_equipment : ''}\n` +
+          `Dari: ${getParentUnitName(lenderEq?.assigned_unit_id)} → <b>${getParentUnitName(borrower?.assigned_unit_id)}</b>\n` +
+          `Menggantikan: <b>${borrower?.tag_number || borrowerEquipmentId}</b> (status Repair)\n` +
+          `📅 ${loan_date}\n` +
+          (reason ? `📝 ${reason}\n` : '') +
+          `👤 ${state.profile.full_name || state.profile.email}`
+        );
         setEquipmentView('detail', borrowerEquipmentId, 'history');
       } catch (err) {
         toast('Gagal: ' + err.message, 'error');
@@ -3218,9 +3299,25 @@
       if (cancelBtn) cancelBtn.disabled = true;
 
       try {
+        // Fetch loan info dulu buat alert nanti
+        const { data: loanData } = await state.supabase.from('loan_log').select('*').eq('id', loanId).maybeSingle();
         await returnLoan({ loan_id: loanId, return_date, borrower_new_status, return_notes });
+        // Fetch tag info untuk alert
+        const [lenderResp, borrowerResp] = await Promise.all([
+          loanData?.lender_equipment_id ? state.supabase.from('equipment').select('tag_number').eq('id', loanData.lender_equipment_id).maybeSingle() : Promise.resolve({ data: null }),
+          loanData?.borrower_equipment_id ? state.supabase.from('equipment').select('tag_number').eq('id', loanData.borrower_equipment_id).maybeSingle() : Promise.resolve({ data: null }),
+        ]);
         toast('Pinjaman berhasil dikembalikan.', 'success');
         closeModal();
+        // 🔔 Telegram alert
+        sendTelegramAlert(
+          `↩️ <b>Kembalikan Pinjaman</b>\n` +
+          `Dikembalikan: <b>${lenderResp?.data?.tag_number || '—'}</b> → ${getParentUnitName(loanData?.lender_unit_id)}\n` +
+          (borrowerResp?.data ? `Equipment asal (${borrowerResp.data.tag_number}) status: <b>${borrower_new_status || '—'}</b>\n` : '') +
+          `📅 ${return_date}\n` +
+          (return_notes ? `📝 ${return_notes}\n` : '') +
+          `👤 ${state.profile.full_name || state.profile.email}`
+        );
         // Refresh halaman detail
         if (state.currentEquipmentId) setEquipmentView('detail', state.currentEquipmentId, 'history');
       } catch (err) {
