@@ -816,6 +816,41 @@
     }
     window.populateParentEquipmentDropdown = populateParentEquipmentDropdown;
 
+    // Populate kategori dropdown berdasarkan tipe parent_unit (Rig / Standalone).
+    // - currentValue: kalau editing, preserve nilai yang sudah ada walaupun gak match filter.
+    function populateCategoryDropdown(parentUnitId, currentValue) {
+      const sel = document.querySelector('#eq-form select[name="kategori_id"]');
+      if (!sel) return;
+      const unit = state.parentUnits.find(u => u.id === Number(parentUnitId));
+      if (!unit) {
+        sel.innerHTML = '<option value="">— pilih Parent Unit dulu —</option>';
+        return;
+      }
+      // Filter: kategori dengan parent_unit_type matching unit.type, atau 'Both'
+      const matching = state.categories.filter(c =>
+        c.parent_unit_type === unit.type || c.parent_unit_type === 'Both'
+      );
+      // Kalau ada currentValue yang TIDAK match filter, tetap include sebagai legacy
+      let extra = [];
+      if (currentValue && !matching.find(c => c.id == currentValue)) {
+        const legacy = state.categories.find(c => c.id == currentValue);
+        if (legacy) extra.push(legacy);
+      }
+      const all = [...matching, ...extra];
+      sel.innerHTML = '<option value="">— pilih kategori —</option>' +
+        all.map(c => {
+          const isLegacy = extra.includes(c);
+          const note = isLegacy ? ` ⚠ legacy (${c.parent_unit_type})` : '';
+          return `<option value="${c.id}" ${currentValue == c.id ? 'selected' : ''}>${escapeHtml(c.name)}${note}</option>`;
+        }).join('');
+      // Tampilkan note kalau ada legacy
+      const noteEl = sel.parentElement.querySelector('.text-xs.text-slate-500');
+      if (noteEl) {
+        noteEl.textContent = `${matching.length} kategori cocok untuk unit type "${unit.type}"${extra.length ? ' (+ 1 legacy)' : ''}.`;
+      }
+    }
+    window.populateCategoryDropdown = populateCategoryDropdown;
+
     // ============================================================
     // 5. INIT SUPABASE + CEK KONFIG
     // ============================================================
@@ -2393,12 +2428,16 @@
         `;
         setTimeout(() => {
           $('#eq-form').addEventListener('submit', (e) => { e.preventDefault(); submitEquipmentForm(isEdit); });
-          // Populate parent equipment dropdown awal & listen ke perubahan parent_unit
+          // Populate parent equipment dropdown awal & kategori dropdown
           populateParentEquipmentDropdown(data.assigned_unit_id, data.parent_equipment_id, state.currentEquipmentId);
+          populateCategoryDropdown(data.assigned_unit_id, data.kategori_id);
+          // Listen ke perubahan parent_unit — refresh dua dropdown
           const unitSelect = $('#eq-form select[name="assigned_unit_id"]');
           if (unitSelect) {
             unitSelect.addEventListener('change', () => {
-              populateParentEquipmentDropdown(Number(unitSelect.value) || null, null, state.currentEquipmentId);
+              const newUnitId = Number(unitSelect.value) || null;
+              populateParentEquipmentDropdown(newUnitId, null, state.currentEquipmentId);
+              populateCategoryDropdown(newUnitId, null); // reset kategori karena unit berubah
             });
           }
         }, 0);
@@ -2432,10 +2471,13 @@
           ${state.parentUnits.map(u => `<option value="${u.id}" ${v == u.id ? 'selected' : ''}>${escapeHtml(u.name)} (${u.type})</option>`).join('')}
         </select>`;
       } else if (f.type === 'select-category') {
-        input = `<select name="${f.name}" ${required} class="${baseCls} bg-white">
-          <option value="">— pilih —</option>
-          ${state.categories.map(c => `<option value="${c.id}" ${v == c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}
-        </select>`;
+        // Render placeholder dulu; akan di-populate berdasarkan parent_unit type
+        // (populateCategoryDropdown dipanggil setelah form di-render)
+        const selectedTag = v ? `data-current-value="${v}"` : '';
+        input = `<select name="${f.name}" ${required} ${selectedTag} class="${baseCls} bg-white">
+          <option value="">— pilih Parent Unit dulu —</option>
+        </select>
+        <p class="text-xs text-slate-500 mt-1">Filter otomatis berdasarkan tipe Parent Unit (Rig/Standalone).</p>`;
       } else if (f.type === 'select-parent-equipment') {
         // Dropdown ini diisi async setelah form di-render (pas kategori/unit dipilih).
         // Render placeholder dulu, isi lewat populateParentEquipmentDropdown().
