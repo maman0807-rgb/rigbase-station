@@ -221,6 +221,13 @@
               <div id="header-user-role" class="text-xs text-slate-500 capitalize">—</div>
             </div>
           </div>
+          <button onclick="confirmLogout()" title="Keluar"
+            class="ml-1 p-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 hover:text-red-800 transition flex items-center gap-1.5 text-sm font-semibold">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+            </svg>
+            <span class="hidden sm:inline">Keluar</span>
+          </button>
         </div>
       </header>
 
@@ -953,6 +960,17 @@
       toast('Berhasil keluar.', 'info');
     }
     window.logout = logout;
+
+    async function confirmLogout() {
+      const ok = await confirmDialog({
+        title: 'Keluar dari aplikasi?',
+        message: `Yakin mau keluar, ${state.profile?.full_name || state.profile?.email}?`,
+        confirmText: 'Ya, Keluar',
+        cancelText: 'Batal',
+      });
+      if (ok) logout();
+    }
+    window.confirmLogout = confirmLogout;
 
     // ============================================================
     // 8. RENDER LAYOUT
