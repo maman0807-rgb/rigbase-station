@@ -1,0 +1,36 @@
+# Claude Code local settings
+.claude/
+
+# Dependencies
+node_modules/
+package-lock.json
+package.json
+
+# Data files (business data — jangan di-publish)
+data_equipment.xlsx
+*.xlsx
+*.xls
+*.csv
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# Logs
+*.log
+npm-debug.log*
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Temp
+*.tmp
+*.bak

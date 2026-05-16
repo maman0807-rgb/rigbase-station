@@ -1,0 +1,2978 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#1E3A8A" />
+  <title>Rigbase Station</title>
+
+  <!-- Tailwind CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    // Konfigurasi warna brand
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            navy:   { DEFAULT: '#1E3A8A', 50: '#EEF2FF', 600: '#1E3A8A', 700: '#172554' },
+            safety: { DEFAULT: '#F97316', 50: '#FFF7ED', 600: '#F97316', 700: '#C2410C' },
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+          },
+        },
+      },
+    };
+  </script>
+
+  <!-- Font Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <!-- Supabase JS SDK v2 -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <style>
+    body { font-family: 'Inter', system-ui, sans-serif; }
+    .hide { display: none !important; }
+    /* Smooth transition saat ganti halaman */
+    .page { animation: fadeIn .2s ease-out; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+    /* Aktif state untuk nav */
+    .nav-active { background-color: #1E3A8A; color: white; }
+    .bottom-nav-active { color: #F97316; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+
+  <!-- ============================================================
+       BANNER KONFIG (muncul kalau SUPABASE_URL belum di-set)
+       ============================================================ -->
+  <div id="config-banner" class="hide fixed inset-x-0 top-0 z-50 bg-red-600 text-white text-sm px-4 py-2 text-center">
+    ⚠️ Konfigurasi Supabase belum di-set. Edit <code class="bg-red-700 px-1 rounded">SUPABASE_URL</code> dan <code class="bg-red-700 px-1 rounded">SUPABASE_ANON_KEY</code> di file <code class="bg-red-700 px-1 rounded">index.html</code>.
+  </div>
+
+  <!-- ============================================================
+       LOGIN SCREEN
+       ============================================================ -->
+  <div id="login-screen" class="hide min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-navy to-navy-700">
+    <div class="w-full max-w-md bg-white rounded-2xl shadow-2xl p-8">
+      <div class="text-center mb-8">
+        <div class="flex justify-center mb-3">
+          <svg viewBox="0 0 64 64" class="w-20 h-20 text-navy" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <!-- Crown block -->
+            <rect x="26" y="6" width="12" height="4" fill="currentColor" stroke="none"/>
+            <!-- Hook line -->
+            <line x1="32" y1="10" x2="32" y2="20"/>
+            <circle cx="32" cy="22" r="2" fill="currentColor" stroke="none"/>
+            <!-- Mast legs -->
+            <line x1="28" y1="10" x2="14" y2="50"/>
+            <line x1="36" y1="10" x2="50" y2="50"/>
+            <!-- Horizontal struts -->
+            <line x1="26" y1="18" x2="38" y2="18"/>
+            <line x1="23" y1="28" x2="41" y2="28"/>
+            <line x1="20" y1="38" x2="44" y2="38"/>
+            <line x1="17" y1="48" x2="47" y2="48"/>
+            <!-- X bracing -->
+            <line x1="26" y1="18" x2="41" y2="28"/>
+            <line x1="38" y1="18" x2="23" y2="28"/>
+            <line x1="23" y1="28" x2="44" y2="38"/>
+            <line x1="41" y1="28" x2="20" y2="38"/>
+            <line x1="20" y1="38" x2="47" y2="48"/>
+            <line x1="44" y1="38" x2="17" y2="48"/>
+            <!-- Base platform -->
+            <rect x="10" y="50" width="44" height="4" fill="currentColor" stroke="none"/>
+            <!-- Ground -->
+            <line x1="4" y1="58" x2="60" y2="58" stroke-width="3"/>
+          </svg>
+        </div>
+        <h1 class="text-2xl font-bold text-navy">Rigbase Station</h1>
+        <p class="text-slate-500 text-sm mt-1">Database Equipment Rig Drilling</p>
+      </div>
+
+      <form id="login-form" class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">Email</label>
+          <input id="login-email" type="email" required autocomplete="email"
+                 class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-navy focus:border-transparent outline-none"
+                 placeholder="email@perusahaan.com" />
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">Password</label>
+          <input id="login-password" type="password" required autocomplete="current-password"
+                 class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-navy focus:border-transparent outline-none"
+                 placeholder="••••••••" />
+        </div>
+
+        <div id="login-error" class="hide text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2"></div>
+
+        <button type="submit" id="login-btn"
+                class="w-full bg-navy hover:bg-navy-700 text-white font-semibold py-2.5 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+          <span id="login-btn-label">Masuk</span>
+          <span id="login-btn-spinner" class="hide animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full"></span>
+        </button>
+      </form>
+
+      <div id="connection-status" class="mt-6 text-xs text-center text-slate-400">
+        Mengecek koneksi…
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       APP UTAMA (setelah login)
+       ============================================================ -->
+  <div id="app" class="hide min-h-screen flex flex-col md:flex-row">
+
+    <!-- SIDEBAR (desktop) -->
+    <aside class="hidden md:flex md:w-60 bg-navy text-white flex-col">
+      <div class="p-5 border-b border-navy-700 flex items-center gap-3">
+        <svg viewBox="0 0 64 64" class="w-9 h-9 text-safety flex-shrink-0" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="26" y="6" width="12" height="4" fill="currentColor" stroke="none"/>
+          <line x1="32" y1="10" x2="32" y2="20"/>
+          <circle cx="32" cy="22" r="2" fill="currentColor" stroke="none"/>
+          <line x1="28" y1="10" x2="14" y2="50"/>
+          <line x1="36" y1="10" x2="50" y2="50"/>
+          <line x1="26" y1="18" x2="38" y2="18"/>
+          <line x1="23" y1="28" x2="41" y2="28"/>
+          <line x1="20" y1="38" x2="44" y2="38"/>
+          <line x1="17" y1="48" x2="47" y2="48"/>
+          <line x1="26" y1="18" x2="41" y2="28"/>
+          <line x1="38" y1="18" x2="23" y2="28"/>
+          <line x1="23" y1="28" x2="44" y2="38"/>
+          <line x1="41" y1="28" x2="20" y2="38"/>
+          <line x1="20" y1="38" x2="47" y2="48"/>
+          <line x1="44" y1="38" x2="17" y2="48"/>
+          <rect x="10" y="50" width="44" height="4" fill="currentColor" stroke="none"/>
+        </svg>
+        <div>
+          <div class="font-bold leading-none text-base">Rigbase</div>
+          <div class="text-xs text-blue-200 leading-tight mt-0.5">Station</div>
+        </div>
+      </div>
+      <nav id="sidebar-nav" class="flex-1 p-3 space-y-1 text-sm">
+        <!-- diisi via JS -->
+      </nav>
+      <div class="p-3 border-t border-navy-700 text-xs text-blue-200">
+        <div id="sidebar-user-name" class="font-semibold text-white truncate">—</div>
+        <div id="sidebar-user-role" class="capitalize">—</div>
+        <button onclick="logout()" class="mt-2 w-full text-left text-blue-200 hover:text-white">↩️ Keluar</button>
+      </div>
+    </aside>
+
+    <!-- KONTEN UTAMA -->
+    <div class="flex-1 flex flex-col min-w-0">
+
+      <!-- HEADER (mobile + desktop) -->
+      <header class="bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between sticky top-0 z-30">
+        <div class="flex items-center gap-2 md:hidden">
+          <svg viewBox="0 0 64 64" class="w-7 h-7 text-navy flex-shrink-0" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="26" y="6" width="12" height="4" fill="currentColor" stroke="none"/>
+            <line x1="28" y1="10" x2="14" y2="50"/>
+            <line x1="36" y1="10" x2="50" y2="50"/>
+            <line x1="23" y1="28" x2="41" y2="28"/>
+            <line x1="20" y1="38" x2="44" y2="38"/>
+            <line x1="26" y1="18" x2="41" y2="28"/>
+            <line x1="38" y1="18" x2="23" y2="28"/>
+            <line x1="23" y1="28" x2="44" y2="38"/>
+            <line x1="41" y1="28" x2="20" y2="38"/>
+            <rect x="10" y="50" width="44" height="4" fill="currentColor" stroke="none"/>
+          </svg>
+          <span class="font-bold text-navy">Rigbase Station</span>
+        </div>
+        <h2 id="page-title" class="hidden md:block text-lg font-semibold text-slate-800">Dashboard</h2>
+        <div class="flex items-center gap-3">
+          <button id="alert-bell" class="relative p-2 rounded-lg hover:bg-slate-100" title="Notifikasi">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2a2 2 0 01-.6 1.4L4 17h5m6 0a3 3 0 11-6 0" />
+            </svg>
+            <span id="alert-badge" class="hide absolute top-1 right-1 w-2 h-2 bg-safety rounded-full"></span>
+          </button>
+          <div class="flex items-center gap-2 text-sm">
+            <div class="w-8 h-8 rounded-full bg-navy text-white flex items-center justify-center font-semibold" id="header-avatar">?</div>
+            <div class="hidden sm:block leading-tight">
+              <div id="header-user-name" class="font-medium text-slate-800">—</div>
+              <div id="header-user-role" class="text-xs text-slate-500 capitalize">—</div>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <!-- MAIN CONTENT -->
+      <main id="main-content" class="flex-1 p-4 md:p-6 pb-24 md:pb-6 overflow-y-auto">
+        <!-- diisi via JS -->
+      </main>
+
+      <!-- BOTTOM NAV (mobile only) -->
+      <nav id="bottom-nav" class="md:hidden fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 flex justify-around z-40">
+        <!-- diisi via JS -->
+      </nav>
+
+    </div>
+  </div>
+
+  <!-- ============================================================
+       TOAST CONTAINER
+       ============================================================ -->
+  <div id="toast-container" class="fixed top-4 right-4 z-50 space-y-2 pointer-events-none"></div>
+
+  <!-- ============================================================
+       SCRIPT UTAMA
+       ============================================================ -->
+  <script>
+    // ============================================================
+    // 1. KONFIGURASI — ISI 2 NILAI INI DARI SUPABASE DASHBOARD
+    // ============================================================
+    // Settings → API → Project URL & anon public key
+    const SUPABASE_URL      = 'https://olmowzrlokajhniqijfq.supabase.co';
+    const SUPABASE_ANON_KEY = 'sb_publishable_cbkPjUGchF_PwQo5ZlM3zQ_gRl-phYL';
+
+    // ============================================================
+    // 1b. ICON SVG LIBRARY
+    // Pakai Heroicons style — 24x24, stroke 2, currentColor.
+    // ============================================================
+    const ICONS = {
+      wrench: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-6 h-6"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.121 2.121 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>`,
+      check:  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="w-6 h-6"><circle cx="12" cy="12" r="10"/><path d="M8 12l3 3 5-6"/></svg>`,
+      warning:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="w-6 h-6"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="13"/><circle cx="12" cy="16.5" r="0.6" fill="currentColor" stroke="none"/></svg>`,
+      bell:   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-6 h-6"><path d="M18 8a6 6 0 00-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>`,
+    };
+
+    // ============================================================
+    // 2. STATE GLOBAL
+    // ============================================================
+    const state = {
+      user: null,
+      profile: null,
+      currentPage: 'dashboard',
+      supabase: null,
+      // Reference data (di-cache saat boot)
+      parentUnits: [],
+      categories: [],
+      // Equipment view state
+      equipmentList: [],
+      equipmentFilters: { parent_unit_id: '', kategori_id: '', status_operasi: '', tipe_kepemilikan: '' },
+      equipmentSearch: '',
+      equipmentSort: { field: 'tag_number', dir: 'asc' },
+      currentEquipmentId: null,
+      equipmentView: 'list', // 'list' | 'detail' | 'form'
+      equipmentFormMode: 'add', // 'add' | 'edit'
+      equipmentDetailTab: 'info',
+    };
+
+    // ============================================================
+    // 3. KONFIGURASI NAVIGASI
+    // ============================================================
+    const NAV_ITEMS = [
+      { id: 'dashboard',   label: 'Dashboard',   icon: '📊',  bottomNav: true  },
+      { id: 'equipment',   label: 'Equipment',   icon: '🔧',  bottomNav: true  },
+      { id: 'maintenance', label: 'Maintenance', icon: '🛠️',  bottomNav: true  },
+      { id: 'alerts',      label: 'Alert',       icon: '🔔',  bottomNav: true  },
+      { id: 'categories',  label: 'Kategori',    icon: '🏷️',  adminOnly: true  },
+      { id: 'users',       label: 'User',        icon: '👥',  adminOnly: true  },
+      { id: 'settings',    label: 'Pengaturan',  icon: '⚙️',  bottomNav: true  },
+    ];
+
+    // ============================================================
+    // 3b. EQUIPMENT FIELD DEFINITIONS (43 fields, terbagi 8 section)
+    // ============================================================
+    const EQUIPMENT_FIELDS = [
+      { section: 'A. Identitas', fields: [
+        { name: 'tag_number',          label: 'Tag Number *',       type: 'text', required: true, placeholder: 'misal: RIG-DW-001' },
+        { name: 'nama_equipment',      label: 'Nama Equipment *',   type: 'text', required: true },
+        { name: 'kategori_id',         label: 'Kategori *',         type: 'select-category', required: true },
+        { name: 'assigned_unit_id',    label: 'Parent Unit *',      type: 'select-parent-unit', required: true },
+        { name: 'parent_equipment_id', label: 'Parent Equipment',   type: 'select-parent-equipment', placeholder: 'opsional — pilih kalau ini komponen dari equipment lain (mis. Drawwork → Mobile Rig)' },
+        { name: 'tipe_kepemilikan',    label: 'Tipe Kepemilikan',   type: 'select', options: ['Permanent','Mobile-Backup'] },
+      ]},
+      { section: 'B. Spesifikasi', fields: [
+        { name: 'brand',               label: 'Brand',             type: 'text' },
+        { name: 'model',               label: 'Model',             type: 'text' },
+        { name: 'serial_number',       label: 'Serial Number',     type: 'text' },
+        { name: 'tahun_pembuatan',     label: 'Tahun Pembuatan',   type: 'number', min: 1900, max: 2100 },
+        { name: 'tahun_commissioning', label: 'Tahun Commissioning', type: 'number', min: 1900, max: 2100 },
+        { name: 'year_used',           label: 'Year Used',         type: 'number', min: 0 },
+        { name: 'country_of_origin',   label: 'Country of Origin', type: 'text' },
+        { name: 'spek_khusus',         label: 'Spek Khusus',       type: 'textarea' },
+      ]},
+      { section: 'C. Status', fields: [
+        { name: 'status_operasi', label: 'Status Operasi', type: 'select', options: ['Aktif','Standby','Repair','Down','Scrap'] },
+        { name: 'kondisi_fisik',  label: 'Kondisi Fisik',  type: 'select', options: ['Good','Fair','Poor'] },
+        { name: 'lokasi_fisik',   label: 'Lokasi Fisik',   type: 'text' },
+        { name: 'running_hours',  label: 'Running Hours',  type: 'number', step: '0.1', min: 0 },
+      ]},
+      { section: 'D. Maintenance', fields: [
+        { name: 'last_maintenance_date', label: 'Last Maintenance Date', type: 'date' },
+        { name: 'last_maintenance_type', label: 'Last Maintenance Type', type: 'text' },
+        { name: 'next_maintenance_date', label: 'Next Maintenance Date', type: 'date' },
+        { name: 'maintenance_interval',  label: 'Maintenance Interval',  type: 'text', placeholder: 'misal: 6 bulan / 500 jam' },
+        { name: 'pic_mechanic',          label: 'PIC Mechanic',          type: 'text' },
+        { name: 'goh_year',              label: 'GOH Year',              type: 'number', min: 1900, max: 2100 },
+      ]},
+      { section: 'E. Sertifikasi & Refurbish', fields: [
+        { name: 'nomor_skpi',             label: 'Nomor SKPI',             type: 'text' },
+        { name: 'skpi_start_date',        label: 'SKPI Start Date',        type: 'date' },
+        { name: 'skpi_end_date',          label: 'SKPI End Date',          type: 'date' },
+        { name: 'coc_number',             label: 'COC Number',             type: 'text' },
+        { name: 'arf_lembaga',            label: 'ARF / Lembaga',          type: 'text' },
+        { name: 'refurbish_year',         label: 'Refurbish Year',         type: 'number', min: 1900, max: 2100 },
+        { name: 'refurbish_by',           label: 'Refurbish By',           type: 'text' },
+        { name: 'load_test_result',       label: 'Load Test Result',       type: 'text' },
+        { name: 'nomor_sertifikat_lain',  label: 'Nomor Sertifikat Lain',  type: 'text' },
+        { name: 'tgl_terbit_sertifikat',  label: 'Tgl Terbit Sertifikat',  type: 'date' },
+        { name: 'tgl_expired_sertifikat', label: 'Tgl Expired Sertifikat', type: 'date' },
+        { name: 'lembaga_penerbit',       label: 'Lembaga Penerbit',       type: 'text' },
+      ]},
+      { section: 'F. Finansial', fields: [
+        { name: 'tgl_pembelian',   label: 'Tgl Pembelian',     type: 'date' },
+        { name: 'harga_perolehan', label: 'Harga Perolehan (Rp)', type: 'number', step: '0.01', min: 0 },
+        { name: 'nomor_po_invoice', label: 'Nomor PO / Invoice', type: 'text' },
+        { name: 'vendor_supplier', label: 'Vendor / Supplier', type: 'text' },
+        { name: 'cost_center',     label: 'Cost Center',       type: 'text' },
+      ]},
+      { section: 'G. Safety', fields: [
+        { name: 'pressure_test_date',   label: 'Pressure Test Date',   type: 'date' },
+        { name: 'pressure_test_result', label: 'Pressure Test Result', type: 'text' },
+      ]},
+      { section: 'H. Catatan', fields: [
+        { name: 'remarks', label: 'Remarks', type: 'textarea' },
+      ]},
+    ];
+
+    // ============================================================
+    // 4. UTILITAS UI & FORMATTERS
+    // ============================================================
+    function $(sel) { return document.querySelector(sel); }
+    function show(el) { (typeof el === 'string' ? $(el) : el).classList.remove('hide'); }
+    function hide(el) { (typeof el === 'string' ? $(el) : el).classList.add('hide'); }
+
+    function escapeHtml(s) {
+      if (s == null) return '';
+      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    function fmtDate(d) {
+      if (!d) return '—';
+      try { return new Date(d).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }); }
+      catch { return d; }
+    }
+    function fmtCurrency(n) {
+      if (n == null || n === '') return '—';
+      return 'Rp ' + Number(n).toLocaleString('id-ID');
+    }
+    function fmtNumber(n, suffix = '') {
+      if (n == null || n === '') return '—';
+      return Number(n).toLocaleString('id-ID') + suffix;
+    }
+    function daysUntil(date) {
+      if (!date) return null;
+      return Math.floor((new Date(date).setHours(0,0,0,0) - new Date().setHours(0,0,0,0)) / 86400000);
+    }
+
+    const STATUS_BADGES = {
+      Aktif:   'bg-green-100 text-green-800',
+      Standby: 'bg-blue-100 text-blue-800',
+      Repair:  'bg-amber-100 text-amber-800',
+      Down:    'bg-red-100 text-red-800',
+      Scrap:   'bg-slate-200 text-slate-700',
+      Good:    'bg-green-100 text-green-800',
+      Fair:    'bg-amber-100 text-amber-800',
+      Poor:    'bg-red-100 text-red-800',
+      Permanent:     'bg-indigo-100 text-indigo-800',
+      'Mobile-Backup': 'bg-purple-100 text-purple-800',
+    };
+    function statusBadge(s) {
+      if (!s) return '<span class="text-slate-400">—</span>';
+      const cls = STATUS_BADGES[s] || 'bg-slate-100 text-slate-700';
+      return `<span class="inline-block px-2 py-0.5 rounded text-xs font-medium ${cls}">${escapeHtml(s)}</span>`;
+    }
+
+    function debounce(fn, ms = 300) {
+      let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
+    }
+
+    function toast(message, type = 'info') {
+      const colors = { success: 'bg-green-600', error: 'bg-red-600', info: 'bg-navy', warn: 'bg-safety' };
+      const el = document.createElement('div');
+      el.className = `${colors[type] || colors.info} text-white px-4 py-2.5 rounded-lg shadow-lg text-sm pointer-events-auto`;
+      el.textContent = message;
+      $('#toast-container').appendChild(el);
+      setTimeout(() => { el.style.transition = 'opacity .3s'; el.style.opacity = '0'; }, 2700);
+      setTimeout(() => el.remove(), 3000);
+    }
+
+    // ============================================================
+    // 4b. MODAL SYSTEM
+    // ============================================================
+    function openModal({ title, body, footer, maxWidth = 'max-w-lg', dismissable = true }) {
+      closeModal();
+      const overlay = document.createElement('div');
+      overlay.id = 'modal-overlay';
+      overlay.className = 'fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 overflow-y-auto';
+      overlay.innerHTML = `
+        <div class="bg-white rounded-2xl shadow-2xl w-full ${maxWidth} my-8 max-h-[90vh] flex flex-col">
+          <div class="px-5 py-4 border-b border-slate-200 flex items-center justify-between flex-shrink-0">
+            <h3 class="text-lg font-bold text-slate-900">${escapeHtml(title || '')}</h3>
+            <button onclick="closeModal()" class="p-1 hover:bg-slate-100 rounded text-slate-500" aria-label="Tutup">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+          </div>
+          <div id="modal-body" class="p-5 overflow-y-auto flex-1"></div>
+          ${footer ? `<div class="px-5 py-3 border-t border-slate-200 flex justify-end gap-2 flex-shrink-0 flex-wrap">${footer}</div>` : ''}
+        </div>
+      `;
+      const bodyHost = overlay.querySelector('#modal-body');
+      if (body instanceof HTMLElement) bodyHost.appendChild(body);
+      else bodyHost.innerHTML = body || '';
+      document.body.appendChild(overlay);
+      overlay.addEventListener('click', (e) => { if (e.target === overlay && dismissable) closeModal(); });
+    }
+    function closeModal() {
+      const m = document.getElementById('modal-overlay');
+      if (m) m.remove();
+    }
+    window.closeModal = closeModal;
+
+    function confirmDialog({ title = 'Konfirmasi', message, confirmText = 'Ya', cancelText = 'Batal', danger = false }) {
+      return new Promise((resolve) => {
+        const id = '__cd_' + Date.now();
+        openModal({
+          title,
+          body: `<p class="text-base text-slate-700">${escapeHtml(message)}</p>`,
+          footer: `
+            <button onclick="closeModal(); window['${id}'](false);" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">${escapeHtml(cancelText)}</button>
+            <button onclick="closeModal(); window['${id}'](true);" class="px-4 py-2 rounded-lg ${danger ? 'bg-red-600 hover:bg-red-700' : 'bg-navy hover:bg-navy-700'} text-white text-sm font-semibold">${escapeHtml(confirmText)}</button>
+          `,
+        });
+        window[id] = (v) => { delete window[id]; resolve(v); };
+      });
+    }
+
+    // ============================================================
+    // 4c. SUPABASE STORAGE HELPERS
+    // ============================================================
+    async function uploadFile(bucket, path, file) {
+      const { data, error } = await state.supabase.storage.from(bucket).upload(path, file, { upsert: false });
+      if (error) throw error;
+      return data;
+    }
+    function getPublicUrl(bucket, path) {
+      return state.supabase.storage.from(bucket).getPublicUrl(path).data.publicUrl;
+    }
+    async function getSignedUrl(bucket, path, expiresIn = 3600) {
+      const { data, error } = await state.supabase.storage.from(bucket).createSignedUrl(path, expiresIn);
+      if (error) throw error;
+      return data.signedUrl;
+    }
+    async function deleteStorageFile(bucket, path) {
+      const { error } = await state.supabase.storage.from(bucket).remove([path]);
+      if (error) throw error;
+    }
+
+    // ============================================================
+    // 4d. REFERENCE DATA LOADER
+    // ============================================================
+    async function loadReferenceData() {
+      const [u, c] = await Promise.all([
+        state.supabase.from('parent_units').select('*').order('id'),
+        state.supabase.from('categories').select('*').order('name'),
+      ]);
+      if (u.error) throw u.error;
+      if (c.error) throw c.error;
+      state.parentUnits = u.data || [];
+      state.categories  = c.data || [];
+    }
+    function getParentUnitName(id) {
+      return state.parentUnits.find(x => x.id === id)?.name || '—';
+    }
+    function getParentUnit(id) {
+      return state.parentUnits.find(x => x.id === id);
+    }
+    function getCategoryName(id) {
+      return state.categories.find(x => x.id === id)?.name || '—';
+    }
+
+    // ============================================================
+    // 4e. CRUD: EQUIPMENT
+    // ============================================================
+    async function fetchEquipmentList() {
+      let q = state.supabase
+        .from('equipment')
+        .select('id, tag_number, nama_equipment, kategori_id, assigned_unit_id, tipe_kepemilikan, status_operasi, kondisi_fisik, brand, model, serial_number, next_maintenance_date, skpi_end_date, tgl_expired_sertifikat');
+      const f = state.equipmentFilters;
+      if (f.parent_unit_id) q = q.eq('assigned_unit_id', Number(f.parent_unit_id));
+      if (f.kategori_id)    q = q.eq('kategori_id',      Number(f.kategori_id));
+      if (f.status_operasi) q = q.eq('status_operasi',   f.status_operasi);
+      if (f.tipe_kepemilikan) q = q.eq('tipe_kepemilikan', f.tipe_kepemilikan);
+      const s = (state.equipmentSearch || '').trim();
+      if (s) q = q.or(`tag_number.ilike.%${s}%,nama_equipment.ilike.%${s}%,serial_number.ilike.%${s}%`);
+      q = q.order(state.equipmentSort.field, { ascending: state.equipmentSort.dir === 'asc' });
+      const { data, error } = await q;
+      if (error) throw error;
+      state.equipmentList = data || [];
+    }
+
+    async function fetchEquipment(id) {
+      const { data, error } = await state.supabase.from('equipment').select('*').eq('id', id).single();
+      if (error) throw error;
+      return data;
+    }
+
+    async function createEquipment(payload) {
+      payload.created_by = state.user.id;
+      payload.updated_by = state.user.id;
+      const { data, error } = await state.supabase.from('equipment').insert(payload).select().single();
+      if (error) throw error;
+      return data;
+    }
+
+    async function updateEquipment(id, payload) {
+      payload.updated_by = state.user.id;
+      const { data, error } = await state.supabase.from('equipment').update(payload).eq('id', id).select().single();
+      if (error) throw error;
+      return data;
+    }
+
+    async function deleteEquipmentById(id) {
+      const { error } = await state.supabase.from('equipment').delete().eq('id', id);
+      if (error) throw error;
+    }
+
+    async function fetchDashboardStats() {
+      const { data, error } = await state.supabase.from('equipment').select('status_operasi, assigned_unit_id, kategori_id');
+      if (error) throw error;
+      const eq = data || [];
+      const byUnit = {};
+      eq.forEach(e => { byUnit[e.assigned_unit_id] = (byUnit[e.assigned_unit_id] || 0) + 1; });
+      return {
+        total: eq.length,
+        aktif: eq.filter(e => e.status_operasi === 'Aktif').length,
+        down:  eq.filter(e => e.status_operasi === 'Down').length,
+        standby: eq.filter(e => e.status_operasi === 'Standby').length,
+        repair:  eq.filter(e => e.status_operasi === 'Repair').length,
+        byUnit,
+      };
+    }
+
+    async function fetchDueMaintenance(days = 30) {
+      const future = new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
+      const { data, error } = await state.supabase
+        .from('equipment')
+        .select('id, tag_number, nama_equipment, next_maintenance_date, assigned_unit_id, status_operasi')
+        .not('next_maintenance_date', 'is', null)
+        .lte('next_maintenance_date', future)
+        .order('next_maintenance_date')
+        .limit(15);
+      if (error) throw error;
+      return data || [];
+    }
+
+    async function fetchExpiringSkpi(days = 60) {
+      const future = new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
+      const { data, error } = await state.supabase
+        .from('equipment')
+        .select('id, tag_number, nama_equipment, skpi_end_date, tgl_expired_sertifikat')
+        .or(`skpi_end_date.lte.${future},tgl_expired_sertifikat.lte.${future}`)
+        .order('skpi_end_date', { nullsFirst: false })
+        .limit(15);
+      if (error) throw error;
+      return (data || []).filter(e => e.skpi_end_date || e.tgl_expired_sertifikat);
+    }
+
+    // ============================================================
+    // 4f. CRUD: MAINTENANCE LOG, MUTATION LOG, DOCUMENTS
+    // ============================================================
+    async function fetchMaintenanceLog(equipment_id) {
+      const { data, error } = await state.supabase
+        .from('maintenance_log')
+        .select('*')
+        .eq('equipment_id', equipment_id)
+        .order('maintenance_date', { ascending: false });
+      if (error) throw error;
+      return data || [];
+    }
+
+    async function createMaintenanceLog(payload) {
+      payload.created_by = state.user.id;
+      const { data, error } = await state.supabase.from('maintenance_log').insert(payload).select().single();
+      if (error) throw error;
+      return data;
+    }
+
+    async function fetchMutationLog(equipment_id) {
+      const { data, error } = await state.supabase
+        .from('mutation_log')
+        .select('*')
+        .eq('equipment_id', equipment_id)
+        .order('mutation_date', { ascending: false });
+      if (error) throw error;
+      return data || [];
+    }
+
+    async function createMutation({ equipment_id, from_unit_id, to_unit_id, mutation_date, reason }) {
+      const { error: e1 } = await state.supabase.from('mutation_log').insert({
+        equipment_id, from_unit_id, to_unit_id, mutation_date, reason, created_by: state.user.id
+      });
+      if (e1) throw e1;
+      const { error: e2 } = await state.supabase.from('equipment').update({
+        assigned_unit_id: to_unit_id, updated_by: state.user.id
+      }).eq('id', equipment_id);
+      if (e2) throw e2;
+    }
+
+    // ----- LOAN LOG (Pinjam-Meminjam) -----
+    async function fetchActiveLoanAsLender(equipmentId) {
+      const { data, error } = await state.supabase
+        .from('loan_log').select('*')
+        .eq('lender_equipment_id', equipmentId).eq('status', 'active').maybeSingle();
+      if (error) throw error;
+      return data;
+    }
+
+    async function fetchActiveLoanAsBorrower(equipmentId) {
+      const { data, error } = await state.supabase
+        .from('loan_log').select('*')
+        .eq('borrower_equipment_id', equipmentId).eq('status', 'active').maybeSingle();
+      if (error) throw error;
+      return data;
+    }
+
+    async function fetchLoanHistory(equipmentId) {
+      const { data, error } = await state.supabase
+        .from('loan_log').select('*')
+        .or(`lender_equipment_id.eq.${equipmentId},borrower_equipment_id.eq.${equipmentId}`)
+        .order('loan_date', { ascending: false });
+      if (error) throw error;
+      return data || [];
+    }
+
+    async function fetchAllActiveLoans() {
+      const { data, error } = await state.supabase
+        .from('loan_log')
+        .select('*, lender_eq:lender_equipment_id (id, tag_number, nama_equipment), borrower_eq:borrower_equipment_id (id, tag_number, nama_equipment)')
+        .eq('status', 'active')
+        .order('loan_date', { ascending: false });
+      if (error) throw error;
+      return data || [];
+    }
+
+    async function createLoan({ lender_equipment_id, borrower_equipment_id, loan_date, reason }) {
+      // Fetch fresh data
+      const { data: lender, error: el } = await state.supabase.from('equipment')
+        .select('id, tag_number, assigned_unit_id, status_operasi').eq('id', lender_equipment_id).single();
+      if (el) throw el;
+      const { data: borrower, error: eb } = await state.supabase.from('equipment')
+        .select('id, tag_number, assigned_unit_id, status_operasi').eq('id', borrower_equipment_id).single();
+      if (eb) throw eb;
+
+      const lender_unit_id   = lender.assigned_unit_id;
+      const borrower_unit_id = borrower.assigned_unit_id;
+      if (!lender_unit_id)   throw new Error('Equipment yang dipinjam belum punya unit.');
+      if (!borrower_unit_id) throw new Error('Equipment yang rusak belum punya unit.');
+      if (lender_unit_id === borrower_unit_id) throw new Error('Lender dan borrower di unit yang sama — gak masuk akal "dipinjam".');
+
+      // 1. Insert loan_log
+      const { data: loan, error: e1 } = await state.supabase.from('loan_log').insert({
+        lender_equipment_id, borrower_equipment_id,
+        lender_unit_id, borrower_unit_id,
+        loan_date, reason,
+        status: 'active',
+        created_by: state.user.id,
+      }).select().single();
+      if (e1) throw e1;
+
+      // 2. Pindah lender equipment ke borrower unit
+      const { error: e2 } = await state.supabase.from('equipment').update({
+        assigned_unit_id: borrower_unit_id,
+        updated_by: state.user.id,
+      }).eq('id', lender_equipment_id);
+      if (e2) throw e2;
+
+      // 3. Set borrower equipment status ke Repair (kalau belum Down/Repair)
+      if (borrower.status_operasi !== 'Down' && borrower.status_operasi !== 'Repair') {
+        const { error: e3 } = await state.supabase.from('equipment').update({
+          status_operasi: 'Repair',
+          updated_by: state.user.id,
+        }).eq('id', borrower_equipment_id);
+        if (e3) throw e3;
+      }
+
+      return loan;
+    }
+
+    async function returnLoan({ loan_id, return_date, borrower_new_status, return_notes }) {
+      // Fetch loan fresh
+      const { data: loan, error: e0 } = await state.supabase.from('loan_log').select('*').eq('id', loan_id).single();
+      if (e0) throw e0;
+      if (loan.status !== 'active') throw new Error('Pinjaman ini sudah dikembalikan sebelumnya.');
+
+      // 1. Update loan_log → returned
+      const { error: e1 } = await state.supabase.from('loan_log').update({
+        status: 'returned', return_date, return_notes,
+        returned_by: state.user.id,
+      }).eq('id', loan_id);
+      if (e1) throw e1;
+
+      // 2. Pindah lender equipment balik ke unit asal
+      const { error: e2 } = await state.supabase.from('equipment').update({
+        assigned_unit_id: loan.lender_unit_id,
+        updated_by: state.user.id,
+      }).eq('id', loan.lender_equipment_id);
+      if (e2) throw e2;
+
+      // 3. Update borrower equipment status sesuai pilihan user
+      if (loan.borrower_equipment_id && borrower_new_status) {
+        const { error: e3 } = await state.supabase.from('equipment').update({
+          status_operasi: borrower_new_status,
+          updated_by: state.user.id,
+        }).eq('id', loan.borrower_equipment_id);
+        if (e3) throw e3;
+      }
+    }
+
+    async function fetchDocuments(equipment_id) {
+      const { data, error } = await state.supabase
+        .from('documents').select('*').eq('equipment_id', equipment_id)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data || [];
+    }
+
+    async function createDocumentRecord(payload) {
+      payload.uploaded_by = state.user.id;
+      const { data, error } = await state.supabase.from('documents').insert(payload).select().single();
+      if (error) throw error;
+      return data;
+    }
+
+    async function deleteDocumentRecord(id) {
+      const { error } = await state.supabase.from('documents').delete().eq('id', id);
+      if (error) throw error;
+    }
+
+    // ----- HIERARKI EQUIPMENT (parent / children) -----
+    async function fetchChildren(equipmentId) {
+      const { data, error } = await state.supabase
+        .from('equipment')
+        .select('id, tag_number, nama_equipment, kategori_id, status_operasi, kondisi_fisik')
+        .eq('parent_equipment_id', equipmentId)
+        .order('tag_number');
+      if (error) throw error;
+      return data || [];
+    }
+
+    async function fetchPotentialParents(parentUnitId, excludeId) {
+      // Cari semua equipment di unit yang sama, kecuali diri sendiri
+      // (untuk dropdown 'Parent Equipment' di form)
+      if (!parentUnitId) return [];
+      let q = state.supabase
+        .from('equipment')
+        .select('id, tag_number, nama_equipment, kategori_id')
+        .eq('assigned_unit_id', parentUnitId)
+        .order('tag_number');
+      if (excludeId) q = q.neq('id', excludeId);
+      const { data, error } = await q;
+      if (error) throw error;
+      return data || [];
+    }
+
+    async function populateParentEquipmentDropdown(parentUnitId, currentValue, excludeId) {
+      const sel = document.querySelector('#eq-form select[name="parent_equipment_id"]');
+      if (!sel) return;
+      sel.innerHTML = '<option value="">— memuat… —</option>';
+      try {
+        const list = await fetchPotentialParents(parentUnitId, excludeId);
+        sel.innerHTML = '<option value="">— tidak ada parent (top-level) —</option>' +
+          list.map(e => `<option value="${e.id}" ${currentValue === e.id ? 'selected' : ''}>${escapeHtml(e.tag_number)} — ${escapeHtml(e.nama_equipment)} (${escapeHtml(getCategoryName(e.kategori_id))})</option>`).join('');
+      } catch (err) {
+        sel.innerHTML = '<option value="">(gagal load: ' + escapeHtml(err.message) + ')</option>';
+      }
+    }
+    window.populateParentEquipmentDropdown = populateParentEquipmentDropdown;
+
+    // ============================================================
+    // 5. INIT SUPABASE + CEK KONFIG
+    // ============================================================
+    function initSupabase() {
+      const isPlaceholder = !SUPABASE_URL || SUPABASE_URL === 'YOUR_SUPABASE_URL' ||
+                            !SUPABASE_ANON_KEY || SUPABASE_ANON_KEY === 'YOUR_SUPABASE_ANON_KEY';
+      if (isPlaceholder) {
+        show('#config-banner');
+        $('#connection-status').innerHTML = '⚠️ Konfigurasi Supabase belum diisi';
+        $('#connection-status').className = 'mt-6 text-xs text-center text-red-600 font-medium';
+        return false;
+      }
+      state.supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      return true;
+    }
+
+    // ============================================================
+    // 6. TEST KONEKSI KE SUPABASE
+    // Query ringan: select 1 row dari parent_units (RLS allow read).
+    // ============================================================
+    async function testConnection() {
+      try {
+        const { error } = await state.supabase
+          .from('parent_units')
+          .select('id', { count: 'exact', head: true });
+        if (error) throw error;
+        $('#connection-status').innerHTML = '✅ Terhubung ke Supabase';
+        $('#connection-status').className = 'mt-6 text-xs text-center text-green-600 font-medium';
+      } catch (err) {
+        console.error('Connection test failed:', err);
+        $('#connection-status').innerHTML = '❌ Gagal terhubung — cek URL/key & internet';
+        $('#connection-status').className = 'mt-6 text-xs text-center text-red-600 font-medium';
+      }
+    }
+
+    // ============================================================
+    // 7. AUTH FLOW
+    // ============================================================
+    async function checkSession() {
+      const { data: { session } } = await state.supabase.auth.getSession();
+      if (session?.user) {
+        await loadProfile(session.user);
+        await loadReferenceData().catch(err => console.warn('Ref data load failed:', err.message));
+        showApp();
+      } else {
+        showLogin();
+      }
+    }
+
+    async function loadProfile(user) {
+      state.user = user;
+      const { data, error } = await state.supabase
+        .from('profiles')
+        .select('id, email, full_name, role, telegram_user_id')
+        .eq('id', user.id)
+        .single();
+      if (error) {
+        console.warn('Profile not found, fallback to user data:', error.message);
+        state.profile = { id: user.id, email: user.email, full_name: user.email, role: 'user' };
+      } else {
+        state.profile = data;
+      }
+    }
+
+    async function login(email, password) {
+      const btn = $('#login-btn');
+      const label = $('#login-btn-label');
+      const spinner = $('#login-btn-spinner');
+      const errorBox = $('#login-error');
+
+      hide(errorBox);
+      btn.disabled = true;
+      label.textContent = 'Memproses…';
+      show(spinner);
+
+      try {
+        const { data, error } = await state.supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+        await loadProfile(data.user);
+        await loadReferenceData().catch(err => console.warn('Ref data load failed:', err.message));
+        showApp();
+        toast(`Selamat datang, ${state.profile.full_name || state.profile.email}`, 'success');
+      } catch (err) {
+        errorBox.textContent = err.message === 'Invalid login credentials'
+          ? 'Email atau password salah.'
+          : `Gagal login: ${err.message}`;
+        show(errorBox);
+      } finally {
+        btn.disabled = false;
+        label.textContent = 'Masuk';
+        hide(spinner);
+      }
+    }
+
+    async function logout() {
+      await state.supabase.auth.signOut();
+      state.user = null;
+      state.profile = null;
+      showLogin();
+      toast('Berhasil keluar.', 'info');
+    }
+    window.logout = logout;
+
+    // ============================================================
+    // 8. RENDER LAYOUT
+    // ============================================================
+    function showLogin() {
+      hide('#app');
+      show('#login-screen');
+    }
+
+    function showApp() {
+      hide('#login-screen');
+      show('#app');
+      renderUserInfo();
+      renderSidebar();
+      renderBottomNav();
+      navigate(state.currentPage || 'dashboard');
+    }
+
+    function renderUserInfo() {
+      const p = state.profile;
+      const name = p.full_name || p.email;
+      const initial = (name || '?').trim().charAt(0).toUpperCase();
+      $('#header-avatar').textContent = initial;
+      $('#header-user-name').textContent = name;
+      $('#header-user-role').textContent = p.role;
+      $('#sidebar-user-name').textContent = name;
+      $('#sidebar-user-role').textContent = p.role;
+    }
+
+    function visibleNavItems() {
+      return NAV_ITEMS.filter(item => !item.adminOnly || state.profile?.role === 'admin');
+    }
+
+    function renderSidebar() {
+      const nav = $('#sidebar-nav');
+      nav.innerHTML = '';
+      visibleNavItems().forEach(item => {
+        const btn = document.createElement('button');
+        btn.className = `w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-navy-700 transition text-left ${state.currentPage === item.id ? 'nav-active' : ''}`;
+        btn.innerHTML = `<span class="text-lg">${item.icon}</span><span>${item.label}</span>`;
+        btn.onclick = () => navigate(item.id);
+        nav.appendChild(btn);
+      });
+    }
+
+    function renderBottomNav() {
+      const nav = $('#bottom-nav');
+      nav.innerHTML = '';
+      visibleNavItems().filter(i => i.bottomNav).forEach(item => {
+        const btn = document.createElement('button');
+        btn.className = `flex-1 flex flex-col items-center justify-center py-2 text-xs ${state.currentPage === item.id ? 'bottom-nav-active' : 'text-slate-500'}`;
+        btn.innerHTML = `<span class="text-xl leading-none">${item.icon}</span><span class="mt-0.5">${item.label}</span>`;
+        btn.onclick = () => navigate(item.id);
+        nav.appendChild(btn);
+      });
+    }
+
+    // ============================================================
+    // 9. ROUTER & PAGE RENDERERS (stub — diisi di Fase 3+)
+    // ============================================================
+    function navigate(pageId) {
+      const item = NAV_ITEMS.find(i => i.id === pageId);
+      if (!item) return;
+      if (item.adminOnly && state.profile?.role !== 'admin') {
+        toast('Halaman ini hanya untuk admin.', 'warn');
+        return;
+      }
+      state.currentPage = pageId;
+      $('#page-title').textContent = item.label;
+      renderSidebar();
+      renderBottomNav();
+      const main = $('#main-content');
+      main.innerHTML = '';
+      const page = PAGES[pageId] ? PAGES[pageId]() : placeholderPage(item);
+      main.appendChild(page);
+    }
+    window.navigate = navigate;
+
+    function placeholderPage(item, msg = 'Halaman ini akan diisi di Fase berikutnya.') {
+      const div = document.createElement('div');
+      div.className = 'page max-w-3xl mx-auto bg-white rounded-xl border border-slate-200 p-8 text-center';
+      div.innerHTML = `
+        <div class="text-5xl mb-3">${item.icon}</div>
+        <h3 class="text-xl font-bold text-slate-800 mb-2">${item.label}</h3>
+        <p class="text-slate-500 text-sm">${escapeHtml(msg)}</p>
+      `;
+      return div;
+    }
+
+    // ============================================================
+    // 9b. STAT CARD HELPER
+    // ============================================================
+    function statCard(label, value, icon, colorClass) {
+      return `
+        <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:shadow-md transition">
+          <div class="flex items-center justify-between mb-3">
+            <div class="text-sm font-semibold text-slate-700">${label}</div>
+            <div class="w-12 h-12 rounded-xl ${colorClass} flex items-center justify-center shadow-sm">${icon}</div>
+          </div>
+          <div class="text-3xl font-extrabold text-slate-900 leading-none">${value}</div>
+        </div>
+      `;
+    }
+
+    // ============================================================
+    // 9c. ALL PAGE RENDERERS
+    // ============================================================
+    const PAGES = {
+      // -----------------------------------------------------
+      // DASHBOARD
+      // -----------------------------------------------------
+      dashboard: () => {
+        const div = document.createElement('div');
+        div.className = 'page space-y-5';
+        div.innerHTML = `
+          <div class="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
+            <h3 class="text-2xl font-bold text-slate-900 mb-1">👋 Halo, ${escapeHtml(state.profile.full_name || state.profile.email)}</h3>
+            <p class="text-base text-slate-600">Role kamu: <span class="font-bold capitalize text-navy">${escapeHtml(state.profile.role)}</span></p>
+          </div>
+          <div id="dash-stats" class="grid grid-cols-2 md:grid-cols-4 gap-4">
+            ${statCard('Total Equipment', '…', ICONS.wrench,  'bg-blue-100 text-blue-700')}
+            ${statCard('Aktif',           '…', ICONS.check,   'bg-green-100 text-green-700')}
+            ${statCard('Down',            '…', ICONS.warning, 'bg-red-100 text-red-700')}
+            ${statCard('Alert Aktif',     '…', ICONS.bell,    'bg-orange-100 text-orange-700')}
+          </div>
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+              <h4 class="text-base font-bold text-slate-800 mb-3 flex items-center gap-2">🛠️ Maintenance Jatuh Tempo (30 hari)</h4>
+              <div id="dash-due" class="space-y-2 text-sm">Memuat…</div>
+            </div>
+            <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+              <h4 class="text-base font-bold text-slate-800 mb-3 flex items-center gap-2">📜 Sertifikat Hampir Expired (60 hari)</h4>
+              <div id="dash-skpi" class="space-y-2 text-sm">Memuat…</div>
+            </div>
+          </div>
+          <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+            <h4 class="text-base font-bold text-slate-800 mb-3 flex items-center gap-2">🤝 Pinjaman Aktif</h4>
+            <div id="dash-loans" class="space-y-2">Memuat…</div>
+          </div>
+          <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+            <h4 class="text-base font-bold text-slate-800 mb-3">🏭 Equipment per Parent Unit</h4>
+            <div id="dash-unit" class="space-y-2">Memuat…</div>
+          </div>
+        `;
+
+        (async () => {
+          try {
+            const [stats, due, skpi, loans] = await Promise.all([
+              fetchDashboardStats(),
+              fetchDueMaintenance(30),
+              fetchExpiringSkpi(60),
+              fetchAllActiveLoans().catch(() => []),
+            ]);
+            // Stats
+            $('#dash-stats').innerHTML = `
+              ${statCard('Total Equipment', fmtNumber(stats.total),   ICONS.wrench,  'bg-blue-100 text-blue-700')}
+              ${statCard('Aktif',           fmtNumber(stats.aktif),   ICONS.check,   'bg-green-100 text-green-700')}
+              ${statCard('Down',            fmtNumber(stats.down),    ICONS.warning, 'bg-red-100 text-red-700')}
+              ${statCard('Maintenance Due', fmtNumber(due.length),    ICONS.bell,    'bg-orange-100 text-orange-700')}
+            `;
+            // Due
+            $('#dash-due').innerHTML = due.length === 0
+              ? '<div class="text-slate-400 text-sm">Tidak ada yang jatuh tempo dalam 30 hari ke depan.</div>'
+              : due.map(e => {
+                  const d = daysUntil(e.next_maintenance_date);
+                  const color = d < 0 ? 'text-red-700' : (d <= 7 ? 'text-amber-700' : 'text-slate-700');
+                  return `<button onclick="setEquipmentView('detail','${e.id}'); navigate('equipment')" class="w-full text-left flex items-center justify-between hover:bg-slate-50 px-2 py-1.5 rounded">
+                    <div class="min-w-0">
+                      <div class="font-semibold text-navy text-sm truncate">${escapeHtml(e.tag_number)}</div>
+                      <div class="text-xs text-slate-500 truncate">${escapeHtml(e.nama_equipment)} • ${escapeHtml(getParentUnitName(e.assigned_unit_id))}</div>
+                    </div>
+                    <div class="text-right flex-shrink-0 ml-2">
+                      <div class="${color} font-semibold text-sm">${fmtDate(e.next_maintenance_date)}</div>
+                      <div class="text-xs text-slate-500">${d < 0 ? `${-d} hari telat` : `${d} hari lagi`}</div>
+                    </div>
+                  </button>`;
+                }).join('');
+            // SKPI
+            $('#dash-skpi').innerHTML = skpi.length === 0
+              ? '<div class="text-slate-400 text-sm">Tidak ada sertifikat hampir expired.</div>'
+              : skpi.map(e => {
+                  const exp = e.skpi_end_date || e.tgl_expired_sertifikat;
+                  const d = daysUntil(exp);
+                  const color = d < 0 ? 'text-red-700' : (d <= 14 ? 'text-amber-700' : 'text-slate-700');
+                  return `<button onclick="setEquipmentView('detail','${e.id}'); navigate('equipment')" class="w-full text-left flex items-center justify-between hover:bg-slate-50 px-2 py-1.5 rounded">
+                    <div class="min-w-0">
+                      <div class="font-semibold text-navy text-sm truncate">${escapeHtml(e.tag_number)}</div>
+                      <div class="text-xs text-slate-500 truncate">${escapeHtml(e.nama_equipment)}</div>
+                    </div>
+                    <div class="text-right flex-shrink-0 ml-2">
+                      <div class="${color} font-semibold text-sm">${fmtDate(exp)}</div>
+                      <div class="text-xs text-slate-500">${d < 0 ? `${-d} hari telat` : `${d} hari lagi`}</div>
+                    </div>
+                  </button>`;
+                }).join('');
+            // Active loans
+            $('#dash-loans').innerHTML = loans.length === 0
+              ? '<div class="text-slate-400 text-sm">Tidak ada pinjaman aktif.</div>'
+              : loans.map(l => {
+                  const days = -daysUntil(l.loan_date);
+                  const lenderTag = l.lender_eq?.tag_number || '(equipment terhapus)';
+                  const lenderName = l.lender_eq?.nama_equipment || '';
+                  const borrowerTag = l.borrower_eq?.tag_number || '';
+                  const lenderUnit = getParentUnitName(l.lender_unit_id);
+                  const borrowerUnit = getParentUnitName(l.borrower_unit_id);
+                  const eqId = l.lender_eq?.id;
+                  return `<button onclick="${eqId ? `setEquipmentView('detail','${eqId}'); navigate('equipment')` : ''}" class="w-full text-left bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg p-3 transition">
+                    <div class="flex items-center justify-between gap-2 mb-1">
+                      <span class="font-semibold text-amber-900 text-sm">${escapeHtml(lenderTag)}</span>
+                      <span class="text-xs text-amber-700 font-medium">${days} hari</span>
+                    </div>
+                    <div class="text-xs text-amber-800">
+                      ${escapeHtml(lenderUnit)} → <span class="font-semibold">${escapeHtml(borrowerUnit)}</span>
+                      ${borrowerTag ? ` (gantikan ${escapeHtml(borrowerTag)})` : ''}
+                    </div>
+                    <div class="text-xs text-amber-600 mt-0.5">Dipinjam ${fmtDate(l.loan_date)}</div>
+                  </button>`;
+                }).join('');
+            // By unit
+            const maxCount = Math.max(1, ...Object.values(stats.byUnit));
+            $('#dash-unit').innerHTML = state.parentUnits.map(u => {
+              const cnt = stats.byUnit[u.id] || 0;
+              const pct = (cnt / maxCount) * 100;
+              const bar = u.type === 'Rig' ? 'bg-navy' : 'bg-safety';
+              return `<div>
+                <div class="flex items-center justify-between text-sm mb-0.5">
+                  <span class="font-medium text-slate-700">${escapeHtml(u.name)} <span class="text-xs text-slate-400">(${u.type})</span></span>
+                  <span class="font-bold text-slate-900">${cnt}</span>
+                </div>
+                <div class="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+                  <div class="${bar} h-2 rounded-full" style="width:${pct}%"></div>
+                </div>
+              </div>`;
+            }).join('');
+          } catch (err) {
+            toast('Gagal memuat dashboard: ' + err.message, 'error');
+          }
+        })();
+
+        return div;
+      },
+
+      // -----------------------------------------------------
+      // EQUIPMENT (list / detail / form sub-views)
+      // -----------------------------------------------------
+      equipment: () => {
+        if (state.equipmentView === 'detail' && state.currentEquipmentId) return renderEquipmentDetail();
+        if (state.equipmentView === 'form') return renderEquipmentForm();
+        return renderEquipmentList();
+      },
+
+      // -----------------------------------------------------
+      // MAINTENANCE (list semua maintenance log)
+      // -----------------------------------------------------
+      maintenance: () => {
+        const div = document.createElement('div');
+        div.className = 'page space-y-4';
+        div.innerHTML = `
+          <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+            <h3 class="text-xl font-bold text-slate-900 mb-1">🛠️ Riwayat Maintenance</h3>
+            <p class="text-sm text-slate-500">Daftar semua maintenance log dari seluruh equipment.</p>
+          </div>
+          <div id="maint-list" class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">Memuat…</div>
+        `;
+        (async () => {
+          try {
+            const { data, error } = await state.supabase
+              .from('maintenance_log')
+              .select('*, equipment:equipment_id (tag_number, nama_equipment)')
+              .order('maintenance_date', { ascending: false })
+              .limit(100);
+            if (error) throw error;
+            const rows = data || [];
+            if (rows.length === 0) {
+              $('#maint-list').innerHTML = '<div class="p-8 text-center text-slate-500">Belum ada maintenance log.</div>';
+              return;
+            }
+            $('#maint-list').innerHTML = `
+              <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                  <thead class="bg-slate-50 border-b border-slate-200">
+                    <tr>
+                      <th class="px-3 py-2 text-left font-bold text-slate-700">Tanggal</th>
+                      <th class="px-3 py-2 text-left font-bold text-slate-700">Equipment</th>
+                      <th class="px-3 py-2 text-left font-bold text-slate-700">Tipe</th>
+                      <th class="px-3 py-2 text-left font-bold text-slate-700">PIC</th>
+                      <th class="px-3 py-2 text-left font-bold text-slate-700">Catatan</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-200">
+                    ${rows.map(r => `
+                      <tr class="hover:bg-slate-50">
+                        <td class="px-3 py-2 whitespace-nowrap">${fmtDate(r.maintenance_date)}</td>
+                        <td class="px-3 py-2">
+                          ${r.equipment ? `<button onclick="setEquipmentView('detail','${r.equipment_id}'); navigate('equipment')" class="text-navy font-semibold hover:underline">${escapeHtml(r.equipment.tag_number)}</button>
+                          <div class="text-xs text-slate-500">${escapeHtml(r.equipment.nama_equipment)}</div>` : '<span class="text-slate-400">—</span>'}
+                        </td>
+                        <td class="px-3 py-2">${escapeHtml(r.maintenance_type || '—')}</td>
+                        <td class="px-3 py-2">${escapeHtml(r.pic_mechanic || '—')}</td>
+                        <td class="px-3 py-2 text-slate-600">${escapeHtml(r.notes || '—')}</td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div>
+              <div class="px-4 py-2 text-xs text-slate-500 bg-slate-50 border-t">${rows.length} entry</div>
+            `;
+          } catch (err) {
+            $('#maint-list').innerHTML = `<div class="p-4 bg-red-50 text-red-700 text-sm">Gagal load: ${escapeHtml(err.message)}</div>`;
+          }
+        })();
+        return div;
+      },
+
+      // -----------------------------------------------------
+      // ALERTS (list dari alert_log)
+      // -----------------------------------------------------
+      alerts: () => {
+        const div = document.createElement('div');
+        div.className = 'page space-y-4';
+        div.innerHTML = `
+          <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+            <h3 class="text-xl font-bold text-slate-900 mb-1">🔔 Alert Center</h3>
+            <p class="text-sm text-slate-500">Riwayat alert yang dikirim ke Telegram (akan aktif setelah Fase 5).</p>
+          </div>
+          <div id="alert-list" class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">Memuat…</div>
+        `;
+        (async () => {
+          try {
+            const { data, error } = await state.supabase
+              .from('alert_log').select('*').order('sent_at', { ascending: false }).limit(50);
+            if (error) throw error;
+            const rows = data || [];
+            if (rows.length === 0) {
+              $('#alert-list').innerHTML = '<div class="p-8 text-center text-slate-500">Belum ada alert. Akan terisi setelah Telegram Bot di-setup di Fase 5.</div>';
+              return;
+            }
+            $('#alert-list').innerHTML = rows.map(r => `
+              <div class="p-4 border-b border-slate-100 last:border-b-0">
+                <div class="flex items-start justify-between gap-3">
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 mb-1">
+                      <span class="px-2 py-0.5 bg-orange-100 text-orange-800 text-xs font-medium rounded">${escapeHtml(r.alert_type)}</span>
+                      <span class="text-xs text-slate-500">${fmtDate(r.sent_at)}</span>
+                    </div>
+                    <div class="text-sm text-slate-700">${escapeHtml(r.message || '—')}</div>
+                  </div>
+                  <div class="text-xs ${r.status === 'sent' ? 'text-green-600' : 'text-red-600'} font-semibold">${escapeHtml(r.status || '—')}</div>
+                </div>
+              </div>
+            `).join('');
+          } catch (err) {
+            $('#alert-list').innerHTML = `<div class="p-4 bg-red-50 text-red-700 text-sm">Gagal load: ${escapeHtml(err.message)}</div>`;
+          }
+        })();
+        return div;
+      },
+
+      // -----------------------------------------------------
+      // CATEGORIES (admin) - stub Fase 4
+      // -----------------------------------------------------
+      categories: () => {
+        const div = document.createElement('div');
+        div.className = 'page space-y-4';
+        div.innerHTML = `
+          <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+            <h3 class="text-xl font-bold text-slate-900 mb-1">🏷️ Kategori Equipment</h3>
+            <p class="text-sm text-slate-500">${state.categories.length} kategori (CRUD lengkap akan dibangun di Fase 4)</p>
+          </div>
+          <div class="bg-white rounded-xl border border-slate-200 shadow-sm divide-y divide-slate-100">
+            ${state.categories.map(c => `
+              <div class="flex items-center justify-between px-4 py-3">
+                <span class="font-medium text-slate-800">${escapeHtml(c.name)}</span>
+                <span class="text-xs px-2 py-0.5 rounded ${c.parent_unit_type==='Rig'?'bg-navy text-white':'bg-safety text-white'}">${escapeHtml(c.parent_unit_type)}</span>
+              </div>
+            `).join('')}
+          </div>
+        `;
+        return div;
+      },
+
+      // -----------------------------------------------------
+      // USERS (admin) - stub Fase 4
+      // -----------------------------------------------------
+      users: () => placeholderPage({ icon: '👥', label: 'User Management' }, 'CRUD user lengkap akan dibangun di Fase 4.'),
+
+      // -----------------------------------------------------
+      // SETTINGS
+      // -----------------------------------------------------
+      settings: () => {
+        const div = document.createElement('div');
+        div.className = 'page max-w-2xl mx-auto space-y-4';
+        div.innerHTML = `
+          <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+            <h3 class="text-xl font-bold text-slate-900 mb-1">⚙️ Pengaturan Akun</h3>
+            <p class="text-sm text-slate-500">Update profil & password kamu.</p>
+          </div>
+          <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm space-y-4">
+            <div>
+              <label class="block text-sm font-medium text-slate-700 mb-1">Email</label>
+              <input type="email" disabled value="${escapeHtml(state.profile.email)}" class="w-full px-3 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-600" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-slate-700 mb-1">Role</label>
+              <input type="text" disabled value="${escapeHtml(state.profile.role)}" class="w-full px-3 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-600 capitalize" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-slate-700 mb-1">Nama Lengkap</label>
+              <input type="text" id="settings-name" value="${escapeHtml(state.profile.full_name || '')}" class="w-full px-3 py-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-navy" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-slate-700 mb-1">Telegram User ID <span class="text-xs text-slate-400">(opsional)</span></label>
+              <input type="text" id="settings-tg" value="${escapeHtml(state.profile.telegram_user_id || '')}" placeholder="contoh: 123456789" class="w-full px-3 py-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-navy" />
+            </div>
+            <button onclick="saveSettings()" class="bg-navy hover:bg-navy-700 text-white px-5 py-2 rounded-lg font-semibold text-sm">Simpan Perubahan</button>
+          </div>
+          <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm space-y-3">
+            <h4 class="font-bold text-slate-800">Ganti Password</h4>
+            <input type="password" id="settings-newpass" placeholder="Password baru (min 6 karakter)" class="w-full px-3 py-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-navy" />
+            <button onclick="changePassword()" class="bg-safety hover:bg-safety-700 text-white px-5 py-2 rounded-lg font-semibold text-sm">Ganti Password</button>
+          </div>
+        `;
+        return div;
+      },
+    };
+
+    // ============================================================
+    // 9d. EQUIPMENT LIST VIEW
+    // ============================================================
+    function setEquipmentView(view, id = null, tab = 'info') {
+      state.equipmentView = view;
+      state.currentEquipmentId = id;
+      state.equipmentDetailTab = tab;
+      navigate('equipment');
+    }
+    window.setEquipmentView = setEquipmentView;
+
+    function renderEquipmentList() {
+      const div = document.createElement('div');
+      div.className = 'page space-y-3';
+      const parentOpts = ['<option value="">Semua Unit</option>'].concat(
+        state.parentUnits.map(u => `<option value="${u.id}" ${state.equipmentFilters.parent_unit_id == u.id ? 'selected' : ''}>${escapeHtml(u.name)}</option>`)
+      ).join('');
+      const catOpts = ['<option value="">Semua Kategori</option>'].concat(
+        state.categories.map(c => `<option value="${c.id}" ${state.equipmentFilters.kategori_id == c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`)
+      ).join('');
+      const isAdmin = state.profile.role === 'admin';
+      const hasActiveFilter = !!(state.equipmentSearch || state.equipmentFilters.parent_unit_id || state.equipmentFilters.kategori_id || state.equipmentFilters.status_operasi || state.equipmentFilters.tipe_kepemilikan);
+
+      div.innerHTML = `
+        <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm space-y-3">
+          <div class="flex flex-col md:flex-row md:items-center gap-3">
+            <div class="flex-1">
+              <input type="text" id="eq-search" placeholder="🔍 Cari tag / nama / serial..." value="${escapeHtml(state.equipmentSearch)}"
+                class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-navy outline-none text-sm" />
+            </div>
+            ${isAdmin ? `
+            <button onclick="setEquipmentView('form', null)" class="bg-safety hover:bg-safety-700 text-white px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 shadow-sm">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+              Tambah Equipment
+            </button>` : ''}
+          </div>
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+            <select id="filter-unit" class="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">${parentOpts}</select>
+            <select id="filter-cat"  class="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">${catOpts}</select>
+            <select id="filter-status" class="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">
+              <option value="">Semua Status</option>
+              ${['Aktif','Standby','Repair','Down','Scrap'].map(s => `<option value="${s}" ${state.equipmentFilters.status_operasi===s?'selected':''}>${s}</option>`).join('')}
+            </select>
+            <select id="filter-tipe" class="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">
+              <option value="">Semua Tipe</option>
+              <option value="Permanent" ${state.equipmentFilters.tipe_kepemilikan==='Permanent'?'selected':''}>Permanent</option>
+              <option value="Mobile-Backup" ${state.equipmentFilters.tipe_kepemilikan==='Mobile-Backup'?'selected':''}>Mobile-Backup</option>
+            </select>
+          </div>
+          <div class="flex items-center justify-between gap-2 text-xs">
+            <div class="text-slate-500">
+              ${hasActiveFilter ? '<span class="inline-flex items-center gap-1 text-safety font-semibold">● Filter aktif</span>' : '<span class="text-slate-400">Belum ada filter</span>'}
+            </div>
+            <button id="btn-reset-filter" onclick="resetEquipmentFilters()"
+              class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border ${hasActiveFilter ? 'border-safety text-safety hover:bg-safety hover:text-white' : 'border-slate-200 text-slate-400 cursor-not-allowed'} text-xs font-semibold transition"
+              ${hasActiveFilter ? '' : 'disabled'}>
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+              Reset Filter
+            </button>
+          </div>
+        </div>
+        <div id="eq-list-container">Memuat…</div>
+      `;
+
+      setTimeout(() => {
+        $('#eq-search').addEventListener('input', debounce(e => { state.equipmentSearch = e.target.value; reloadEquipmentList(); refreshFilterIndicator(); }, 350));
+        $('#filter-unit').onchange   = e => { state.equipmentFilters.parent_unit_id = e.target.value; reloadEquipmentList(); refreshFilterIndicator(); };
+        $('#filter-cat').onchange    = e => { state.equipmentFilters.kategori_id    = e.target.value; reloadEquipmentList(); refreshFilterIndicator(); };
+        $('#filter-status').onchange = e => { state.equipmentFilters.status_operasi = e.target.value; reloadEquipmentList(); refreshFilterIndicator(); };
+        $('#filter-tipe').onchange   = e => { state.equipmentFilters.tipe_kepemilikan = e.target.value; reloadEquipmentList(); refreshFilterIndicator(); };
+      }, 0);
+
+      reloadEquipmentList();
+      return div;
+    }
+
+    function resetEquipmentFilters() {
+      const hadFilter = state.equipmentSearch || state.equipmentFilters.parent_unit_id || state.equipmentFilters.kategori_id || state.equipmentFilters.status_operasi || state.equipmentFilters.tipe_kepemilikan;
+      if (!hadFilter) return;
+      state.equipmentSearch = '';
+      state.equipmentFilters = { parent_unit_id: '', kategori_id: '', status_operasi: '', tipe_kepemilikan: '' };
+      // Reset UI inputs tanpa re-render full page
+      const s = $('#eq-search'); if (s) s.value = '';
+      ['#filter-unit', '#filter-cat', '#filter-status', '#filter-tipe'].forEach(sel => {
+        const el = $(sel); if (el) el.value = '';
+      });
+      refreshFilterIndicator();
+      reloadEquipmentList();
+      toast('Filter di-reset.', 'info');
+    }
+    window.resetEquipmentFilters = resetEquipmentFilters;
+
+    function refreshFilterIndicator() {
+      const indicator = document.querySelector('#btn-reset-filter')?.parentElement?.querySelector('div');
+      const btn = document.querySelector('#btn-reset-filter');
+      if (!indicator || !btn) return;
+      const has = !!(state.equipmentSearch || state.equipmentFilters.parent_unit_id || state.equipmentFilters.kategori_id || state.equipmentFilters.status_operasi || state.equipmentFilters.tipe_kepemilikan);
+      indicator.innerHTML = has
+        ? '<span class="inline-flex items-center gap-1 text-safety font-semibold">● Filter aktif</span>'
+        : '<span class="text-slate-400">Belum ada filter</span>';
+      btn.disabled = !has;
+      btn.className = `inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border ${has ? 'border-safety text-safety hover:bg-safety hover:text-white' : 'border-slate-200 text-slate-400 cursor-not-allowed'} text-xs font-semibold transition`;
+    }
+
+    async function reloadEquipmentList() {
+      const c = document.getElementById('eq-list-container');
+      if (!c) return;
+      c.innerHTML = '<div class="text-center py-8 text-slate-400 text-sm">Memuat data…</div>';
+      try {
+        await fetchEquipmentList();
+        c.innerHTML = renderEquipmentTable(state.equipmentList);
+      } catch (err) {
+        c.innerHTML = `<div class="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 text-sm">Gagal load: ${escapeHtml(err.message)}</div>`;
+      }
+    }
+
+    function renderEquipmentTable(items) {
+      if (!items.length) {
+        return `<div class="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-500">Tidak ada equipment yang cocok.</div>`;
+      }
+      const cards = items.map(eq => `
+        <button onclick="setEquipmentView('detail', '${eq.id}')" class="block w-full bg-white border border-slate-200 rounded-xl p-4 text-left hover:shadow-md transition">
+          <div class="flex items-center justify-between mb-1">
+            <div class="font-bold text-navy">${escapeHtml(eq.tag_number)}</div>
+            ${statusBadge(eq.status_operasi)}
+          </div>
+          <div class="text-sm text-slate-800 font-medium truncate">${escapeHtml(eq.nama_equipment)}</div>
+          <div class="text-xs text-slate-500 mt-1 truncate">
+            ${escapeHtml(getCategoryName(eq.kategori_id))} • ${escapeHtml(getParentUnitName(eq.assigned_unit_id))}
+          </div>
+        </button>
+      `).join('');
+      const rows = items.map(eq => `
+        <tr class="hover:bg-slate-50 cursor-pointer" onclick="setEquipmentView('detail', '${eq.id}')">
+          <td class="px-3 py-2 text-sm font-semibold text-navy whitespace-nowrap">${escapeHtml(eq.tag_number)}</td>
+          <td class="px-3 py-2 text-sm">${escapeHtml(eq.nama_equipment)}</td>
+          <td class="px-3 py-2 text-sm text-slate-600 whitespace-nowrap">${escapeHtml(getCategoryName(eq.kategori_id))}</td>
+          <td class="px-3 py-2 text-sm text-slate-600 whitespace-nowrap">${escapeHtml(getParentUnitName(eq.assigned_unit_id))}</td>
+          <td class="px-3 py-2 text-sm">${statusBadge(eq.status_operasi)}</td>
+          <td class="px-3 py-2 text-sm">${statusBadge(eq.tipe_kepemilikan)}</td>
+          <td class="px-3 py-2 text-sm text-slate-600 whitespace-nowrap">${fmtDate(eq.next_maintenance_date)}</td>
+        </tr>
+      `).join('');
+      return `
+        <div class="md:hidden space-y-2">${cards}</div>
+        <div class="hidden md:block bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+          <div class="overflow-x-auto">
+            <table class="w-full">
+              <thead class="bg-slate-50 border-b border-slate-200">
+                <tr>
+                  <th class="px-3 py-2 text-left text-xs font-bold text-slate-700 uppercase">Tag</th>
+                  <th class="px-3 py-2 text-left text-xs font-bold text-slate-700 uppercase">Nama</th>
+                  <th class="px-3 py-2 text-left text-xs font-bold text-slate-700 uppercase">Kategori</th>
+                  <th class="px-3 py-2 text-left text-xs font-bold text-slate-700 uppercase">Parent Unit</th>
+                  <th class="px-3 py-2 text-left text-xs font-bold text-slate-700 uppercase">Status</th>
+                  <th class="px-3 py-2 text-left text-xs font-bold text-slate-700 uppercase">Tipe</th>
+                  <th class="px-3 py-2 text-left text-xs font-bold text-slate-700 uppercase">Next Maint.</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-200">${rows}</tbody>
+            </table>
+          </div>
+          <div class="px-4 py-2 text-xs text-slate-500 bg-slate-50 border-t">${items.length} equipment</div>
+        </div>
+      `;
+    }
+
+    // ============================================================
+    // 9e. EQUIPMENT DETAIL VIEW (5 tabs)
+    // ============================================================
+    function renderEquipmentDetail() {
+      const div = document.createElement('div');
+      div.className = 'page space-y-4';
+      div.innerHTML = '<div class="text-slate-400 text-sm">Memuat detail…</div>';
+
+      Promise.all([
+        fetchEquipment(state.currentEquipmentId),
+        fetchActiveLoanAsLender(state.currentEquipmentId).catch(() => null),
+        fetchActiveLoanAsBorrower(state.currentEquipmentId).catch(() => null),
+        fetchChildren(state.currentEquipmentId).catch(() => []),
+      ]).then(async ([eq, loanAsLender, loanAsBorrower, children]) => {
+        // Fetch parent equipment kalau ada
+        let parentEq = null;
+        if (eq.parent_equipment_id) {
+          try {
+            const { data } = await state.supabase.from('equipment')
+              .select('id, tag_number, nama_equipment, kategori_id')
+              .eq('id', eq.parent_equipment_id).maybeSingle();
+            parentEq = data;
+          } catch {}
+        }
+        const isAdmin = state.profile.role === 'admin';
+        const isBroken = eq.status_operasi === 'Down' || eq.status_operasi === 'Repair';
+        const hasActiveLoan = !!(loanAsLender || loanAsBorrower);
+        const activeLoan = loanAsLender || loanAsBorrower;
+
+        // Banner pinjaman
+        let loanBanner = '';
+        if (loanAsLender) {
+          loanBanner = `
+            <div class="bg-purple-50 border-2 border-purple-300 rounded-xl p-4 shadow-sm">
+              <div class="flex items-start gap-3">
+                <span class="text-2xl">📌</span>
+                <div class="flex-1">
+                  <div class="font-bold text-purple-900 text-sm">Equipment ini sedang DIPINJAMKAN</div>
+                  <div class="text-sm text-purple-800 mt-1">
+                    Pemilik asli: <span class="font-semibold">${escapeHtml(getParentUnitName(loanAsLender.lender_unit_id))}</span> →
+                    Dipinjam ke: <span class="font-semibold">${escapeHtml(getParentUnitName(loanAsLender.borrower_unit_id))}</span>
+                  </div>
+                  <div class="text-xs text-purple-700 mt-1">
+                    Sejak <span class="font-semibold">${fmtDate(loanAsLender.loan_date)}</span>
+                    (${daysUntil(loanAsLender.loan_date) != null ? `${-daysUntil(loanAsLender.loan_date)} hari lalu` : '—'})
+                    ${loanAsLender.reason ? '• Alasan: ' + escapeHtml(loanAsLender.reason) : ''}
+                  </div>
+                </div>
+              </div>
+            </div>`;
+        } else if (loanAsBorrower) {
+          loanBanner = `
+            <div class="bg-amber-50 border-2 border-amber-300 rounded-xl p-4 shadow-sm">
+              <div class="flex items-start gap-3">
+                <span class="text-2xl">🔧</span>
+                <div class="flex-1">
+                  <div class="font-bold text-amber-900 text-sm">Equipment ini sementara DIGANTIKAN PINJAMAN</div>
+                  <div class="text-sm text-amber-800 mt-1">
+                    Dari unit <span class="font-semibold">${escapeHtml(getParentUnitName(loanAsBorrower.lender_unit_id))}</span> sejak
+                    <span class="font-semibold">${fmtDate(loanAsBorrower.loan_date)}</span>
+                  </div>
+                  <div class="text-xs text-amber-700 mt-1">
+                    ${loanAsBorrower.reason ? 'Alasan: ' + escapeHtml(loanAsBorrower.reason) : ''}
+                  </div>
+                </div>
+              </div>
+            </div>`;
+        }
+
+        // Determine which buttons to show
+        const canPinjam = isAdmin && isBroken && !loanAsBorrower; // butuh pengganti tapi belum punya pinjaman aktif
+        const canKembalikan = isAdmin && hasActiveLoan;
+        const canMutasi = isAdmin && !hasActiveLoan; // gak boleh mutasi kalau lagi dipinjam/meminjamkan
+        const canGanti = isAdmin && !hasActiveLoan;
+        const canEdit = isAdmin;
+        const canHapus = isAdmin && !hasActiveLoan;
+
+        // Breadcrumb hierarki: Parent Unit → Parent Equipment → Equipment ini
+        const breadcrumb = `
+          <div class="flex items-center gap-1.5 flex-wrap text-xs text-slate-500 mb-1">
+            <span>🏭 ${escapeHtml(getParentUnitName(eq.assigned_unit_id))}</span>
+            ${parentEq ? `<span>›</span><button onclick="setEquipmentView('detail','${parentEq.id}')" class="text-navy hover:underline">📦 ${escapeHtml(parentEq.tag_number)}</button>` : ''}
+            <span>›</span>
+            <span class="font-semibold text-slate-700">${escapeHtml(eq.tag_number)}</span>
+          </div>`;
+
+        div.innerHTML = `
+          ${loanBanner}
+          <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+            <button onclick="setEquipmentView('list')" class="text-sm text-navy hover:underline mb-2 inline-flex items-center gap-1">← Kembali ke daftar</button>
+            ${breadcrumb}
+            <div class="flex items-start justify-between gap-3 flex-wrap">
+              <div class="flex-1 min-w-0">
+                <h2 class="text-2xl font-bold text-slate-900">${escapeHtml(eq.tag_number)}</h2>
+                <p class="text-base text-slate-700 mt-1">${escapeHtml(eq.nama_equipment)}</p>
+                <div class="flex flex-wrap items-center gap-2 mt-3">
+                  ${statusBadge(eq.status_operasi)}
+                  ${statusBadge(eq.kondisi_fisik)}
+                  ${statusBadge(eq.tipe_kepemilikan)}
+                  <span class="text-xs text-slate-500">${escapeHtml(getCategoryName(eq.kategori_id))}</span>
+                  <span class="text-xs text-slate-400">•</span>
+                  <span class="text-xs text-slate-500">${escapeHtml(getParentUnitName(eq.assigned_unit_id))}</span>
+                  ${children.length > 0 ? `<span class="text-xs text-slate-400">•</span><span class="text-xs font-semibold text-navy">🧩 ${children.length} komponen</span>` : ''}
+                </div>
+              </div>
+              ${isAdmin ? `
+                <div class="flex gap-2 flex-wrap">
+                  ${canPinjam ? `<button onclick="openLoanModal('${eq.id}')" class="px-3 py-2 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-800 text-sm font-medium">🤝 Pinjam Pengganti</button>` : ''}
+                  ${canKembalikan ? `<button onclick="openReturnLoanModal('${activeLoan.id}')" class="px-3 py-2 rounded-lg bg-green-100 hover:bg-green-200 text-green-800 text-sm font-medium">↩️ Kembalikan Pinjaman</button>` : ''}
+                  ${canGanti ? `<button onclick="openReplaceModal('${eq.id}')" class="px-3 py-2 rounded-lg bg-purple-100 hover:bg-purple-200 text-purple-800 text-sm font-medium">🔄 Ganti</button>` : ''}
+                  ${canMutasi ? `<button onclick="openMutasiModal('${eq.id}')" class="px-3 py-2 rounded-lg bg-blue-100 hover:bg-blue-200 text-blue-800 text-sm font-medium">↔ Mutasi</button>` : ''}
+                  ${canEdit ? `<button onclick="setEquipmentView('form', '${eq.id}')" class="px-3 py-2 rounded-lg bg-navy hover:bg-navy-700 text-white text-sm font-medium">✏ Edit</button>` : ''}
+                  ${canHapus ? `<button onclick="confirmDeleteEquipment('${eq.id}', '${escapeHtml(eq.tag_number).replace(/'/g,'&#39;')}')" class="px-3 py-2 rounded-lg bg-red-100 hover:bg-red-200 text-red-700 text-sm font-medium">🗑 Hapus</button>` : ''}
+                </div>` : ''}
+            </div>
+            ${hasActiveLoan && isAdmin ? '<div class="mt-3 text-xs text-slate-500 italic">ℹ️ Mutasi/Ganti/Hapus di-disable selama equipment ini ada pinjaman aktif. Kembalikan dulu pinjaman.</div>' : ''}
+          </div>
+
+          ${children.length > 0 ? `
+          <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+            <h3 class="text-base font-bold text-slate-800 mb-3 flex items-center gap-2">
+              🧩 Komponen (${children.length})
+              <span class="text-xs font-normal text-slate-500">— equipment yang merupakan bagian dari ${escapeHtml(eq.tag_number)}</span>
+            </h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              ${children.map(c => `
+                <button onclick="setEquipmentView('detail','${c.id}')" class="text-left bg-slate-50 hover:bg-navy hover:text-white rounded-lg p-3 transition group border border-slate-200">
+                  <div class="flex items-center justify-between gap-2 mb-1">
+                    <span class="font-bold text-navy group-hover:text-white text-sm">${escapeHtml(c.tag_number)}</span>
+                    ${statusBadge(c.status_operasi)}
+                  </div>
+                  <div class="text-xs text-slate-700 group-hover:text-blue-100 truncate">${escapeHtml(c.nama_equipment)}</div>
+                  <div class="text-xs text-slate-500 group-hover:text-blue-200 mt-0.5">${escapeHtml(getCategoryName(c.kategori_id))}</div>
+                </button>
+              `).join('')}
+            </div>
+          </div>` : ''}
+
+          <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+            <div class="flex border-b border-slate-200 overflow-x-auto">
+              ${[
+                ['info','📋 Info'],
+                ['maintenance','🛠️ Maintenance'],
+                ['sertifikasi','📜 Sertifikasi'],
+                ['dokumen','📎 Dokumen'],
+                ['history','🔄 History'],
+              ].map(([id, lbl]) => `
+                <button onclick="state.equipmentDetailTab='${id}'; renderDetailTab(window.__currentEq)"
+                  class="px-4 py-3 text-sm font-medium whitespace-nowrap ${state.equipmentDetailTab===id ? 'border-b-2 border-safety text-safety bg-safety/5' : 'text-slate-600 hover:text-navy'}">
+                  ${lbl}
+                </button>
+              `).join('')}
+            </div>
+            <div id="detail-tab-content" class="p-5"></div>
+          </div>
+        `;
+        window.__currentEq = eq;
+        window.__currentLoan = activeLoan;
+        renderDetailTab(eq);
+      }).catch(err => {
+        div.innerHTML = `<div class="bg-red-50 border border-red-200 p-4 rounded-lg text-red-700 text-sm">Gagal load: ${escapeHtml(err.message)}</div>`;
+      });
+
+      return div;
+    }
+
+    function renderDetailTab(eq) {
+      const c = document.getElementById('detail-tab-content');
+      if (!c) return;
+      // Re-render tabs bar to update active state
+      const parent = c.parentElement.querySelector('.flex.border-b');
+      if (parent) {
+        parent.querySelectorAll('button').forEach((btn, i) => {
+          const ids = ['info','maintenance','sertifikasi','dokumen','history'];
+          btn.className = `px-4 py-3 text-sm font-medium whitespace-nowrap ${state.equipmentDetailTab===ids[i] ? 'border-b-2 border-safety text-safety bg-safety/5' : 'text-slate-600 hover:text-navy'}`;
+        });
+      }
+      switch (state.equipmentDetailTab) {
+        case 'info':        c.innerHTML = renderInfoTab(eq); break;
+        case 'sertifikasi': c.innerHTML = renderSertifikasiTab(eq); break;
+        case 'maintenance': c.innerHTML = '<div class="text-slate-400">Memuat…</div>'; renderMaintenanceTab(eq, c); break;
+        case 'dokumen':     c.innerHTML = '<div class="text-slate-400">Memuat…</div>'; renderDokumenTab(eq, c); break;
+        case 'history':     c.innerHTML = '<div class="text-slate-400">Memuat…</div>'; renderHistoryTab(eq, c); break;
+      }
+    }
+    window.renderDetailTab = renderDetailTab;
+
+    function infoRow(label, value) {
+      return `<div class="grid grid-cols-3 gap-2 py-2.5 border-b border-slate-200 last:border-0">
+        <div class="text-sm md:text-base font-medium text-slate-600">${escapeHtml(label)}</div>
+        <div class="col-span-2 text-sm md:text-base font-semibold text-slate-900">${value === '' || value == null ? '<span class="text-slate-400 font-normal">—</span>' : value}</div>
+      </div>`;
+    }
+
+    function renderInfoTab(eq) {
+      const sections = [
+        ['Identitas', [
+          ['Tag Number', eq.tag_number],
+          ['Nama Equipment', eq.nama_equipment],
+          ['Kategori', getCategoryName(eq.kategori_id)],
+          ['Parent Unit', getParentUnitName(eq.assigned_unit_id)],
+          ['Tipe Kepemilikan', eq.tipe_kepemilikan],
+        ]],
+        ['Spesifikasi', [
+          ['Brand', eq.brand],
+          ['Model', eq.model],
+          ['Serial Number', eq.serial_number],
+          ['Tahun Pembuatan', eq.tahun_pembuatan],
+          ['Tahun Commissioning', eq.tahun_commissioning],
+          ['Year Used', eq.year_used],
+          ['Country of Origin', eq.country_of_origin],
+          ['Spek Khusus', eq.spek_khusus],
+        ]],
+        ['Status', [
+          ['Status Operasi', eq.status_operasi],
+          ['Kondisi Fisik', eq.kondisi_fisik],
+          ['Lokasi Fisik', eq.lokasi_fisik],
+          ['Running Hours', eq.running_hours != null ? fmtNumber(eq.running_hours, ' jam') : null],
+        ]],
+        ['Maintenance', [
+          ['Last Maintenance', fmtDate(eq.last_maintenance_date)],
+          ['Last Type', eq.last_maintenance_type],
+          ['Next Maintenance', fmtDate(eq.next_maintenance_date)],
+          ['Interval', eq.maintenance_interval],
+          ['PIC Mechanic', eq.pic_mechanic],
+          ['GOH Year', eq.goh_year],
+        ]],
+        ['Finansial', [
+          ['Tgl Pembelian', fmtDate(eq.tgl_pembelian)],
+          ['Harga Perolehan', eq.harga_perolehan != null ? fmtCurrency(eq.harga_perolehan) : null],
+          ['Nomor PO/Invoice', eq.nomor_po_invoice],
+          ['Vendor/Supplier', eq.vendor_supplier],
+          ['Cost Center', eq.cost_center],
+        ]],
+        ['Safety', [
+          ['Pressure Test Date', fmtDate(eq.pressure_test_date)],
+          ['Pressure Test Result', eq.pressure_test_result],
+        ]],
+        ['Catatan', [
+          ['Remarks', eq.remarks],
+        ]],
+      ];
+      return sections.map(([title, rows]) => `
+        <div class="mb-5 last:mb-0">
+          <h4 class="font-bold text-navy text-base uppercase tracking-wider mb-3">${title}</h4>
+          <div class="bg-white border border-slate-200 rounded-lg p-4">
+            ${rows.map(([l, v]) => infoRow(l, v != null && v !== '' ? escapeHtml(String(v)) : null)).join('')}
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function renderSertifikasiTab(eq) {
+      const skpiDays = daysUntil(eq.skpi_end_date);
+      const sertDays = daysUntil(eq.tgl_expired_sertifikat);
+      const skpiAlert = skpiDays != null
+        ? (skpiDays < 0 ? `<span class="text-red-700 font-bold">⚠ Expired ${-skpiDays} hari lalu</span>`
+        : (skpiDays <= 60 ? `<span class="text-amber-700 font-bold">⏰ ${skpiDays} hari lagi</span>`
+        : `<span class="text-green-700">${skpiDays} hari lagi</span>`))
+        : '<span class="text-slate-400">—</span>';
+      const sertAlert = sertDays != null
+        ? (sertDays < 0 ? `<span class="text-red-700 font-bold">⚠ Expired ${-sertDays} hari lalu</span>`
+        : (sertDays <= 60 ? `<span class="text-amber-700 font-bold">⏰ ${sertDays} hari lagi</span>`
+        : `<span class="text-green-700">${sertDays} hari lagi</span>`))
+        : '<span class="text-slate-400">—</span>';
+      return `
+        <div class="space-y-5">
+          <div>
+            <h4 class="font-bold text-navy text-base uppercase tracking-wider mb-3">SKPI</h4>
+            <div class="bg-white border border-slate-200 rounded-lg p-4">
+              ${infoRow('Nomor SKPI', escapeHtml(eq.nomor_skpi || '') || null)}
+              ${infoRow('Start Date', fmtDate(eq.skpi_start_date))}
+              ${infoRow('End Date', fmtDate(eq.skpi_end_date) + ' &nbsp; ' + skpiAlert)}
+            </div>
+          </div>
+          <div>
+            <h4 class="font-bold text-navy text-base uppercase tracking-wider mb-3">COC & Refurbish</h4>
+            <div class="bg-white border border-slate-200 rounded-lg p-4">
+              ${infoRow('COC Number', escapeHtml(eq.coc_number || '') || null)}
+              ${infoRow('ARF / Lembaga', escapeHtml(eq.arf_lembaga || '') || null)}
+              ${infoRow('Refurbish Year', eq.refurbish_year)}
+              ${infoRow('Refurbish By', escapeHtml(eq.refurbish_by || '') || null)}
+              ${infoRow('Load Test Result', escapeHtml(eq.load_test_result || '') || null)}
+            </div>
+          </div>
+          <div>
+            <h4 class="font-bold text-navy text-base uppercase tracking-wider mb-3">Sertifikat Lainnya</h4>
+            <div class="bg-white border border-slate-200 rounded-lg p-4">
+              ${infoRow('Nomor Sertifikat', escapeHtml(eq.nomor_sertifikat_lain || '') || null)}
+              ${infoRow('Tgl Terbit', fmtDate(eq.tgl_terbit_sertifikat))}
+              ${infoRow('Tgl Expired', fmtDate(eq.tgl_expired_sertifikat) + ' &nbsp; ' + sertAlert)}
+              ${infoRow('Lembaga Penerbit', escapeHtml(eq.lembaga_penerbit || '') || null)}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    async function renderMaintenanceTab(eq, container) {
+      try {
+        const logs = await fetchMaintenanceLog(eq.id);
+        container.innerHTML = `
+          <div class="flex items-center justify-between mb-3">
+            <h4 class="font-bold text-slate-800">Riwayat Maintenance (${logs.length})</h4>
+            <button onclick="openMaintenanceModal('${eq.id}')" class="bg-safety hover:bg-safety-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium">+ Tambah</button>
+          </div>
+          ${logs.length === 0 ? '<div class="text-center py-6 text-slate-400 text-sm bg-slate-50 rounded-lg">Belum ada maintenance log.</div>' :
+            `<div class="space-y-2">
+              ${logs.map(l => `
+                <div class="bg-white border border-slate-200 rounded-lg p-4">
+                  <div class="flex items-center justify-between mb-1">
+                    <span class="font-semibold text-navy text-sm">${fmtDate(l.maintenance_date)}</span>
+                    <span class="text-xs px-2 py-0.5 bg-blue-100 text-blue-800 rounded">${escapeHtml(l.maintenance_type || '—')}</span>
+                  </div>
+                  ${l.pic_mechanic ? `<div class="text-xs text-slate-600">PIC: ${escapeHtml(l.pic_mechanic)}</div>` : ''}
+                  ${l.notes ? `<div class="text-sm text-slate-700 mt-1">${escapeHtml(l.notes)}</div>` : ''}
+                </div>
+              `).join('')}
+            </div>`
+          }
+        `;
+      } catch (err) {
+        container.innerHTML = `<div class="bg-red-50 text-red-700 p-3 rounded">Gagal load: ${escapeHtml(err.message)}</div>`;
+      }
+    }
+
+    async function renderDokumenTab(eq, container) {
+      try {
+        const docs = await fetchDocuments(eq.id);
+        const isAdmin = state.profile.role === 'admin';
+        container.innerHTML = `
+          <div class="flex items-center justify-between mb-3">
+            <h4 class="font-bold text-slate-800">Dokumen (${docs.length})</h4>
+            ${isAdmin ? `
+              <label class="bg-safety hover:bg-safety-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium cursor-pointer">
+                + Upload
+                <input type="file" multiple accept="image/*,application/pdf" class="hidden" onchange="handleDocUpload(event, '${eq.id}')" />
+              </label>` : ''}
+          </div>
+          ${isAdmin ? `<p class="text-xs text-slate-500 mb-2">ℹ️ Foto otomatis dikompres ke max 1920px (kualitas 85%) supaya hemat storage tapi tetap jelas. PDF di-upload tanpa kompresi.</p>` : ''}
+          <div id="doc-upload-status"></div>
+          ${docs.length === 0 ? '<div class="text-center py-6 text-slate-400 text-sm bg-slate-50 rounded-lg">Belum ada dokumen.</div>' :
+            `<div class="space-y-2">
+              ${docs.map(d => `
+                <div class="bg-slate-50 rounded-lg p-3 flex items-center gap-3">
+                  <div class="text-2xl flex-shrink-0">${d.file_type?.startsWith('image/') ? '🖼️' : (d.file_type === 'application/pdf' ? '📄' : '📎')}</div>
+                  <div class="flex-1 min-w-0">
+                    <div class="font-medium text-slate-800 text-sm truncate">${escapeHtml(d.file_name)}</div>
+                    <div class="text-xs text-slate-500">${fmtDate(d.created_at)}</div>
+                  </div>
+                  <button onclick="openDoc('${escapeHtml(d.file_url)}', '${escapeHtml(d.file_name)}')" class="text-navy hover:underline text-sm font-medium">Buka</button>
+                  ${isAdmin ? `<button onclick="confirmDeleteDoc('${d.id}', '${escapeHtml(d.file_url)}', '${escapeHtml(d.file_name).replace(/'/g,'&#39;')}')" class="text-red-600 hover:text-red-800 text-sm">Hapus</button>` : ''}
+                </div>
+              `).join('')}
+            </div>`
+          }
+        `;
+      } catch (err) {
+        container.innerHTML = `<div class="bg-red-50 text-red-700 p-3 rounded">Gagal load: ${escapeHtml(err.message)}</div>`;
+      }
+    }
+
+    async function renderHistoryTab(eq, container) {
+      try {
+        const [muts, loans] = await Promise.all([
+          fetchMutationLog(eq.id),
+          fetchLoanHistory(eq.id).catch(() => []),
+        ]);
+
+        // Gabung events ke timeline yg sama, sort by date desc
+        const events = [];
+        muts.forEach(m => events.push({
+          kind: 'mutasi',
+          date: m.mutation_date,
+          title: `${getParentUnitName(m.from_unit_id)} → ${getParentUnitName(m.to_unit_id)}`,
+          detail: m.reason,
+          color: 'bg-safety',
+        }));
+        loans.forEach(l => {
+          const isLender = l.lender_equipment_id === eq.id;
+          // Event "pinjam"
+          events.push({
+            kind: 'pinjam',
+            date: l.loan_date,
+            title: isLender
+              ? `🤝 DIPINJAMKAN: ${getParentUnitName(l.lender_unit_id)} → ${getParentUnitName(l.borrower_unit_id)}`
+              : `🤝 MENERIMA PINJAMAN: dari ${getParentUnitName(l.lender_unit_id)}`,
+            detail: l.reason,
+            color: 'bg-amber-500',
+            status: l.status,
+          });
+          // Event "kembali" (kalau sudah dikembalikan)
+          if (l.status === 'returned' && l.return_date) {
+            events.push({
+              kind: 'kembali',
+              date: l.return_date,
+              title: isLender
+                ? `↩️ DIKEMBALIKAN: ke ${getParentUnitName(l.lender_unit_id)}`
+                : `↩️ MENGEMBALIKAN: pinjaman ke ${getParentUnitName(l.lender_unit_id)}`,
+              detail: l.return_notes,
+              color: 'bg-green-500',
+            });
+          }
+        });
+        events.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+
+        container.innerHTML = `
+          <h4 class="font-bold text-slate-800 mb-3">Riwayat Mutasi & Pinjaman (${events.length})</h4>
+          ${events.length === 0 ? '<div class="text-center py-6 text-slate-400 text-sm bg-slate-50 rounded-lg">Belum ada riwayat.</div>' :
+            `<div class="relative pl-6 space-y-3">
+              ${events.map((ev, idx) => `
+                <div class="relative">
+                  <div class="absolute -left-6 top-1 w-3 h-3 rounded-full ${ev.color} ring-4 ring-white"></div>
+                  ${idx < events.length - 1 ? '<div class="absolute -left-[18px] top-4 bottom-[-12px] w-0.5 bg-slate-200"></div>' : ''}
+                  <div class="bg-white border border-slate-200 rounded-lg p-4">
+                    <div class="flex items-center gap-2 text-sm mb-1 flex-wrap">
+                      <span class="font-semibold text-navy">${fmtDate(ev.date)}</span>
+                      <span class="text-slate-500">•</span>
+                      <span class="text-slate-700">${escapeHtml(ev.title)}</span>
+                      ${ev.kind === 'pinjam' && ev.status === 'active' ? '<span class="px-2 py-0.5 bg-amber-100 text-amber-800 text-xs font-semibold rounded">aktif</span>' : ''}
+                    </div>
+                    ${ev.detail ? `<div class="text-xs text-slate-600">${escapeHtml(ev.detail)}</div>` : ''}
+                  </div>
+                </div>
+              `).join('')}
+            </div>`
+          }
+        `;
+      } catch (err) {
+        container.innerHTML = `<div class="bg-red-50 text-red-700 p-3 rounded">Gagal load: ${escapeHtml(err.message)}</div>`;
+      }
+    }
+
+    // ============================================================
+    // 9f. EQUIPMENT FORM (Add / Edit)
+    // ============================================================
+    function renderEquipmentForm() {
+      const isEdit = !!state.currentEquipmentId;
+      state.equipmentFormMode = isEdit ? 'edit' : 'add';
+      const div = document.createElement('div');
+      div.className = 'page space-y-4';
+      div.innerHTML = `<div class="text-slate-400 text-sm">${isEdit ? 'Memuat data…' : 'Menyiapkan form…'}</div>`;
+
+      const setup = (existing) => {
+        const data = existing || { tipe_kepemilikan: 'Permanent', status_operasi: 'Aktif', kondisi_fisik: 'Good' };
+        const sections = EQUIPMENT_FIELDS.map(sec => `
+          <div class="bg-white rounded-xl border border-slate-200 shadow-sm">
+            <h4 class="px-5 py-3 font-bold text-navy border-b border-slate-200 bg-slate-50">${sec.section}</h4>
+            <div class="p-5 grid grid-cols-1 md:grid-cols-2 gap-4">
+              ${sec.fields.map(f => renderFormField(f, data[f.name])).join('')}
+            </div>
+          </div>
+        `).join('');
+
+        div.innerHTML = `
+          <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+            <button onclick="${isEdit ? `setEquipmentView('detail', '${state.currentEquipmentId}')` : `setEquipmentView('list')`}" class="text-sm text-navy hover:underline mb-2 inline-flex items-center gap-1">← Kembali</button>
+            <h2 class="text-xl font-bold text-slate-900">${isEdit ? '✏ Edit Equipment' : '+ Tambah Equipment Baru'}</h2>
+            ${isEdit ? `<p class="text-sm text-slate-500 mt-1">${escapeHtml(data.tag_number || '')}</p>` : ''}
+          </div>
+          <form id="eq-form" class="space-y-4">
+            ${sections}
+            <div class="flex flex-col md:flex-row gap-3 sticky bottom-0 md:bottom-0 bg-white border border-slate-200 rounded-xl p-4 shadow-lg">
+              <button type="button" onclick="${isEdit ? `setEquipmentView('detail', '${state.currentEquipmentId}')` : `setEquipmentView('list')`}" class="md:flex-none px-5 py-2.5 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
+              <button type="submit" class="flex-1 bg-navy hover:bg-navy-700 text-white px-5 py-2.5 rounded-lg text-sm font-semibold">
+                ${isEdit ? '💾 Simpan Perubahan' : '+ Simpan Equipment'}
+              </button>
+            </div>
+            <div id="form-error" class="hide bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-3"></div>
+          </form>
+        `;
+        setTimeout(() => {
+          $('#eq-form').addEventListener('submit', (e) => { e.preventDefault(); submitEquipmentForm(isEdit); });
+          // Populate parent equipment dropdown awal & listen ke perubahan parent_unit
+          populateParentEquipmentDropdown(data.assigned_unit_id, data.parent_equipment_id, state.currentEquipmentId);
+          const unitSelect = $('#eq-form select[name="assigned_unit_id"]');
+          if (unitSelect) {
+            unitSelect.addEventListener('change', () => {
+              populateParentEquipmentDropdown(Number(unitSelect.value) || null, null, state.currentEquipmentId);
+            });
+          }
+        }, 0);
+      };
+
+      if (isEdit) {
+        fetchEquipment(state.currentEquipmentId).then(setup).catch(err => {
+          div.innerHTML = `<div class="bg-red-50 text-red-700 p-4 rounded">Gagal load: ${escapeHtml(err.message)}</div>`;
+        });
+      } else {
+        setup(null);
+      }
+      return div;
+    }
+
+    function renderFormField(f, value) {
+      const v = value == null ? '' : value;
+      const required = f.required ? 'required' : '';
+      const baseCls = 'w-full px-3 py-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-navy text-sm';
+      let input;
+      if (f.type === 'textarea') {
+        input = `<textarea name="${f.name}" rows="3" ${required} class="${baseCls}">${escapeHtml(v)}</textarea>`;
+      } else if (f.type === 'select') {
+        input = `<select name="${f.name}" ${required} class="${baseCls} bg-white">
+          ${f.required ? '' : '<option value="">—</option>'}
+          ${f.options.map(o => `<option value="${o}" ${v == o ? 'selected' : ''}>${o}</option>`).join('')}
+        </select>`;
+      } else if (f.type === 'select-parent-unit') {
+        input = `<select name="${f.name}" ${required} class="${baseCls} bg-white">
+          <option value="">— pilih —</option>
+          ${state.parentUnits.map(u => `<option value="${u.id}" ${v == u.id ? 'selected' : ''}>${escapeHtml(u.name)} (${u.type})</option>`).join('')}
+        </select>`;
+      } else if (f.type === 'select-category') {
+        input = `<select name="${f.name}" ${required} class="${baseCls} bg-white">
+          <option value="">— pilih —</option>
+          ${state.categories.map(c => `<option value="${c.id}" ${v == c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}
+        </select>`;
+      } else if (f.type === 'select-parent-equipment') {
+        // Dropdown ini diisi async setelah form di-render (pas kategori/unit dipilih).
+        // Render placeholder dulu, isi lewat populateParentEquipmentDropdown().
+        const selectedTag = v ? `data-current-value="${v}"` : '';
+        input = `<select name="${f.name}" ${selectedTag} class="${baseCls} bg-white">
+          <option value="">— tidak ada parent (top-level) —</option>
+        </select>
+        ${f.placeholder ? `<p class="text-xs text-slate-500 mt-1">${escapeHtml(f.placeholder)}</p>` : ''}`;
+      } else {
+        const extras = [
+          f.min != null ? `min="${f.min}"` : '',
+          f.max != null ? `max="${f.max}"` : '',
+          f.step ? `step="${f.step}"` : '',
+          f.placeholder ? `placeholder="${escapeHtml(f.placeholder)}"` : '',
+        ].join(' ');
+        input = `<input type="${f.type}" name="${f.name}" value="${escapeHtml(v)}" ${extras} ${required} class="${baseCls}" />`;
+      }
+      const isFull = f.type === 'textarea';
+      return `<div class="${isFull ? 'md:col-span-2' : ''}">
+        <label class="block text-xs font-semibold text-slate-700 mb-1">${escapeHtml(f.label)}</label>
+        ${input}
+      </div>`;
+    }
+
+    async function submitEquipmentForm(isEdit) {
+      const form = $('#eq-form');
+      const errBox = $('#form-error');
+      hide(errBox);
+      const payload = {};
+      EQUIPMENT_FIELDS.forEach(sec => sec.fields.forEach(f => {
+        const el = form.elements[f.name];
+        if (!el) return;
+        let v = el.value;
+        if (v === '') v = null;
+        else if (f.type === 'number' || f.type === 'select-parent-unit' || f.type === 'select-category') {
+          v = v == null ? null : Number(v);
+          if (Number.isNaN(v)) v = null;
+        }
+        // select-parent-equipment stays as UUID string (no conversion)
+        payload[f.name] = v;
+      }));
+
+      const submitBtn = form.querySelector('button[type=submit]');
+      submitBtn.disabled = true;
+      const originalLabel = submitBtn.innerHTML;
+      submitBtn.innerHTML = 'Menyimpan…';
+
+      try {
+        let saved;
+        if (isEdit) {
+          saved = await updateEquipment(state.currentEquipmentId, payload);
+          toast('Equipment berhasil di-update.', 'success');
+        } else {
+          saved = await createEquipment(payload);
+          toast('Equipment baru berhasil dibuat.', 'success');
+        }
+        setEquipmentView('detail', saved.id);
+      } catch (err) {
+        errBox.textContent = `Gagal: ${err.message}`;
+        show(errBox);
+        toast('Gagal menyimpan: ' + err.message, 'error');
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = originalLabel;
+      }
+    }
+
+    // ============================================================
+    // 9g. DELETE / MUTASI / MAINTENANCE / DOCUMENT ACTIONS
+    // ============================================================
+    async function confirmDeleteEquipment(id, tag) {
+      const ok = await confirmDialog({
+        title: 'Hapus Equipment?',
+        message: `Yakin mau hapus "${tag}"? Semua maintenance log, mutasi, dan dokumen terkait ikut terhapus. Aksi ini tidak bisa di-undo.`,
+        confirmText: 'Hapus',
+        danger: true,
+      });
+      if (!ok) return;
+      try {
+        await deleteEquipmentById(id);
+        toast('Equipment dihapus.', 'success');
+        setEquipmentView('list');
+      } catch (err) {
+        toast('Gagal hapus: ' + err.message, 'error');
+      }
+    }
+    window.confirmDeleteEquipment = confirmDeleteEquipment;
+
+    function openMutasiModal(equipmentId) {
+      const eq = window.__currentEq;
+      if (!eq || eq.id !== equipmentId) return;
+      // Guard: equipment tanpa unit gak bisa dimutasi
+      if (!eq.assigned_unit_id) {
+        toast('Equipment ini belum ter-assign ke unit manapun. Edit dulu untuk set unit.', 'warn');
+        return;
+      }
+      const options = state.parentUnits
+        .filter(u => u.id !== eq.assigned_unit_id)
+        .map(u => `<option value="${u.id}">${escapeHtml(u.name)} (${u.type})</option>`)
+        .join('');
+      openModal({
+        title: 'Mutasi Equipment',
+        maxWidth: 'max-w-md',
+        body: `
+          <form id="mutasi-form" class="space-y-3">
+            <div class="bg-slate-50 rounded p-3 text-sm">
+              <div><span class="text-slate-500">Equipment:</span> <span class="font-semibold">${escapeHtml(eq.tag_number)}</span></div>
+              <div><span class="text-slate-500">Dari unit:</span> <span class="font-semibold">${escapeHtml(getParentUnitName(eq.assigned_unit_id))}</span></div>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-slate-700 mb-1">Pindah ke Unit *</label>
+              <select name="to_unit_id" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">
+                <option value="">— pilih —</option>${options}
+              </select>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-slate-700 mb-1">Tanggal Mutasi *</label>
+              <input type="date" name="mutation_date" required value="${new Date().toISOString().slice(0,10)}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-slate-700 mb-1">Alasan</label>
+              <textarea name="reason" rows="2" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" placeholder="opsional"></textarea>
+            </div>
+          </form>
+        `,
+        footer: `
+          <button id="mutasi-cancel-btn" onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm">Batal</button>
+          <button id="mutasi-submit-btn" onclick="submitMutasi('${equipmentId}', ${eq.assigned_unit_id})" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy-700 text-white text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed">Mutasi Sekarang</button>
+        `,
+      });
+    }
+    window.openMutasiModal = openMutasiModal;
+
+    async function submitMutasi(equipment_id, from_unit_id) {
+      const form = document.getElementById('mutasi-form');
+      const submitBtn = document.getElementById('mutasi-submit-btn');
+      const cancelBtn = document.getElementById('mutasi-cancel-btn');
+      const to_unit_id = Number(form.elements.to_unit_id.value);
+      const mutation_date = form.elements.mutation_date.value;
+      const reason = form.elements.reason.value || null;
+      if (!to_unit_id) { toast('Pilih unit tujuan dulu.', 'warn'); return; }
+      if (to_unit_id === from_unit_id) { toast('Unit tujuan harus berbeda dengan unit asal.', 'warn'); return; }
+
+      // Cek apakah equipment ini punya children — kalau iya, tanya cascade
+      let children = [];
+      try { children = await fetchChildren(equipment_id); } catch {}
+      let cascade = false;
+      if (children.length > 0) {
+        closeModal();
+        const choice = await new Promise((resolve) => {
+          const id = '__cas_' + Date.now();
+          openModal({
+            title: `Equipment ini punya ${children.length} komponen`,
+            maxWidth: 'max-w-md',
+            body: `
+              <p class="text-sm text-slate-700 mb-3">Equipment ini adalah <b>container</b> yang punya komponen anak:</p>
+              <ul class="text-sm text-slate-600 bg-slate-50 rounded p-3 max-h-40 overflow-y-auto mb-3 list-disc list-inside">
+                ${children.map(c => `<li><b>${escapeHtml(c.tag_number)}</b> — ${escapeHtml(c.nama_equipment)}</li>`).join('')}
+              </ul>
+              <p class="text-sm text-slate-700">Apa yang mau dilakukan ke komponen ini saat mutasi?</p>
+            `,
+            footer: `
+              <button onclick="closeModal(); window['${id}']('cancel');" class="px-3 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batalkan Mutasi</button>
+              <button onclick="closeModal(); window['${id}']('detach');" class="px-3 py-2 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-800 text-sm font-medium">Detach saja (komponen tetap di unit lama)</button>
+              <button onclick="closeModal(); window['${id}']('cascade');" class="px-3 py-2 rounded-lg bg-navy hover:bg-navy-700 text-white text-sm font-semibold">Cascade — pindah semua</button>
+            `,
+            dismissable: false,
+          });
+          window[id] = (v) => { delete window[id]; resolve(v); };
+        });
+
+        if (choice === 'cancel') return;
+        cascade = (choice === 'cascade');
+      }
+
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Memproses…'; }
+      if (cancelBtn) cancelBtn.disabled = true;
+      try {
+        // Mutasi parent
+        await createMutation({ equipment_id, from_unit_id, to_unit_id, mutation_date, reason });
+
+        // Handle children
+        if (children.length > 0) {
+          if (cascade) {
+            // Pindahkan semua children ke unit tujuan + log mutation
+            for (const child of children) {
+              await createMutation({
+                equipment_id: child.id,
+                from_unit_id,
+                to_unit_id,
+                mutation_date,
+                reason: `[Cascade] Ikut parent ${escapeHtml(window.__currentEq?.tag_number || '')} — ${reason || ''}`.trim(),
+              });
+            }
+          } else {
+            // Detach: lepas parent_equipment_id dari children, tapi tetap di unit lama
+            const { error } = await state.supabase.from('equipment').update({
+              parent_equipment_id: null,
+              updated_by: state.user.id,
+            }).in('id', children.map(c => c.id));
+            if (error) throw new Error('Detach children gagal: ' + error.message);
+          }
+        }
+
+        toast(`Mutasi berhasil${cascade ? ' (cascade ' + children.length + ' komponen)' : children.length > 0 ? ' (komponen di-detach)' : ''} — lihat tab History.`, 'success');
+        closeModal();
+        setEquipmentView('detail', equipment_id, 'history');
+      } catch (err) {
+        toast('Gagal mutasi: ' + err.message, 'error');
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Mutasi Sekarang'; }
+        if (cancelBtn) cancelBtn.disabled = false;
+      }
+    }
+    window.submitMutasi = submitMutasi;
+
+    // ============================================================
+    // 9g.2. PENGGANTIAN EQUIPMENT (Replace Flow)
+    // Yang lama → pindah ke unit Independent, status Standby, tipe Mobile-Backup.
+    // Yang baru → menempati posisi/unit yang ditinggalkan.
+    // ============================================================
+    // State helper buat replace modal — track filter Mobile-Backup only
+    state.replaceShowPermanent = false;
+    state.replaceCandidates = [];
+
+    async function openReplaceModal(equipmentId) {
+      const eq = window.__currentEq;
+      if (!eq || eq.id !== equipmentId) return;
+
+      // GUARD 1: parent unit "Independent" harus ada
+      const independentUnit = state.parentUnits.find(u => u.name === 'Independent');
+      if (!independentUnit) {
+        toast('Parent unit "Independent" tidak ditemukan di database.', 'error');
+        return;
+      }
+      // GUARD 2: equipment harus punya unit assigned
+      if (!eq.assigned_unit_id) {
+        toast('Equipment ini belum ter-assign ke unit. Edit dulu sebelum diganti.', 'warn');
+        return;
+      }
+      // GUARD 3: kalau equipment udah di Independent — gak masuk akal diganti
+      if (eq.assigned_unit_id === independentUnit.id) {
+        toast('Equipment ini sudah di pool Independent (backup). Pakai Mutasi kalau mau pindah ke rig.', 'warn');
+        return;
+      }
+      // GUARD 4: harus punya kategori
+      if (!eq.kategori_id) {
+        toast('Equipment ini belum punya kategori. Edit dulu sebelum diganti.', 'warn');
+        return;
+      }
+
+      state.replaceShowPermanent = false;
+      await loadReplaceCandidates(eq);
+      renderReplaceModal(eq, independentUnit);
+    }
+    window.openReplaceModal = openReplaceModal;
+
+    async function loadReplaceCandidates(eq) {
+      try {
+        let q = state.supabase
+          .from('equipment')
+          .select('id, tag_number, nama_equipment, assigned_unit_id, status_operasi, tipe_kepemilikan, brand, model')
+          .eq('kategori_id', eq.kategori_id)
+          .neq('id', eq.id)
+          .neq('status_operasi', 'Scrap');
+        if (!state.replaceShowPermanent) q = q.eq('tipe_kepemilikan', 'Mobile-Backup');
+        q = q.order('tipe_kepemilikan', { ascending: false }).order('tag_number');
+        const { data, error } = await q;
+        if (error) throw error;
+        state.replaceCandidates = data || [];
+      } catch (err) {
+        toast('Gagal load kandidat: ' + err.message, 'error');
+        state.replaceCandidates = [];
+      }
+    }
+
+    async function toggleReplacePermanent(eqId) {
+      state.replaceShowPermanent = !state.replaceShowPermanent;
+      const eq = window.__currentEq;
+      if (!eq || eq.id !== eqId) return;
+      await loadReplaceCandidates(eq);
+      const selectEl = document.querySelector('#replace-form select[name="new_id"]');
+      const noteEl = document.querySelector('#replace-candidate-note');
+      const toggleEl = document.querySelector('#replace-permanent-toggle');
+      if (selectEl) selectEl.innerHTML = buildCandidateOptions();
+      if (noteEl) noteEl.innerHTML = candidateNote(eq);
+      if (toggleEl) toggleEl.checked = state.replaceShowPermanent;
+    }
+    window.toggleReplacePermanent = toggleReplacePermanent;
+
+    function buildCandidateOptions() {
+      if (state.replaceCandidates.length === 0) {
+        const filterNote = state.replaceShowPermanent ? '' : ' (Mobile-Backup saja)';
+        return `<option value="">-- Tidak ada kandidat${filterNote} --</option>`;
+      }
+      return '<option value="">— pilih pengganti —</option>' + state.replaceCandidates.map(c => {
+        const note = c.tipe_kepemilikan === 'Mobile-Backup' ? ' [Backup]' : ' [Permanent]';
+        const loc = c.assigned_unit_id ? ` @ ${getParentUnitName(c.assigned_unit_id)}` : ' @ belum ter-assign';
+        return `<option value="${c.id}">${escapeHtml(c.tag_number)} — ${escapeHtml(c.nama_equipment)}${note}${escapeHtml(loc)}</option>`;
+      }).join('');
+    }
+
+    function candidateNote(eq) {
+      const total = state.replaceCandidates.length;
+      const mode = state.replaceShowPermanent ? 'semua (Backup + Permanent)' : 'Mobile-Backup saja';
+      return `${total} kandidat kategori "${escapeHtml(getCategoryName(eq.kategori_id))}" — ${mode}.`;
+    }
+
+    function renderReplaceModal(eq, independentUnit) {
+      const oldUnitName = getParentUnitName(eq.assigned_unit_id);
+      const today = new Date().toISOString().slice(0, 10);
+      openModal({
+        title: 'Ganti Equipment',
+        maxWidth: 'max-w-xl',
+        body: `
+          <div class="space-y-3">
+            <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm">
+              <div class="font-bold text-amber-900 mb-1">Equipment yang akan diganti:</div>
+              <div class="text-amber-800">
+                <span class="font-semibold">${escapeHtml(eq.tag_number)}</span> — ${escapeHtml(eq.nama_equipment)}
+              </div>
+              <div class="text-xs text-amber-700 mt-1">
+                Kategori: ${escapeHtml(getCategoryName(eq.kategori_id))} • Saat ini di: <span class="font-semibold">${escapeHtml(oldUnitName)}</span>
+              </div>
+            </div>
+
+            <form id="replace-form" class="space-y-3">
+              <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1">Equipment Pengganti *</label>
+                <select name="new_id" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">
+                  ${buildCandidateOptions()}
+                </select>
+                <p id="replace-candidate-note" class="text-xs text-slate-500 mt-1">${candidateNote(eq)}</p>
+                <label class="flex items-center gap-2 mt-2 text-xs text-slate-600 cursor-pointer">
+                  <input type="checkbox" id="replace-permanent-toggle" ${state.replaceShowPermanent ? 'checked' : ''} onchange="toggleReplacePermanent('${eq.id}')" class="rounded" />
+                  <span>Tampilkan juga equipment <b>Permanent</b> (hati-hati: bisa "mencuri" dari rig lain)</span>
+                </label>
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-sm font-semibold text-slate-700 mb-1">Tanggal Penggantian *</label>
+                  <input type="date" name="replace_date" required value="${today}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label class="block text-sm font-semibold text-slate-700 mb-1">Status Equipment Lama</label>
+                  <select name="old_status" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">
+                    <option value="Standby" selected>Standby (default)</option>
+                    <option value="Repair">Repair</option>
+                    <option value="Down">Down</option>
+                    <option value="Scrap">Scrap</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1">Catatan / Alasan</label>
+                <textarea name="reason" rows="2" placeholder="contoh: Equipment lama overhaul, sementara pakai backup..." class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"></textarea>
+              </div>
+
+              <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-800">
+                <div class="font-bold mb-1">📋 Yang akan terjadi:</div>
+                <ul class="list-disc list-inside space-y-0.5">
+                  <li><span class="font-semibold">${escapeHtml(eq.tag_number)}</span> → pindah ke <span class="font-semibold">Independent</span>, tipe <span class="font-semibold">Mobile-Backup</span>, status sesuai pilihan</li>
+                  <li><span class="font-semibold">Equipment pengganti</span> → pindah ke <span class="font-semibold">${escapeHtml(oldUnitName)}</span>, tipe <span class="font-semibold">Permanent</span>, status <span class="font-semibold">Aktif</span></li>
+                  <li>Dua entry mutation_log dicatat untuk audit trail</li>
+                </ul>
+              </div>
+            </form>
+          </div>
+        `,
+        footer: `
+          <button id="replace-cancel-btn" onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
+          <button id="replace-submit-btn" onclick="submitReplace('${eq.id}', ${eq.assigned_unit_id}, ${independentUnit.id})" class="px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed">🔄 Lakukan Penggantian</button>
+        `,
+      });
+    }
+
+    async function submitReplace(oldEquipmentId, oldUnitId, independentUnitId) {
+      const form = document.getElementById('replace-form');
+      const submitBtn = document.getElementById('replace-submit-btn');
+      const cancelBtn = document.getElementById('replace-cancel-btn');
+      const newId = form.elements.new_id.value;
+      const replace_date = form.elements.replace_date.value;
+      const old_status = form.elements.old_status.value || 'Standby';
+      const reason = form.elements.reason.value || null;
+
+      // VALIDASI input
+      if (!newId)         { toast('Pilih equipment pengganti dulu.', 'warn'); return; }
+      if (!replace_date)  { toast('Tanggal wajib diisi.', 'warn'); return; }
+      if (newId === oldEquipmentId) { toast('Equipment pengganti tidak boleh sama dengan equipment lama.', 'warn'); return; }
+      if (!oldUnitId)     { toast('Equipment lama belum punya unit. Operasi dibatalkan.', 'error'); return; }
+      if (oldUnitId === independentUnitId) { toast('Equipment lama sudah di Independent. Operasi dibatalkan.', 'error'); return; }
+
+      // Konfirmasi double (extra safety)
+      const ok = await confirmDialog({
+        title: 'Konfirmasi Penggantian',
+        message: `Yakin mau lakukan penggantian ini? 2 equipment akan di-update + 2 entry log akan dibuat. Aksi ini tidak otomatis bisa di-undo.`,
+        confirmText: 'Ya, Lanjutkan',
+      });
+      if (!ok) return;
+
+      // Modal konfirmasi nutup modal replace, kita harus buka lagi atau langsung jalan?
+      // Karena confirmDialog override modal, replace modal udah ke-close.
+      // Disable button gak bisa lagi — langsung kerja saja.
+
+      // Fetch ulang equipment baru (data fresh — antisipasi race condition)
+      let newEq;
+      try {
+        const { data, error } = await state.supabase.from('equipment')
+          .select('id, tag_number, nama_equipment, assigned_unit_id, status_operasi').eq('id', newId).single();
+        if (error) throw error;
+        newEq = data;
+      } catch (err) {
+        toast('Gagal load equipment pengganti: ' + err.message, 'error');
+        return;
+      }
+
+      // Re-verify: newEq jangan dalam status Scrap (mungkin baru di-Scrap antara load modal & submit)
+      if (newEq.status_operasi === 'Scrap') {
+        toast(`Equipment ${newEq.tag_number} berstatus Scrap. Pilih yang lain.`, 'warn');
+        return;
+      }
+
+      const oldEq = window.__currentEq;
+      const oldUnitName = getParentUnitName(oldUnitId);
+
+      // 4 operasi
+      try {
+        // 1. Update equipment lama
+        const { error: e1 } = await state.supabase.from('equipment').update({
+          assigned_unit_id: independentUnitId,
+          status_operasi: old_status,
+          tipe_kepemilikan: 'Mobile-Backup',
+          updated_by: state.user.id,
+        }).eq('id', oldEquipmentId);
+        if (e1) throw new Error('Update equipment lama gagal: ' + e1.message);
+
+        // 2. Update equipment baru
+        const { error: e2 } = await state.supabase.from('equipment').update({
+          assigned_unit_id: oldUnitId,
+          status_operasi: 'Aktif',
+          tipe_kepemilikan: 'Permanent',
+          updated_by: state.user.id,
+        }).eq('id', newId);
+        if (e2) throw new Error('Update equipment baru gagal: ' + e2.message);
+
+        // 3. Mutation log untuk equipment lama
+        const reasonOld = `[Penggantian] Diganti oleh ${newEq.tag_number}. Status → ${old_status}.${reason ? ' — ' + reason : ''}`.trim();
+        const { error: e3 } = await state.supabase.from('mutation_log').insert({
+          equipment_id: oldEquipmentId,
+          from_unit_id: oldUnitId,
+          to_unit_id: independentUnitId,
+          mutation_date: replace_date,
+          reason: reasonOld,
+          created_by: state.user.id,
+        });
+        if (e3) throw new Error('Log mutasi lama gagal: ' + e3.message);
+
+        // 4. Mutation log untuk equipment baru
+        const reasonNew = `[Penggantian] Menggantikan ${oldEq.tag_number} di ${oldUnitName}.${reason ? ' — ' + reason : ''}`.trim();
+        const { error: e4 } = await state.supabase.from('mutation_log').insert({
+          equipment_id: newId,
+          from_unit_id: newEq.assigned_unit_id,
+          to_unit_id: oldUnitId,
+          mutation_date: replace_date,
+          reason: reasonNew,
+          created_by: state.user.id,
+        });
+        if (e4) throw new Error('Log mutasi baru gagal: ' + e4.message);
+
+        toast(`Penggantian berhasil. ${newEq.tag_number} aktif di ${oldUnitName}. Lihat tab History.`, 'success');
+        // Langsung pindah ke equipment BARU's History tab
+        setEquipmentView('detail', newId, 'history');
+      } catch (err) {
+        toast('Gagal: ' + err.message + ' — Cek manual via SQL Editor.', 'error');
+        console.error('Replace failed:', err);
+      }
+    }
+    window.submitReplace = submitReplace;
+
+    // ============================================================
+    // 9g.3. PINJAM-MEMINJAM EQUIPMENT (Loan Flow)
+    // Equipment yang rusak pinjam pengganti dari unit lain.
+    // Lender equipment: tetap milik unit asal, pindah sementara.
+    // Borrower equipment: tetap di unit-nya, status jadi Repair.
+    // ============================================================
+    async function openLoanModal(borrowerEquipmentId) {
+      const borrower = window.__currentEq;
+      if (!borrower || borrower.id !== borrowerEquipmentId) return;
+
+      // Guards
+      if (!borrower.assigned_unit_id) {
+        toast('Equipment ini belum ter-assign ke unit.', 'warn');
+        return;
+      }
+      if (!borrower.kategori_id) {
+        toast('Equipment ini belum punya kategori.', 'warn');
+        return;
+      }
+
+      // Fetch kandidat lender: kategori sama, status Aktif, unit BEDA, gak lagi dipinjam
+      let candidates = [];
+      try {
+        const { data, error } = await state.supabase
+          .from('equipment')
+          .select('id, tag_number, nama_equipment, assigned_unit_id, status_operasi, tipe_kepemilikan')
+          .eq('kategori_id', borrower.kategori_id)
+          .eq('status_operasi', 'Aktif')
+          .neq('id', borrowerEquipmentId)
+          .neq('assigned_unit_id', borrower.assigned_unit_id)
+          .order('tipe_kepemilikan', { ascending: false })
+          .order('tag_number');
+        if (error) throw error;
+        // Filter: pastikan gak lagi dipinjamkan (cek loan_log)
+        const candidateIds = (data || []).map(c => c.id);
+        if (candidateIds.length > 0) {
+          const { data: activeLoans } = await state.supabase
+            .from('loan_log')
+            .select('lender_equipment_id')
+            .in('lender_equipment_id', candidateIds)
+            .eq('status', 'active');
+          const lentIds = new Set((activeLoans || []).map(l => l.lender_equipment_id));
+          candidates = (data || []).filter(c => !lentIds.has(c.id));
+        }
+      } catch (err) {
+        toast('Gagal load kandidat: ' + err.message, 'error');
+        return;
+      }
+
+      const borrowerUnitName = getParentUnitName(borrower.assigned_unit_id);
+      const today = new Date().toISOString().slice(0, 10);
+
+      const candidateOpts = candidates.length === 0
+        ? '<option value="">-- Tidak ada kandidat (kategori sama, status Aktif, unit lain, tidak sedang dipinjamkan) --</option>'
+        : '<option value="">— pilih equipment yang dipinjam —</option>' + candidates.map(c => {
+            const note = c.tipe_kepemilikan === 'Mobile-Backup' ? ' [Backup]' : '';
+            return `<option value="${c.id}">${escapeHtml(c.tag_number)} — ${escapeHtml(c.nama_equipment)}${note} @ ${escapeHtml(getParentUnitName(c.assigned_unit_id))}</option>`;
+          }).join('');
+
+      openModal({
+        title: 'Pinjam Equipment Pengganti',
+        maxWidth: 'max-w-xl',
+        body: `
+          <div class="space-y-3">
+            <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm">
+              <div class="font-bold text-amber-900 mb-1">Equipment yang butuh pengganti:</div>
+              <div class="text-amber-800">
+                <span class="font-semibold">${escapeHtml(borrower.tag_number)}</span> — ${escapeHtml(borrower.nama_equipment)}
+              </div>
+              <div class="text-xs text-amber-700 mt-1">
+                Kategori: ${escapeHtml(getCategoryName(borrower.kategori_id))} • Berada di: <span class="font-semibold">${escapeHtml(borrowerUnitName)}</span> • Status: ${escapeHtml(borrower.status_operasi)}
+              </div>
+            </div>
+
+            <form id="loan-form" class="space-y-3">
+              <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1">Equipment yang Dipinjam *</label>
+                <select name="lender_id" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">
+                  ${candidateOpts}
+                </select>
+                <p class="text-xs text-slate-500 mt-1">${candidates.length} kandidat kategori "${escapeHtml(getCategoryName(borrower.kategori_id))}" — status Aktif & unit berbeda.</p>
+              </div>
+
+              <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1">Tanggal Pinjam *</label>
+                <input type="date" name="loan_date" required value="${today}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+              </div>
+
+              <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1">Alasan / Catatan</label>
+                <textarea name="reason" rows="2" placeholder="contoh: ACC-100A rusak segel, perlu pengganti sementara sambil tunggu spare part" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"></textarea>
+              </div>
+
+              <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-800">
+                <div class="font-bold mb-1">📋 Yang akan terjadi:</div>
+                <ul class="list-disc list-inside space-y-0.5">
+                  <li>Equipment yang dipinjam → pindah <b>sementara</b> ke <b>${escapeHtml(borrowerUnitName)}</b></li>
+                  <li><b>${escapeHtml(borrower.tag_number)}</b> → status diubah jadi <b>Repair</b> (kalau belum)</li>
+                  <li>Entry loan_log dibuat dengan status <b>active</b></li>
+                  <li>Nanti tinggal klik <b>↩ Kembalikan Pinjaman</b> untuk balikin equipment ke pemilik</li>
+                </ul>
+              </div>
+            </form>
+          </div>
+        `,
+        footer: `
+          <button id="loan-cancel-btn" onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
+          <button id="loan-submit-btn" onclick="submitLoan('${borrowerEquipmentId}')" class="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed">🤝 Pinjam Sekarang</button>
+        `,
+      });
+    }
+    window.openLoanModal = openLoanModal;
+
+    async function submitLoan(borrowerEquipmentId) {
+      const form = document.getElementById('loan-form');
+      const submitBtn = document.getElementById('loan-submit-btn');
+      const cancelBtn = document.getElementById('loan-cancel-btn');
+      const lender_id = form.elements.lender_id.value;
+      const loan_date = form.elements.loan_date.value;
+      const reason = form.elements.reason.value || null;
+
+      if (!lender_id) { toast('Pilih equipment yang dipinjam dulu.', 'warn'); return; }
+      if (!loan_date) { toast('Tanggal pinjam wajib diisi.', 'warn'); return; }
+
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Memproses…'; }
+      if (cancelBtn) cancelBtn.disabled = true;
+
+      try {
+        await createLoan({
+          lender_equipment_id: lender_id,
+          borrower_equipment_id: borrowerEquipmentId,
+          loan_date, reason,
+        });
+        toast('Pinjaman berhasil dicatat.', 'success');
+        closeModal();
+        setEquipmentView('detail', borrowerEquipmentId, 'history');
+      } catch (err) {
+        toast('Gagal: ' + err.message, 'error');
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = '🤝 Pinjam Sekarang'; }
+        if (cancelBtn) cancelBtn.disabled = false;
+      }
+    }
+    window.submitLoan = submitLoan;
+
+    async function openReturnLoanModal(loanId) {
+      let loan;
+      try {
+        const { data, error } = await state.supabase.from('loan_log').select('*').eq('id', loanId).single();
+        if (error) throw error;
+        loan = data;
+      } catch (err) {
+        toast('Gagal load loan: ' + err.message, 'error');
+        return;
+      }
+      if (loan.status !== 'active') {
+        toast('Pinjaman ini sudah dikembalikan.', 'warn');
+        return;
+      }
+
+      // Fetch info equipment terkait
+      const [lenderResp, borrowerResp] = await Promise.all([
+        state.supabase.from('equipment').select('id, tag_number, nama_equipment').eq('id', loan.lender_equipment_id).maybeSingle(),
+        loan.borrower_equipment_id
+          ? state.supabase.from('equipment').select('id, tag_number, nama_equipment, status_operasi').eq('id', loan.borrower_equipment_id).maybeSingle()
+          : Promise.resolve({ data: null }),
+      ]);
+      const lenderEq = lenderResp.data;
+      const borrowerEq = borrowerResp.data;
+      const today = new Date().toISOString().slice(0, 10);
+      const lenderUnitName = getParentUnitName(loan.lender_unit_id);
+
+      openModal({
+        title: 'Kembalikan Pinjaman',
+        maxWidth: 'max-w-xl',
+        body: `
+          <div class="space-y-3">
+            <div class="bg-green-50 border border-green-200 rounded-lg p-3 text-sm">
+              <div class="font-bold text-green-900 mb-1">Detail Pinjaman:</div>
+              <div class="text-green-800 text-sm">
+                <div><b>Yang dipinjam:</b> ${lenderEq ? escapeHtml(lenderEq.tag_number) + ' — ' + escapeHtml(lenderEq.nama_equipment) : '(equipment terhapus)'}</div>
+                <div><b>Kembali ke unit:</b> ${escapeHtml(lenderUnitName)}</div>
+                ${borrowerEq ? `<div><b>Yang digantikan:</b> ${escapeHtml(borrowerEq.tag_number)} — ${escapeHtml(borrowerEq.nama_equipment)}</div>` : ''}
+                <div class="text-xs text-green-700 mt-1">Dipinjam sejak ${fmtDate(loan.loan_date)} (${-daysUntil(loan.loan_date)} hari lalu)</div>
+              </div>
+            </div>
+
+            <form id="return-form" class="space-y-3">
+              <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1">Tanggal Pengembalian *</label>
+                <input type="date" name="return_date" required value="${today}" min="${loan.loan_date}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+              </div>
+
+              ${borrowerEq ? `
+              <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1">Status ${escapeHtml(borrowerEq.tag_number)} Setelah Dikembalikan</label>
+                <select name="borrower_status" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">
+                  <option value="Aktif">Aktif (sudah selesai repair)</option>
+                  <option value="Repair" selected>Repair (masih dalam perbaikan)</option>
+                  <option value="Down">Down (belum bisa diperbaiki)</option>
+                  <option value="Scrap">Scrap (tidak bisa dipakai lagi)</option>
+                </select>
+                <p class="text-xs text-slate-500 mt-1">Status equipment yang tadinya butuh pengganti — sesuaikan dengan kondisi setelah pinjaman dikembalikan.</p>
+              </div>` : ''}
+
+              <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1">Catatan Pengembalian</label>
+                <textarea name="return_notes" rows="2" placeholder="contoh: Spare part baru sudah dipasang di ACC-100A, equipment pinjaman dikembalikan" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"></textarea>
+              </div>
+
+              <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-800">
+                <div class="font-bold mb-1">📋 Yang akan terjadi:</div>
+                <ul class="list-disc list-inside space-y-0.5">
+                  <li>${lenderEq ? `<b>${escapeHtml(lenderEq.tag_number)}</b>` : 'Equipment yang dipinjam'} → pindah balik ke <b>${escapeHtml(lenderUnitName)}</b></li>
+                  ${borrowerEq ? `<li><b>${escapeHtml(borrowerEq.tag_number)}</b> → status sesuai pilihan</li>` : ''}
+                  <li>Entry loan_log update jadi status <b>returned</b></li>
+                </ul>
+              </div>
+            </form>
+          </div>
+        `,
+        footer: `
+          <button id="return-cancel-btn" onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
+          <button id="return-submit-btn" onclick="submitReturnLoan('${loanId}')" class="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed">↩️ Kembalikan</button>
+        `,
+      });
+    }
+    window.openReturnLoanModal = openReturnLoanModal;
+
+    async function submitReturnLoan(loanId) {
+      const form = document.getElementById('return-form');
+      const submitBtn = document.getElementById('return-submit-btn');
+      const cancelBtn = document.getElementById('return-cancel-btn');
+      const return_date = form.elements.return_date.value;
+      const borrower_new_status = form.elements.borrower_status ? form.elements.borrower_status.value : null;
+      const return_notes = form.elements.return_notes.value || null;
+
+      if (!return_date) { toast('Tanggal pengembalian wajib diisi.', 'warn'); return; }
+
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Memproses…'; }
+      if (cancelBtn) cancelBtn.disabled = true;
+
+      try {
+        await returnLoan({ loan_id: loanId, return_date, borrower_new_status, return_notes });
+        toast('Pinjaman berhasil dikembalikan.', 'success');
+        closeModal();
+        // Refresh halaman detail
+        if (state.currentEquipmentId) setEquipmentView('detail', state.currentEquipmentId, 'history');
+      } catch (err) {
+        toast('Gagal: ' + err.message, 'error');
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = '↩️ Kembalikan'; }
+        if (cancelBtn) cancelBtn.disabled = false;
+      }
+    }
+    window.submitReturnLoan = submitReturnLoan;
+
+    function openMaintenanceModal(equipmentId) {
+      openModal({
+        title: 'Tambah Maintenance Log',
+        maxWidth: 'max-w-md',
+        body: `
+          <form id="maint-form" class="space-y-3">
+            <div>
+              <label class="block text-sm font-medium text-slate-700 mb-1">Tanggal Maintenance *</label>
+              <input type="date" name="maintenance_date" required value="${new Date().toISOString().slice(0,10)}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-slate-700 mb-1">Tipe Maintenance</label>
+              <input type="text" name="maintenance_type" placeholder="misal: Service rutin, Repair, Overhaul" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-slate-700 mb-1">PIC Mechanic</label>
+              <input type="text" name="pic_mechanic" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-slate-700 mb-1">Catatan</label>
+              <textarea name="notes" rows="3" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"></textarea>
+            </div>
+          </form>
+        `,
+        footer: `
+          <button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm">Batal</button>
+          <button onclick="submitMaintenance('${equipmentId}')" class="px-4 py-2 rounded-lg bg-safety hover:bg-safety-700 text-white text-sm font-semibold">Simpan</button>
+        `,
+      });
+    }
+    window.openMaintenanceModal = openMaintenanceModal;
+
+    async function submitMaintenance(equipment_id) {
+      const f = document.getElementById('maint-form');
+      const payload = {
+        equipment_id,
+        maintenance_date: f.elements.maintenance_date.value,
+        maintenance_type: f.elements.maintenance_type.value || null,
+        pic_mechanic: f.elements.pic_mechanic.value || null,
+        notes: f.elements.notes.value || null,
+      };
+      if (!payload.maintenance_date) { toast('Tanggal wajib diisi.', 'warn'); return; }
+      try {
+        await createMaintenanceLog(payload);
+        toast('Maintenance log ditambahkan.', 'success');
+        closeModal();
+        if (window.__currentEq?.id === equipment_id) {
+          renderDetailTab(window.__currentEq);
+        }
+      } catch (err) {
+        toast('Gagal simpan: ' + err.message, 'error');
+      }
+    }
+    window.submitMaintenance = submitMaintenance;
+
+    // Kompresi foto sebelum upload — max 1920px, JPEG quality 0.85
+    // Target: file < 500KB, kualitas masih jelas buat dokumentasi equipment.
+    async function compressImage(file, { maxDim = 1920, quality = 0.85 } = {}) {
+      if (!file.type.startsWith('image/')) return file;
+      // Skip kompresi untuk GIF / SVG / HEIC — canvas gak bisa handle
+      if (/^image\/(gif|svg\+xml|heic|heif)/.test(file.type)) return file;
+      let bitmap;
+      try { bitmap = await createImageBitmap(file); } catch { return file; }
+      let { width, height } = bitmap;
+      const ratio = Math.min(maxDim / width, maxDim / height, 1);
+      width = Math.round(width * ratio);
+      height = Math.round(height * ratio);
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(bitmap, 0, 0, width, height);
+      bitmap.close?.();
+      const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', quality));
+      if (!blob || blob.size >= file.size) return file; // kalau hasil kompresi lebih besar, pakai original
+      const newName = file.name.replace(/\.[^.]+$/, '') + '.jpg';
+      return new File([blob], newName, { type: 'image/jpeg' });
+    }
+
+    function fmtBytes(n) {
+      if (n < 1024) return n + ' B';
+      if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+      return (n / 1048576).toFixed(2) + ' MB';
+    }
+
+    async function handleDocUpload(event, equipmentId) {
+      const rawFiles = Array.from(event.target.files || []);
+      if (!rawFiles.length) return;
+      const status = document.getElementById('doc-upload-status');
+      const isImage = (f) => f.type.startsWith('image/');
+      let okCount = 0;
+      for (const raw of rawFiles) {
+        // Kompresi kalau foto
+        status.innerHTML = `<div class="bg-blue-50 text-blue-700 p-2 rounded text-sm mb-2">${isImage(raw) ? '🖼️ Mengompres' : '📎 Memuat'} ${escapeHtml(raw.name)}…</div>`;
+        const file = isImage(raw) ? await compressImage(raw) : raw;
+        const savedNote = isImage(raw) && file.size < raw.size
+          ? ` (${fmtBytes(raw.size)} → ${fmtBytes(file.size)})`
+          : '';
+        const bucket = isImage(file) ? 'equipment-photos' : 'equipment-documents';
+        const ext = (file.name.split('.').pop() || 'bin').toLowerCase();
+        const path = `${equipmentId}/${Date.now()}-${Math.random().toString(36).slice(2,8)}.${ext}`;
+        try {
+          status.innerHTML = `<div class="bg-blue-50 text-blue-700 p-2 rounded text-sm mb-2">Mengupload ${escapeHtml(file.name)}${savedNote}…</div>`;
+          await uploadFile(bucket, path, file);
+          const file_url = isImage(file) ? getPublicUrl(bucket, path) : `${bucket}/${path}`;
+          await createDocumentRecord({
+            equipment_id: equipmentId,
+            file_name: raw.name, // pakai nama asli, bukan .jpg hasil kompresi
+            file_url,
+            file_type: file.type || null,
+          });
+          okCount++;
+          if (savedNote) toast(`Foto ${raw.name} dikompres${savedNote}`, 'info');
+        } catch (err) {
+          toast(`Gagal upload ${raw.name}: ${err.message}`, 'error');
+        }
+      }
+      status.innerHTML = '';
+      event.target.value = '';
+      if (okCount > 0) {
+        toast(`${okCount} file ter-upload.`, 'success');
+        if (window.__currentEq?.id === equipmentId) {
+          const c = document.getElementById('detail-tab-content');
+          if (c) renderDokumenTab(window.__currentEq, c);
+        }
+      }
+    }
+    window.handleDocUpload = handleDocUpload;
+
+    async function openDoc(fileUrl, fileName) {
+      try {
+        let url = fileUrl;
+        if (!url.startsWith('http')) {
+          // private bucket — fileUrl format: "bucket/path"
+          const [bucket, ...rest] = url.split('/');
+          url = await getSignedUrl(bucket, rest.join('/'), 3600);
+        }
+        window.open(url, '_blank');
+      } catch (err) {
+        toast('Gagal buka dokumen: ' + err.message, 'error');
+      }
+    }
+    window.openDoc = openDoc;
+
+    async function confirmDeleteDoc(docId, fileUrl, fileName) {
+      const ok = await confirmDialog({ title: 'Hapus Dokumen?', message: `Hapus "${fileName}"?`, confirmText: 'Hapus', danger: true });
+      if (!ok) return;
+      try {
+        // delete file from storage (best effort)
+        try {
+          if (fileUrl.startsWith('http')) {
+            const idx = fileUrl.indexOf('/equipment-photos/');
+            if (idx > -1) await deleteStorageFile('equipment-photos', fileUrl.slice(idx + '/equipment-photos/'.length));
+          } else {
+            const [bucket, ...rest] = fileUrl.split('/');
+            await deleteStorageFile(bucket, rest.join('/'));
+          }
+        } catch (storageErr) {
+          console.warn('Storage delete failed (continuing):', storageErr.message);
+        }
+        await deleteDocumentRecord(docId);
+        toast('Dokumen dihapus.', 'success');
+        if (window.__currentEq) {
+          const c = document.getElementById('detail-tab-content');
+          if (c) renderDokumenTab(window.__currentEq, c);
+        }
+      } catch (err) {
+        toast('Gagal hapus: ' + err.message, 'error');
+      }
+    }
+    window.confirmDeleteDoc = confirmDeleteDoc;
+
+    // ============================================================
+    // 9h. SETTINGS ACTIONS
+    // ============================================================
+    async function saveSettings() {
+      const name = $('#settings-name').value.trim();
+      const tg = $('#settings-tg').value.trim();
+      try {
+        const { data, error } = await state.supabase.from('profiles')
+          .update({ full_name: name || null, telegram_user_id: tg || null })
+          .eq('id', state.user.id).select().single();
+        if (error) throw error;
+        state.profile = data;
+        renderUserInfo();
+        toast('Profil tersimpan.', 'success');
+      } catch (err) {
+        toast('Gagal simpan: ' + err.message, 'error');
+      }
+    }
+    window.saveSettings = saveSettings;
+
+    async function changePassword() {
+      const pwd = $('#settings-newpass').value;
+      if (!pwd || pwd.length < 6) { toast('Password minimal 6 karakter.', 'warn'); return; }
+      try {
+        const { error } = await state.supabase.auth.updateUser({ password: pwd });
+        if (error) throw error;
+        $('#settings-newpass').value = '';
+        toast('Password berhasil diganti.', 'success');
+      } catch (err) {
+        toast('Gagal ganti password: ' + err.message, 'error');
+      }
+    }
+    window.changePassword = changePassword;
+
+    // ============================================================
+    // 10. EVENT LISTENERS
+    // ============================================================
+    $('#login-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      login($('#login-email').value.trim(), $('#login-password').value);
+    });
+
+    $('#alert-bell').addEventListener('click', () => navigate('alerts'));
+
+    // ============================================================
+    // 11. BOOT
+    // ============================================================
+    (async function boot() {
+      if (!initSupabase()) {
+        showLogin();
+        return;
+      }
+      await testConnection();
+      await checkSession();
+      // Subscribe ke perubahan auth (misal token expired)
+      state.supabase.auth.onAuthStateChange((event, session) => {
+        if (event === 'SIGNED_OUT' || !session) {
+          state.user = null;
+          state.profile = null;
+          showLogin();
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
