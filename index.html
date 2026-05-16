@@ -33,6 +33,9 @@
   <!-- Supabase JS SDK v2 -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
+  <!-- SheetJS untuk export Excel -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
   <style>
     body { font-family: 'Inter', system-ui, sans-serif; }
     .hide { display: none !important; }
@@ -42,6 +45,27 @@
     /* Aktif state untuk nav */
     .nav-active { background-color: #1E3A8A; color: white; }
     .bottom-nav-active { color: #F97316; }
+
+    /* ===== PRINT STYLES (untuk Save as PDF) ===== */
+    @media print {
+      /* Sembunyikan navigasi & elemen interaktif */
+      aside, header, #bottom-nav, .no-print, #toast-container, #modal-overlay { display: none !important; }
+      /* Reset background & padding biar irit kertas */
+      body, main { background: white !important; padding: 0 !important; margin: 0 !important; }
+      .page { animation: none !important; }
+      /* Card jangan ada shadow + border tipis */
+      .shadow-sm, .shadow-md { box-shadow: none !important; }
+      /* Komponen card jangan break di tengah */
+      .grid > * { break-inside: avoid; }
+      /* Pastikan teks gelap */
+      * { color: black !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      /* Tombol di header detail sembunyikan */
+      button { display: none !important; }
+      /* Tetap tampilkan info penting */
+      h2, h3, h4, td, th, span, div, p, li, label { display: revert !important; color: black !important; }
+      /* Tab content tetap kelihatan */
+      #detail-tab-content { display: block !important; }
+    }
   </style>
 </head>
 <body class="bg-slate-50 text-slate-800">
@@ -1253,32 +1277,47 @@
       },
 
       // -----------------------------------------------------
-      // CATEGORIES (admin) - stub Fase 4
+      // CATEGORIES (admin) - full CRUD
       // -----------------------------------------------------
       categories: () => {
         const div = document.createElement('div');
         div.className = 'page space-y-4';
         div.innerHTML = `
-          <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-            <h3 class="text-xl font-bold text-slate-900 mb-1">🏷️ Kategori Equipment</h3>
-            <p class="text-sm text-slate-500">${state.categories.length} kategori (CRUD lengkap akan dibangun di Fase 4)</p>
+          <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+            <div>
+              <h3 class="text-xl font-bold text-slate-900 mb-1">🏷️ Kategori Equipment</h3>
+              <p class="text-sm text-slate-500">${state.categories.length} kategori — Admin bisa tambah/edit/hapus.</p>
+            </div>
+            <button onclick="openCategoryModal()" class="bg-safety hover:bg-safety-700 text-white px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 shadow-sm">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+              Tambah Kategori
+            </button>
           </div>
-          <div class="bg-white rounded-xl border border-slate-200 shadow-sm divide-y divide-slate-100">
-            ${state.categories.map(c => `
-              <div class="flex items-center justify-between px-4 py-3">
-                <span class="font-medium text-slate-800">${escapeHtml(c.name)}</span>
-                <span class="text-xs px-2 py-0.5 rounded ${c.parent_unit_type==='Rig'?'bg-navy text-white':'bg-safety text-white'}">${escapeHtml(c.parent_unit_type)}</span>
-              </div>
-            `).join('')}
-          </div>
+          <div id="cat-list-container" class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">Memuat…</div>
         `;
+        reloadCategoriesList();
         return div;
       },
 
       // -----------------------------------------------------
       // USERS (admin) - stub Fase 4
       // -----------------------------------------------------
-      users: () => placeholderPage({ icon: '👥', label: 'User Management' }, 'CRUD user lengkap akan dibangun di Fase 4.'),
+      users: () => {
+        const div = document.createElement('div');
+        div.className = 'page space-y-4';
+        div.innerHTML = `
+          <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+            <h3 class="text-xl font-bold text-slate-900 mb-1">👥 User Management</h3>
+            <p class="text-sm text-slate-500">Daftar semua user, ubah role & telegram ID. Untuk tambah user baru, gunakan Supabase Dashboard.</p>
+          </div>
+          <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">
+            ℹ️ <span class="font-semibold">Cara tambah user:</span> Supabase Dashboard → Authentication → Add user → Create new user (centang Auto Confirm). User baru otomatis dapat profile dengan role <code>user</code>. Promosi jadi admin via tabel di bawah.
+          </div>
+          <div id="user-list-container" class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">Memuat…</div>
+        `;
+        reloadUsersList();
+        return div;
+      },
 
       // -----------------------------------------------------
       // SETTINGS
@@ -1321,6 +1360,394 @@
     };
 
     // ============================================================
+    // 9c.1. CATEGORY MANAGEMENT (admin)
+    // ============================================================
+    async function reloadCategoriesList() {
+      const c = document.getElementById('cat-list-container');
+      if (!c) return;
+      c.innerHTML = '<div class="p-8 text-center text-slate-400 text-sm">Memuat…</div>';
+      try {
+        // Fetch ulang dari DB (sync state.categories) + count equipment per kategori
+        const [catResp, eqResp] = await Promise.all([
+          state.supabase.from('categories').select('*').order('name'),
+          state.supabase.from('equipment').select('kategori_id'),
+        ]);
+        if (catResp.error) throw catResp.error;
+        if (eqResp.error) throw eqResp.error;
+        state.categories = catResp.data || [];
+        const eqCount = {};
+        (eqResp.data || []).forEach(e => { if (e.kategori_id) eqCount[e.kategori_id] = (eqCount[e.kategori_id] || 0) + 1; });
+
+        if (state.categories.length === 0) {
+          c.innerHTML = '<div class="p-8 text-center text-slate-500">Belum ada kategori.</div>';
+          return;
+        }
+        c.innerHTML = `
+          <div class="overflow-x-auto">
+            <table class="w-full">
+              <thead class="bg-slate-50 border-b border-slate-200">
+                <tr>
+                  <th class="px-3 py-2 text-left text-xs font-bold text-slate-700 uppercase">Nama</th>
+                  <th class="px-3 py-2 text-left text-xs font-bold text-slate-700 uppercase">Untuk Unit Type</th>
+                  <th class="px-3 py-2 text-left text-xs font-bold text-slate-700 uppercase">Dipakai Equipment</th>
+                  <th class="px-3 py-2 text-right text-xs font-bold text-slate-700 uppercase">Aksi</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-200">
+                ${state.categories.map(cat => {
+                  const usage = eqCount[cat.id] || 0;
+                  const typeBadge = cat.parent_unit_type === 'Rig' ? 'bg-navy text-white'
+                    : cat.parent_unit_type === 'Standalone' ? 'bg-safety text-white'
+                    : 'bg-slate-500 text-white';
+                  return `
+                    <tr class="hover:bg-slate-50">
+                      <td class="px-3 py-2 text-sm font-semibold text-slate-800">${escapeHtml(cat.name)}</td>
+                      <td class="px-3 py-2"><span class="text-xs px-2 py-0.5 rounded ${typeBadge}">${escapeHtml(cat.parent_unit_type)}</span></td>
+                      <td class="px-3 py-2 text-sm text-slate-600">${usage} equipment</td>
+                      <td class="px-3 py-2 text-right space-x-1 whitespace-nowrap">
+                        <button onclick='openCategoryModal(${JSON.stringify(cat).replace(/'/g, "&apos;")})' class="px-2 py-1 rounded bg-navy hover:bg-navy-700 text-white text-xs font-medium">✏ Edit</button>
+                        <button onclick="confirmDeleteCategory(${cat.id}, '${escapeHtml(cat.name).replace(/'/g, "&apos;")}', ${usage})" class="px-2 py-1 rounded bg-red-100 hover:bg-red-200 text-red-700 text-xs font-medium">🗑 Hapus</button>
+                      </td>
+                    </tr>
+                  `;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>
+          <div class="px-4 py-2 text-xs text-slate-500 bg-slate-50 border-t">${state.categories.length} kategori</div>
+        `;
+      } catch (err) {
+        c.innerHTML = `<div class="p-4 bg-red-50 text-red-700 text-sm">Gagal load: ${escapeHtml(err.message)}</div>`;
+      }
+    }
+    window.reloadCategoriesList = reloadCategoriesList;
+
+    function openCategoryModal(existing = null) {
+      const isEdit = !!existing;
+      openModal({
+        title: isEdit ? 'Edit Kategori' : 'Tambah Kategori Baru',
+        maxWidth: 'max-w-md',
+        body: `
+          <form id="cat-form" class="space-y-3">
+            <div>
+              <label class="block text-sm font-semibold text-slate-700 mb-1">Nama Kategori *</label>
+              <input type="text" name="name" required value="${escapeHtml(existing?.name || '')}" placeholder="misal: BOP Ram"
+                class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-navy outline-none" />
+            </div>
+            <div>
+              <label class="block text-sm font-semibold text-slate-700 mb-1">Untuk Unit Type *</label>
+              <select name="parent_unit_type" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">
+                ${['Rig','Standalone','Both'].map(t => `<option value="${t}" ${existing?.parent_unit_type === t ? 'selected' : ''}>${t}</option>`).join('')}
+              </select>
+              <p class="text-xs text-slate-500 mt-1">Rig: untuk equipment di rig. Standalone: untuk MTU/Slickline/Independent. Both: bisa dua-duanya.</p>
+            </div>
+          </form>
+        `,
+        footer: `
+          <button id="cat-cancel-btn" onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
+          <button id="cat-submit-btn" onclick="submitCategory(${isEdit ? existing.id : 'null'})" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy-700 text-white text-sm font-semibold disabled:opacity-50">
+            ${isEdit ? '💾 Simpan' : '+ Tambah'}
+          </button>
+        `,
+      });
+    }
+    window.openCategoryModal = openCategoryModal;
+
+    async function submitCategory(id) {
+      const form = document.getElementById('cat-form');
+      const submitBtn = document.getElementById('cat-submit-btn');
+      const cancelBtn = document.getElementById('cat-cancel-btn');
+      const name = form.elements.name.value.trim();
+      const parent_unit_type = form.elements.parent_unit_type.value;
+      if (!name) { toast('Nama kategori wajib diisi.', 'warn'); return; }
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Memproses…'; }
+      if (cancelBtn) cancelBtn.disabled = true;
+      try {
+        if (id) {
+          const { error } = await state.supabase.from('categories').update({ name, parent_unit_type }).eq('id', id);
+          if (error) throw error;
+          toast('Kategori berhasil di-update.', 'success');
+        } else {
+          const { error } = await state.supabase.from('categories').insert({ name, parent_unit_type });
+          if (error) throw error;
+          toast('Kategori baru dibuat.', 'success');
+        }
+        closeModal();
+        reloadCategoriesList();
+      } catch (err) {
+        toast('Gagal: ' + err.message, 'error');
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = id ? '💾 Simpan' : '+ Tambah'; }
+        if (cancelBtn) cancelBtn.disabled = false;
+      }
+    }
+    window.submitCategory = submitCategory;
+
+    async function confirmDeleteCategory(id, name, usageCount) {
+      if (usageCount > 0) {
+        toast(`Tidak bisa hapus — ada ${usageCount} equipment yang pakai kategori ini. Hapus/pindah dulu equipment-nya.`, 'warn');
+        return;
+      }
+      const ok = await confirmDialog({
+        title: 'Hapus Kategori?',
+        message: `Yakin mau hapus kategori "${name}"? Aksi tidak bisa di-undo.`,
+        confirmText: 'Hapus',
+        danger: true,
+      });
+      if (!ok) return;
+      try {
+        const { error } = await state.supabase.from('categories').delete().eq('id', id);
+        if (error) throw error;
+        toast('Kategori dihapus.', 'success');
+        reloadCategoriesList();
+      } catch (err) {
+        toast('Gagal hapus: ' + err.message, 'error');
+      }
+    }
+    window.confirmDeleteCategory = confirmDeleteCategory;
+
+    // ============================================================
+    // 9c.3. EXPORT EXCEL & PDF
+    // ============================================================
+    async function exportEquipmentToExcel() {
+      try {
+        toast('Menyiapkan data export…', 'info');
+        // Ambil data lengkap (43 field) berdasarkan filter saat ini
+        let q = state.supabase.from('equipment').select('*');
+        const f = state.equipmentFilters;
+        if (f.parent_unit_id) q = q.eq('assigned_unit_id', Number(f.parent_unit_id));
+        if (f.kategori_id)    q = q.eq('kategori_id',      Number(f.kategori_id));
+        if (f.status_operasi) q = q.eq('status_operasi',   f.status_operasi);
+        if (f.tipe_kepemilikan) q = q.eq('tipe_kepemilikan', f.tipe_kepemilikan);
+        const s = (state.equipmentSearch || '').trim();
+        if (s) q = q.or(`tag_number.ilike.%${s}%,nama_equipment.ilike.%${s}%,serial_number.ilike.%${s}%`);
+        q = q.order('tag_number');
+        const { data, error } = await q;
+        if (error) throw error;
+        if (!data || data.length === 0) {
+          toast('Tidak ada data untuk di-export.', 'warn');
+          return;
+        }
+
+        // Transform data: ganti ID → nama (kategori, parent_unit, parent_equipment)
+        const rows = data.map(eq => ({
+          'Tag Number': eq.tag_number,
+          'Nama Equipment': eq.nama_equipment,
+          'Kategori': getCategoryName(eq.kategori_id),
+          'Parent Unit': getParentUnitName(eq.assigned_unit_id),
+          'Tipe Kepemilikan': eq.tipe_kepemilikan,
+          'Brand': eq.brand,
+          'Model': eq.model,
+          'Serial Number': eq.serial_number,
+          'Tahun Pembuatan': eq.tahun_pembuatan,
+          'Tahun Commissioning': eq.tahun_commissioning,
+          'Year Used': eq.year_used,
+          'Country of Origin': eq.country_of_origin,
+          'Spek Khusus': eq.spek_khusus,
+          'Status Operasi': eq.status_operasi,
+          'Kondisi Fisik': eq.kondisi_fisik,
+          'Lokasi Fisik': eq.lokasi_fisik,
+          'Running Hours': eq.running_hours,
+          'Last Maintenance Date': eq.last_maintenance_date,
+          'Last Maintenance Type': eq.last_maintenance_type,
+          'Next Maintenance Date': eq.next_maintenance_date,
+          'Maintenance Interval': eq.maintenance_interval,
+          'PIC Mechanic': eq.pic_mechanic,
+          'GOH Year': eq.goh_year,
+          'Nomor SKPI': eq.nomor_skpi,
+          'SKPI Start Date': eq.skpi_start_date,
+          'SKPI End Date': eq.skpi_end_date,
+          'COC Number': eq.coc_number,
+          'ARF / Lembaga': eq.arf_lembaga,
+          'Refurbish Year': eq.refurbish_year,
+          'Refurbish By': eq.refurbish_by,
+          'Load Test Result': eq.load_test_result,
+          'Nomor Sertifikat Lain': eq.nomor_sertifikat_lain,
+          'Tgl Terbit Sertifikat': eq.tgl_terbit_sertifikat,
+          'Tgl Expired Sertifikat': eq.tgl_expired_sertifikat,
+          'Lembaga Penerbit': eq.lembaga_penerbit,
+          'Tgl Pembelian': eq.tgl_pembelian,
+          'Harga Perolehan': eq.harga_perolehan,
+          'Nomor PO/Invoice': eq.nomor_po_invoice,
+          'Vendor/Supplier': eq.vendor_supplier,
+          'Cost Center': eq.cost_center,
+          'Pressure Test Date': eq.pressure_test_date,
+          'Pressure Test Result': eq.pressure_test_result,
+          'Remarks': eq.remarks,
+        }));
+
+        // Bikin workbook
+        const wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.json_to_sheet(rows);
+        // Set lebar kolom auto (paling tidak ada lebar minimum)
+        const colWidths = Object.keys(rows[0]).map(key => {
+          const maxLen = Math.max(
+            key.length,
+            ...rows.map(r => String(r[key] || '').length)
+          );
+          return { wch: Math.min(Math.max(maxLen + 2, 12), 50) };
+        });
+        ws['!cols'] = colWidths;
+        XLSX.utils.book_append_sheet(wb, ws, 'Equipment');
+
+        // Bikin metadata sheet
+        const meta = [
+          ['Export dari Rigbase Station'],
+          ['Tanggal Export', new Date().toLocaleString('id-ID')],
+          ['Total Records', rows.length],
+          [],
+          ['Filter Aktif:'],
+          ['Parent Unit', state.equipmentFilters.parent_unit_id ? getParentUnitName(Number(state.equipmentFilters.parent_unit_id)) : '(semua)'],
+          ['Kategori', state.equipmentFilters.kategori_id ? getCategoryName(Number(state.equipmentFilters.kategori_id)) : '(semua)'],
+          ['Status Operasi', state.equipmentFilters.status_operasi || '(semua)'],
+          ['Tipe Kepemilikan', state.equipmentFilters.tipe_kepemilikan || '(semua)'],
+          ['Search', state.equipmentSearch || '(kosong)'],
+        ];
+        const wsMeta = XLSX.utils.aoa_to_sheet(meta);
+        wsMeta['!cols'] = [{ wch: 25 }, { wch: 30 }];
+        XLSX.utils.book_append_sheet(wb, wsMeta, 'Info');
+
+        // Generate filename
+        const ts = new Date().toISOString().slice(0, 16).replace(/[:\-T]/g, '');
+        const filename = `rigbase_equipment_${ts}.xlsx`;
+        XLSX.writeFile(wb, filename);
+        toast(`✅ ${rows.length} equipment ter-export ke ${filename}`, 'success');
+      } catch (err) {
+        toast('Gagal export: ' + err.message, 'error');
+      }
+    }
+    window.exportEquipmentToExcel = exportEquipmentToExcel;
+
+    // Print equipment detail (browser native, hasil bisa di-save jadi PDF)
+    function printEquipmentDetail() {
+      window.print();
+    }
+    window.printEquipmentDetail = printEquipmentDetail;
+
+    // ============================================================
+    // 9c.2. USER MANAGEMENT (admin)
+    // ============================================================
+    async function reloadUsersList() {
+      const c = document.getElementById('user-list-container');
+      if (!c) return;
+      c.innerHTML = '<div class="p-8 text-center text-slate-400 text-sm">Memuat…</div>';
+      try {
+        const { data, error } = await state.supabase.from('profiles').select('*').order('created_at');
+        if (error) throw error;
+        const users = data || [];
+        if (users.length === 0) {
+          c.innerHTML = '<div class="p-8 text-center text-slate-500">Belum ada user.</div>';
+          return;
+        }
+        c.innerHTML = `
+          <div class="overflow-x-auto">
+            <table class="w-full">
+              <thead class="bg-slate-50 border-b border-slate-200">
+                <tr>
+                  <th class="px-3 py-2 text-left text-xs font-bold text-slate-700 uppercase">Email</th>
+                  <th class="px-3 py-2 text-left text-xs font-bold text-slate-700 uppercase">Nama Lengkap</th>
+                  <th class="px-3 py-2 text-left text-xs font-bold text-slate-700 uppercase">Role</th>
+                  <th class="px-3 py-2 text-left text-xs font-bold text-slate-700 uppercase">Telegram ID</th>
+                  <th class="px-3 py-2 text-left text-xs font-bold text-slate-700 uppercase">Bergabung</th>
+                  <th class="px-3 py-2 text-right text-xs font-bold text-slate-700 uppercase">Aksi</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-200">
+                ${users.map(u => {
+                  const isSelf = u.id === state.user.id;
+                  const roleBadge = u.role === 'admin' ? 'bg-navy text-white' : 'bg-slate-200 text-slate-700';
+                  return `
+                    <tr class="hover:bg-slate-50">
+                      <td class="px-3 py-2 text-sm font-medium text-slate-800">${escapeHtml(u.email)}${isSelf ? ' <span class="text-xs text-safety">(kamu)</span>' : ''}</td>
+                      <td class="px-3 py-2 text-sm text-slate-600">${escapeHtml(u.full_name || '—')}</td>
+                      <td class="px-3 py-2"><span class="text-xs px-2 py-0.5 rounded ${roleBadge} capitalize">${escapeHtml(u.role)}</span></td>
+                      <td class="px-3 py-2 text-sm text-slate-600 font-mono">${escapeHtml(u.telegram_user_id || '—')}</td>
+                      <td class="px-3 py-2 text-sm text-slate-500 whitespace-nowrap">${fmtDate(u.created_at)}</td>
+                      <td class="px-3 py-2 text-right whitespace-nowrap">
+                        <button onclick='openUserEditModal(${JSON.stringify(u).replace(/'/g, "&apos;")})' class="px-2 py-1 rounded bg-navy hover:bg-navy-700 text-white text-xs font-medium">✏ Edit</button>
+                      </td>
+                    </tr>
+                  `;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>
+          <div class="px-4 py-2 text-xs text-slate-500 bg-slate-50 border-t">${users.length} user — ${users.filter(u=>u.role==='admin').length} admin, ${users.filter(u=>u.role==='user').length} user</div>
+        `;
+      } catch (err) {
+        c.innerHTML = `<div class="p-4 bg-red-50 text-red-700 text-sm">Gagal load: ${escapeHtml(err.message)}</div>`;
+      }
+    }
+    window.reloadUsersList = reloadUsersList;
+
+    function openUserEditModal(u) {
+      const isSelf = u.id === state.user.id;
+      openModal({
+        title: 'Edit User',
+        maxWidth: 'max-w-md',
+        body: `
+          <form id="user-form" class="space-y-3">
+            <div>
+              <label class="block text-sm font-semibold text-slate-700 mb-1">Email</label>
+              <input type="text" disabled value="${escapeHtml(u.email)}" class="w-full px-3 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-600 text-sm" />
+              <p class="text-xs text-slate-500 mt-1">Email tidak bisa diubah dari sini.</p>
+            </div>
+            <div>
+              <label class="block text-sm font-semibold text-slate-700 mb-1">Nama Lengkap</label>
+              <input type="text" name="full_name" value="${escapeHtml(u.full_name || '')}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-navy outline-none" />
+            </div>
+            <div>
+              <label class="block text-sm font-semibold text-slate-700 mb-1">Role *</label>
+              <select name="role" required ${isSelf ? 'disabled' : ''} class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">
+                <option value="user"  ${u.role==='user'?'selected':''}>user — view only + maintenance log</option>
+                <option value="admin" ${u.role==='admin'?'selected':''}>admin — full CRUD</option>
+              </select>
+              ${isSelf ? '<p class="text-xs text-red-600 mt-1">⚠️ Role kamu sendiri tidak bisa diubah dari sini (anti-lockout).</p>' : ''}
+            </div>
+            <div>
+              <label class="block text-sm font-semibold text-slate-700 mb-1">Telegram User ID <span class="text-xs text-slate-400">(opsional)</span></label>
+              <input type="text" name="telegram_user_id" value="${escapeHtml(u.telegram_user_id || '')}" placeholder="contoh: 123456789" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-navy outline-none" />
+              <p class="text-xs text-slate-500 mt-1">Untuk routing alert Telegram (Fase 5). Cari ID via bot @userinfobot di Telegram.</p>
+            </div>
+          </form>
+        `,
+        footer: `
+          <button id="user-cancel-btn" onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
+          <button id="user-submit-btn" onclick="submitUserEdit('${u.id}', ${isSelf})" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy-700 text-white text-sm font-semibold disabled:opacity-50">💾 Simpan</button>
+        `,
+      });
+    }
+    window.openUserEditModal = openUserEditModal;
+
+    async function submitUserEdit(userId, isSelf) {
+      const form = document.getElementById('user-form');
+      const submitBtn = document.getElementById('user-submit-btn');
+      const cancelBtn = document.getElementById('user-cancel-btn');
+      const full_name = form.elements.full_name.value.trim() || null;
+      const telegram_user_id = form.elements.telegram_user_id.value.trim() || null;
+      // Role hanya update kalau bukan diri sendiri
+      const payload = { full_name, telegram_user_id };
+      if (!isSelf) payload.role = form.elements.role.value;
+
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Memproses…'; }
+      if (cancelBtn) cancelBtn.disabled = true;
+      try {
+        const { error } = await state.supabase.from('profiles').update(payload).eq('id', userId);
+        if (error) throw error;
+        toast('User berhasil di-update.', 'success');
+        closeModal();
+        reloadUsersList();
+        // Refresh state.profile kalau yg di-edit diri sendiri
+        if (isSelf) await loadProfile(state.user);
+        renderUserInfo();
+      } catch (err) {
+        toast('Gagal: ' + err.message, 'error');
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = '💾 Simpan'; }
+        if (cancelBtn) cancelBtn.disabled = false;
+      }
+    }
+    window.submitUserEdit = submitUserEdit;
+
+    // ============================================================
     // 9d. EQUIPMENT LIST VIEW
     // ============================================================
     function setEquipmentView(view, id = null, tab = 'info') {
@@ -1355,6 +1782,10 @@
               <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
               Tambah Equipment
             </button>` : ''}
+            <button onclick="exportEquipmentToExcel()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 shadow-sm" title="Export ke Excel (hasil filter saat ini)">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+              Export Excel
+            </button>
           </div>
           <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
             <select id="filter-unit" class="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">${parentOpts}</select>
@@ -1592,15 +2023,17 @@
                   ${children.length > 0 ? `<span class="text-xs text-slate-400">•</span><span class="text-xs font-semibold text-navy">🧩 ${children.length} komponen</span>` : ''}
                 </div>
               </div>
-              ${isAdmin ? `
-                <div class="flex gap-2 flex-wrap">
+              <div class="flex gap-2 flex-wrap">
+                <button onclick="printEquipmentDetail()" class="px-3 py-2 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-700 text-sm font-medium no-print">🖨 Print / PDF</button>
+                ${isAdmin ? `
                   ${canPinjam ? `<button onclick="openLoanModal('${eq.id}')" class="px-3 py-2 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-800 text-sm font-medium">🤝 Pinjam Pengganti</button>` : ''}
                   ${canKembalikan ? `<button onclick="openReturnLoanModal('${activeLoan.id}')" class="px-3 py-2 rounded-lg bg-green-100 hover:bg-green-200 text-green-800 text-sm font-medium">↩️ Kembalikan Pinjaman</button>` : ''}
                   ${canGanti ? `<button onclick="openReplaceModal('${eq.id}')" class="px-3 py-2 rounded-lg bg-purple-100 hover:bg-purple-200 text-purple-800 text-sm font-medium">🔄 Ganti</button>` : ''}
                   ${canMutasi ? `<button onclick="openMutasiModal('${eq.id}')" class="px-3 py-2 rounded-lg bg-blue-100 hover:bg-blue-200 text-blue-800 text-sm font-medium">↔ Mutasi</button>` : ''}
                   ${canEdit ? `<button onclick="setEquipmentView('form', '${eq.id}')" class="px-3 py-2 rounded-lg bg-navy hover:bg-navy-700 text-white text-sm font-medium">✏ Edit</button>` : ''}
                   ${canHapus ? `<button onclick="confirmDeleteEquipment('${eq.id}', '${escapeHtml(eq.tag_number).replace(/'/g,'&#39;')}')" class="px-3 py-2 rounded-lg bg-red-100 hover:bg-red-200 text-red-700 text-sm font-medium">🗑 Hapus</button>` : ''}
-                </div>` : ''}
+                ` : ''}
+              </div>
             </div>
             ${hasActiveLoan && isAdmin ? '<div class="mt-3 text-xs text-slate-500 italic">ℹ️ Mutasi/Ganti/Hapus di-disable selama equipment ini ada pinjaman aktif. Kembalikan dulu pinjaman.</div>' : ''}
           </div>
