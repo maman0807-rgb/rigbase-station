@@ -2597,8 +2597,10 @@
                     ✅ <b>Closed</b> ${f.tgl_closed ? 'pada ' + fmtDate(f.tgl_closed) : ''} ${f.pic_perbaikan ? '— PIC: ' + escapeHtml(f.pic_perbaikan) : ''}
                   </div>
                 ` : ''}
-                ${renderFindingPhotos(f.id, 'before', photosBefore)}
-                ${renderFindingPhotos(f.id, 'after', photosAfter)}
+                ${f.category === 'N/A'
+                  ? renderFindingPhotos(f.id, 'before', photosBefore, 'kondisi')
+                  : renderFindingPhotos(f.id, 'before', photosBefore, 'before') + renderFindingPhotos(f.id, 'after', photosAfter, 'after')
+                }
                 ${f.catatan ? `<div class="mt-2 text-xs text-slate-600 italic">📝 ${escapeHtml(f.catatan)}</div>` : ''}
               </div>
             `;
@@ -2609,7 +2611,8 @@
     window.renderTemuanList = renderTemuanList;
 
     // Render photo grid + upload slot per finding
-    function renderFindingPhotos(findingId, slot, photos) {
+    // labelType: 'before' | 'after' | 'kondisi' (untuk N/A — pakai field photos_before di DB)
+    function renderFindingPhotos(findingId, slot, photos, labelType) {
       const max = 4;
       const slots = [];
       // Render existing photos
@@ -2636,7 +2639,11 @@
           </label>
         `);
       }
-      const slotLabel = slot === 'before' ? '📷 Before' : '📷 After';
+      const slotLabel = {
+        before:  '📷 Before (kondisi rusak)',
+        after:   '📷 After (setelah perbaikan)',
+        kondisi: '📷 Foto Kondisi Aktual',
+      }[labelType] || '📷 Foto';
       return `
         <div class="mt-3">
           <div class="text-xs font-bold text-slate-600 mb-1.5">${slotLabel} (${photos.length}/${max})</div>
