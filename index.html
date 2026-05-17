@@ -782,6 +782,96 @@
       return data || [];
     }
 
+    // Auto-generate inspection_code: SIKLUS-YYYY-NNN
+    async function generateInspectionCode(year) {
+      const { data, error } = await state.supabase
+        .from('inspections')
+        .select('inspection_code')
+        .like('inspection_code', `SIKLUS-${year}-%`);
+      if (error) throw error;
+      const codes = (data || []).map(r => r.inspection_code);
+      const maxNum = codes.reduce((max, c) => {
+        const m = c.match(/^SIKLUS-\d{4}-(\d+)$/);
+        if (!m) return max;
+        const n = parseInt(m[1], 10);
+        return n > max ? n : max;
+      }, 0);
+      const next = String(maxNum + 1).padStart(3, '0');
+      return `SIKLUS-${year}-${next}`;
+    }
+
+    async function createInspection(payload) {
+      payload.created_by = state.user.id;
+      payload.updated_by = state.user.id;
+      const { data, error } = await state.supabase.from('inspections').insert(payload).select().single();
+      if (error) throw error;
+      return data;
+    }
+
+    async function updateInspection(id, payload) {
+      payload.updated_by = state.user.id;
+      const { data, error } = await state.supabase.from('inspections').update(payload).eq('id', id).select().single();
+      if (error) throw error;
+      return data;
+    }
+
+    async function deleteInspection(id) {
+      const { error } = await state.supabase.from('inspections').delete().eq('id', id);
+      if (error) throw error;
+    }
+
+    async function createFinding(payload) {
+      payload.created_by = state.user.id;
+      payload.updated_by = state.user.id;
+      const { data, error } = await state.supabase.from('inspection_findings').insert(payload).select().single();
+      if (error) throw error;
+      return data;
+    }
+
+    async function updateFinding(id, payload) {
+      payload.updated_by = state.user.id;
+      const { data, error } = await state.supabase.from('inspection_findings').update(payload).eq('id', id).select().single();
+      if (error) throw error;
+      return data;
+    }
+
+    async function deleteFinding(id) {
+      const { error } = await state.supabase.from('inspection_findings').delete().eq('id', id);
+      if (error) throw error;
+    }
+
+    // Upload foto finding (max 1MB, auto-compress).
+    // slot: 'before' | 'after'. Return public URL.
+    async function uploadFindingPhoto(findingId, slot, file) {
+      const compressed = await compressImage(file, { maxDim: 1600, quality: 0.82 });
+      const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+      const path = `findings/${findingId}/${slot}_${Date.now()}_${Math.random().toString(36).slice(2,6)}.${ext}`;
+      const { error } = await state.supabase.storage.from('inspection-photos').upload(path, compressed, { upsert: false });
+      if (error) throw error;
+      return state.supabase.storage.from('inspection-photos').getPublicUrl(path).data.publicUrl;
+    }
+
+    async function deleteFindingPhotoFromStorage(photoUrl) {
+      // Extract path setelah /inspection-photos/
+      const marker = '/inspection-photos/';
+      const idx = photoUrl.indexOf(marker);
+      if (idx === -1) return;
+      const path = photoUrl.slice(idx + marker.length);
+      try { await state.supabase.storage.from('inspection-photos').remove([path]); }
+      catch (e) { console.warn('Storage delete failed (continuing):', e.message); }
+    }
+
+    // Fetch equipment dari rig tertentu (untuk dropdown finding)
+    async function fetchEquipmentByRig(parentUnitId) {
+      const { data, error } = await state.supabase
+        .from('equipment')
+        .select('id, tag_number, nama_equipment, kategori_id')
+        .eq('assigned_unit_id', parentUnitId)
+        .order('tag_number');
+      if (error) throw error;
+      return data || [];
+    }
+
     async function createLoan({ lender_equipment_id, borrower_equipment_id, loan_date, reason }) {
       // Fetch fresh data
       const { data: lender, error: el } = await state.supabase.from('equipment')
@@ -2149,6 +2239,10 @@
               <input type="text" id="insp-search" placeholder="🔍 Cari kode siklus / PI / inspector..." value="${escapeHtml(state.inspectionFilters.search)}"
                 class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-navy outline-none text-sm" />
             </div>
+            <button onclick="openInspectionFormModal()" class="bg-safety hover:bg-safety-700 text-white px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 shadow-sm">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+              Siklus Baru
+            </button>
           </div>
           <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
             <select id="insp-tahun" class="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">
@@ -2313,6 +2407,10 @@
                   ${katBadge}
                   ${inspectionStatusBadge(insp.status)}
                 </div>
+                <div class="flex gap-2 flex-wrap mt-2 mb-1">
+                  <button onclick='openInspectionFormModal(${JSON.stringify(insp).replace(/'/g, "&apos;")})' class="px-3 py-1.5 rounded-lg bg-navy hover:bg-navy-700 text-white text-xs font-semibold">✏ Edit Siklus</button>
+                  ${state.profile.role === 'admin' ? `<button onclick="confirmDeleteInspection('${insp.id}', '${escapeHtml(insp.inspection_code)}')" class="px-3 py-1.5 rounded-lg bg-red-100 hover:bg-red-200 text-red-700 text-xs font-semibold">🗑 Hapus Siklus</button>` : ''}
+                </div>
                 <p class="text-base text-slate-700 mt-1">🏭 ${escapeHtml(insp.parent_unit?.name || '—')} (${escapeHtml(insp.parent_unit?.type || '—')})</p>
                 <div class="mt-2 grid grid-cols-1 md:grid-cols-3 gap-x-4 gap-y-1 text-sm">
                   <div><span class="text-slate-500">PI:</span> <span class="font-semibold">${escapeHtml(insp.pi_company)}</span></div>
@@ -2376,10 +2474,19 @@
     }
 
     function renderTemuanList(findings) {
+      const insp = window.__currentInspection;
+      const isAdmin = state.profile.role === 'admin';
+      const addBtn = `
+        <div class="flex justify-end mb-3">
+          <button onclick="openFindingFormModal()" class="bg-safety hover:bg-safety-700 text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 shadow-sm">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+            Tambah Temuan
+          </button>
+        </div>`;
       if (findings.length === 0) {
-        return '<div class="text-center py-6 text-slate-400 text-sm bg-slate-50 rounded-lg">Belum ada temuan untuk siklus ini.</div>';
+        return addBtn + '<div class="text-center py-6 text-slate-400 text-sm bg-slate-50 rounded-lg">Belum ada temuan untuk siklus ini.</div>';
       }
-      return `
+      return addBtn + `
         <div class="space-y-3">
           ${findings.map(f => {
             const photosBefore = Array.isArray(f.photos_before) ? f.photos_before : [];
@@ -2395,7 +2502,11 @@
                     ${findingCategoryBadge(f.category)}
                     ${findingStatusBadge(f.status)}
                   </div>
-                  <div class="text-xs text-slate-500">${fmtDate(f.tgl_ditemukan)}</div>
+                  <div class="flex items-center gap-2">
+                    <div class="text-xs text-slate-500">${fmtDate(f.tgl_ditemukan)}</div>
+                    <button onclick='openFindingFormModal(${JSON.stringify(f).replace(/'/g, "&apos;")})' class="px-2 py-0.5 rounded bg-navy hover:bg-navy-700 text-white text-xs font-medium">✏</button>
+                    ${isAdmin ? `<button onclick="confirmDeleteFinding('${f.id}', '${escapeHtml(f.equipment_name_snapshot).replace(/'/g,'&#39;')}')" class="px-2 py-0.5 rounded bg-red-100 hover:bg-red-200 text-red-700 text-xs font-medium">🗑</button>` : ''}
+                  </div>
                 </div>
                 <div class="text-sm mb-1">
                   ${eqLink}
@@ -2411,9 +2522,8 @@
                     ✅ <b>Closed</b> ${f.tgl_closed ? 'pada ' + fmtDate(f.tgl_closed) : ''} ${f.pic_perbaikan ? '— PIC: ' + escapeHtml(f.pic_perbaikan) : ''}
                   </div>
                 ` : ''}
-                ${(photosBefore.length + photosAfter.length) > 0 ? `
-                  <div class="mt-2 text-xs text-slate-500">📷 ${photosBefore.length} foto before, ${photosAfter.length} foto after (upload & viewer di Fase 3-4)</div>
-                ` : ''}
+                ${renderFindingPhotos(f.id, 'before', photosBefore)}
+                ${renderFindingPhotos(f.id, 'after', photosAfter)}
                 ${f.catatan ? `<div class="mt-2 text-xs text-slate-600 italic">📝 ${escapeHtml(f.catatan)}</div>` : ''}
               </div>
             `;
@@ -2422,6 +2532,632 @@
       `;
     }
     window.renderTemuanList = renderTemuanList;
+
+    // Render photo grid + upload slot per finding
+    function renderFindingPhotos(findingId, slot, photos) {
+      const max = 4;
+      const slots = [];
+      // Render existing photos
+      photos.forEach((url, idx) => {
+        slots.push(`
+          <div class="relative group aspect-square rounded overflow-hidden bg-slate-100 border border-slate-200">
+            <img src="${escapeHtml(url)}" alt="${slot}_${idx}" class="w-full h-full object-cover cursor-pointer" onclick="openFindingPhotoLightbox('${findingId}','${slot}',${idx})" />
+            ${state.profile.role === 'admin' ? `
+              <button onclick="deleteFindingPhoto('${findingId}','${slot}','${escapeHtml(url)}')" class="absolute top-0 right-0 p-1 bg-red-600 text-white rounded-bl opacity-0 group-hover:opacity-100 transition" title="Hapus foto">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+              </button>` : ''}
+          </div>
+        `);
+      });
+      // Upload slot (if < 4)
+      if (photos.length < max) {
+        slots.push(`
+          <label class="aspect-square rounded border-2 border-dashed border-slate-300 hover:border-safety bg-slate-50 hover:bg-safety/5 flex items-center justify-center cursor-pointer transition">
+            <input type="file" accept="image/*" multiple class="hidden" onchange="handleFindingPhotoUpload(event, '${findingId}', '${slot}')" />
+            <div class="text-center text-slate-400">
+              <svg class="w-6 h-6 mx-auto" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+              <div class="text-xs mt-0.5">+ Foto</div>
+            </div>
+          </label>
+        `);
+      }
+      const slotLabel = slot === 'before' ? '📷 Before' : '📷 After';
+      return `
+        <div class="mt-3">
+          <div class="text-xs font-bold text-slate-600 mb-1.5">${slotLabel} (${photos.length}/${max})</div>
+          <div class="grid grid-cols-4 gap-1.5">${slots.join('')}</div>
+        </div>
+      `;
+    }
+
+    function openFindingPhotoLightbox(findingId, slot, idx) {
+      const findings = window.__currentFindings || [];
+      const f = findings.find(x => x.id === findingId);
+      if (!f) return;
+      const photos = slot === 'before' ? (f.photos_before || []) : (f.photos_after || []);
+      // Reuse equipment lightbox infrastructure: bikin pseudo-photos array
+      window.__currentPhotos = photos.map((url, i) => ({ file_url: url, file_name: `${slot}_${i + 1}`, created_at: f.created_at }));
+      openPhotoLightbox(idx);
+    }
+    window.openFindingPhotoLightbox = openFindingPhotoLightbox;
+
+    // ============================================================
+    // 9c.6. INSPEKSI — FORM MODAL: SIKLUS
+    // ============================================================
+    async function openInspectionFormModal(existing = null) {
+      const isEdit = !!existing;
+      const today = new Date().toISOString().slice(0, 10);
+      const year = new Date().getFullYear();
+      let defaultCode = '';
+      if (!isEdit) {
+        try { defaultCode = await generateInspectionCode(year); }
+        catch (e) { defaultCode = `SIKLUS-${year}-001`; }
+      }
+      const data = existing || {
+        inspection_code: defaultCode,
+        kategori_inspeksi: 'Cat 3',
+        start_date: today,
+        status: 'On Progress',
+        progress_akumulatif: 0,
+      };
+      const rigOpts = state.parentUnits.filter(u => u.type === 'Rig').map(u =>
+        `<option value="${u.id}" ${data.parent_unit_id == u.id ? 'selected' : ''}>${escapeHtml(u.name)}</option>`
+      ).join('');
+
+      openModal({
+        title: isEdit ? 'Edit Siklus Inspeksi' : 'Tambah Siklus Inspeksi Baru',
+        maxWidth: 'max-w-3xl',
+        body: `
+          <form id="insp-form" class="space-y-4">
+            <!-- Section A: Info Dasar -->
+            <div class="bg-slate-50 rounded-lg p-3">
+              <h4 class="font-bold text-navy text-sm uppercase mb-2">A. Info Dasar</h4>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-xs font-semibold text-slate-700 mb-1">Kode Siklus *</label>
+                  <input type="text" name="inspection_code" required value="${escapeHtml(data.inspection_code || '')}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+                  ${!isEdit ? `<p class="text-xs text-slate-500 mt-1">Auto-generate: ${defaultCode}</p>` : ''}
+                </div>
+                <div>
+                  <label class="block text-xs font-semibold text-slate-700 mb-1">Kategori Inspeksi *</label>
+                  <select name="kategori_inspeksi" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">
+                    <option value="Cat 3" ${data.kategori_inspeksi==='Cat 3'?'selected':''}>Cat 3 (Rutin 6 bulanan)</option>
+                    <option value="Cat 4" ${data.kategori_inspeksi==='Cat 4'?'selected':''}>Cat 4 (4 tahunan / PLO)</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-xs font-semibold text-slate-700 mb-1">Rig *</label>
+                  <select name="parent_unit_id" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">
+                    <option value="">— pilih rig —</option>
+                    ${rigOpts}
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-xs font-semibold text-slate-700 mb-1">PI (Perusahaan Inspeksi) *</label>
+                  <input type="text" name="pi_company" required value="${escapeHtml(data.pi_company || '')}" placeholder="PT PJ-Tek Mandiri" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label class="block text-xs font-semibold text-slate-700 mb-1">Rig Inspector *</label>
+                  <input type="text" name="rig_inspector" required value="${escapeHtml(data.rig_inspector || '')}" placeholder="Nama inspektor" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label class="block text-xs font-semibold text-slate-700 mb-1">Status</label>
+                  <select name="status" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">
+                    <option value="On Progress" ${data.status==='On Progress'?'selected':''}>On Progress</option>
+                    <option value="Completed" ${data.status==='Completed'?'selected':''}>Completed</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-xs font-semibold text-slate-700 mb-1">Tanggal Mulai *</label>
+                  <input type="date" name="start_date" required value="${escapeHtml(data.start_date || '')}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label class="block text-xs font-semibold text-slate-700 mb-1">Tanggal Selesai <span class="text-slate-400">(opsional)</span></label>
+                  <input type="date" name="end_date" value="${escapeHtml(data.end_date || '')}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label class="block text-xs font-semibold text-slate-700 mb-1">Progress (%)</label>
+                  <input type="number" name="progress_akumulatif" min="0" max="100" step="1" value="${data.progress_akumulatif != null ? data.progress_akumulatif : 0}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label class="block text-xs font-semibold text-slate-700 mb-1">Tempat Inspeksi</label>
+                  <input type="text" name="place_of_inspection" value="${escapeHtml(data.place_of_inspection || '')}" placeholder="Wellpad, Lapangan, dll" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+                </div>
+              </div>
+            </div>
+
+            <!-- Section B: Client & Spesifikasi -->
+            <div class="bg-slate-50 rounded-lg p-3">
+              <h4 class="font-bold text-navy text-sm uppercase mb-2">B. Client & Spesifikasi</h4>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-xs font-semibold text-slate-700 mb-1">Client</label>
+                  <input type="text" name="client" value="${escapeHtml(data.client || '')}" placeholder="PT Pertamina EP" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label class="block text-xs font-semibold text-slate-700 mb-1">Service</label>
+                  <input type="text" name="service" value="${escapeHtml(data.service || '')}" placeholder="Workover Service" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label class="block text-xs font-semibold text-slate-700 mb-1">Rig Type</label>
+                  <input type="text" name="rig_type" value="${escapeHtml(data.rig_type || '')}" placeholder="Mobile Rig 350 HP" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label class="block text-xs font-semibold text-slate-700 mb-1">Manufacturer</label>
+                  <input type="text" name="manufacturer" value="${escapeHtml(data.manufacturer || '')}" placeholder="Cooper" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label class="block text-xs font-semibold text-slate-700 mb-1">Tahun Pembuatan</label>
+                  <input type="number" name="year_manufactured" min="1900" max="2100" value="${data.year_manufactured || ''}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label class="block text-xs font-semibold text-slate-700 mb-1">Model / Serial</label>
+                  <input type="text" name="model_serial" value="${escapeHtml(data.model_serial || '')}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label class="block text-xs font-semibold text-slate-700 mb-1">Height of Mast (m)</label>
+                  <input type="number" step="0.1" name="height_of_mast" value="${data.height_of_mast || ''}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label class="block text-xs font-semibold text-slate-700 mb-1">Hook Load (Metric Ton)</label>
+                  <input type="number" step="0.1" name="hook_load" value="${data.hook_load || ''}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label class="block text-xs font-semibold text-slate-700 mb-1">Power (HP)</label>
+                  <input type="number" step="1" name="power_hp" value="${data.power_hp || ''}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+                </div>
+              </div>
+            </div>
+
+            <!-- Section C: Catatan -->
+            <div class="bg-slate-50 rounded-lg p-3">
+              <h4 class="font-bold text-navy text-sm uppercase mb-2">C. Catatan</h4>
+              <textarea name="catatan" rows="3" placeholder="opsional" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm">${escapeHtml(data.catatan || '')}</textarea>
+            </div>
+
+            <div id="insp-form-error" class="hide bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-3"></div>
+          </form>
+        `,
+        footer: `
+          <button id="insp-cancel-btn" onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
+          <button id="insp-submit-btn" onclick="submitInspectionForm(${isEdit ? `'${existing.id}'` : 'null'})" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy-700 text-white text-sm font-semibold">
+            ${isEdit ? '💾 Simpan Perubahan' : '+ Buat Siklus'}
+          </button>
+        `,
+      });
+    }
+    window.openInspectionFormModal = openInspectionFormModal;
+
+    async function submitInspectionForm(id) {
+      const form = document.getElementById('insp-form');
+      const submitBtn = document.getElementById('insp-submit-btn');
+      const cancelBtn = document.getElementById('insp-cancel-btn');
+      const errBox = document.getElementById('insp-form-error');
+      hide(errBox);
+
+      // Build payload
+      const payload = {};
+      ['inspection_code','kategori_inspeksi','client','service','rig_type','manufacturer','model_serial','place_of_inspection','pi_company','rig_inspector','status','catatan','start_date','end_date'].forEach(f => {
+        const el = form.elements[f];
+        if (el) payload[f] = el.value || null;
+      });
+      payload.parent_unit_id = Number(form.elements.parent_unit_id.value) || null;
+      ['year_manufactured','height_of_mast','hook_load','power_hp','progress_akumulatif'].forEach(f => {
+        const v = form.elements[f]?.value;
+        payload[f] = v === '' ? null : Number(v);
+      });
+
+      // Validate
+      if (!payload.inspection_code) { errBox.textContent = 'Kode siklus wajib diisi.'; show(errBox); return; }
+      if (!payload.parent_unit_id)  { errBox.textContent = 'Pilih rig dulu.'; show(errBox); return; }
+      if (!payload.start_date)      { errBox.textContent = 'Tanggal mulai wajib diisi.'; show(errBox); return; }
+      if (!payload.pi_company)      { errBox.textContent = 'PI wajib diisi.'; show(errBox); return; }
+      if (!payload.rig_inspector)   { errBox.textContent = 'Rig Inspector wajib diisi.'; show(errBox); return; }
+
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Menyimpan…'; }
+      if (cancelBtn) cancelBtn.disabled = true;
+      try {
+        let saved;
+        if (id) {
+          saved = await updateInspection(id, payload);
+          logActivity('updated', 'inspection', id, saved.inspection_code);
+          toast('Siklus berhasil di-update.', 'success');
+        } else {
+          saved = await createInspection(payload);
+          logActivity('created', 'inspection', saved.id, saved.inspection_code, {
+            rig: getParentUnitName(saved.parent_unit_id),
+            kategori: saved.kategori_inspeksi,
+          });
+          toast('Siklus baru berhasil dibuat.', 'success');
+        }
+        closeModal();
+        setInspectionView('detail', saved.id);
+      } catch (err) {
+        errBox.textContent = `Gagal: ${err.message}`;
+        show(errBox);
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = id ? '💾 Simpan Perubahan' : '+ Buat Siklus'; }
+        if (cancelBtn) cancelBtn.disabled = false;
+      }
+    }
+    window.submitInspectionForm = submitInspectionForm;
+
+    async function confirmDeleteInspection(id, code) {
+      const ok = await confirmDialog({
+        title: 'Hapus Siklus Inspeksi?',
+        message: `Yakin mau hapus siklus "${code}"? SEMUA temuan dan foto terkait ikut terhapus. Aksi tidak bisa di-undo.`,
+        confirmText: 'Hapus',
+        danger: true,
+      });
+      if (!ok) return;
+      try {
+        await deleteInspection(id);
+        logActivity('deleted', 'inspection', id, code);
+        toast('Siklus dihapus.', 'success');
+        setInspectionView('list');
+      } catch (err) {
+        toast('Gagal hapus: ' + err.message, 'error');
+      }
+    }
+    window.confirmDeleteInspection = confirmDeleteInspection;
+
+    // ============================================================
+    // 9c.7. INSPEKSI — FORM MODAL: TEMUAN (with conditional Mast bagian)
+    // ============================================================
+    function MAST_BAGIAN_OPTIONS() {
+      return ['A-Frame', 'Crown Block', 'Upper', 'Lower', 'Monkey Board'];
+    }
+
+    function isMastCategory(kategoriId) {
+      const cat = state.categories.find(c => c.id === kategoriId);
+      if (!cat) return false;
+      // Mast atau Mast (Slickline) atau apapun yang mengandung "Mast"
+      return /^mast\b/i.test(cat.name) || /\bmast\b/i.test(cat.name);
+    }
+
+    async function openFindingFormModal(existing = null) {
+      const insp = window.__currentInspection;
+      if (!insp) { toast('Buka detail siklus dulu.', 'warn'); return; }
+      const isEdit = !!existing;
+
+      // Fetch equipment di rig ini
+      let equipmentList = [];
+      try { equipmentList = await fetchEquipmentByRig(insp.parent_unit_id); }
+      catch (err) { toast('Gagal load equipment: ' + err.message, 'error'); return; }
+
+      const findings = window.__currentFindings || [];
+      const nextNoUrut = findings.length > 0 ? Math.max(...findings.map(f => f.no_urut)) + 1 : 1;
+      const today = new Date().toISOString().slice(0, 10);
+
+      const data = existing || {
+        no_urut: nextNoUrut,
+        category: 'Major',
+        status: 'Open',
+        tgl_ditemukan: today,
+        mpi_result: 'N/A',
+      };
+
+      const eqOpts = ['<option value="">— pilih (atau biarkan untuk unresolved) —</option>'].concat(
+        equipmentList.map(e => {
+          const cat = state.categories.find(c => c.id === e.kategori_id);
+          return `<option value="${e.id}" data-name="${escapeHtml(e.nama_equipment)}" data-kategori="${e.kategori_id}" ${data.equipment_id === e.id ? 'selected' : ''}>${escapeHtml(e.tag_number)} — ${escapeHtml(e.nama_equipment)} ${cat ? '(' + escapeHtml(cat.name) + ')' : ''}</option>`;
+        })
+      ).join('');
+
+      openModal({
+        title: isEdit ? 'Edit Temuan' : 'Tambah Temuan Baru',
+        maxWidth: 'max-w-2xl',
+        body: `
+          <form id="finding-form" class="space-y-3">
+            <div class="bg-slate-50 rounded p-2 text-xs text-slate-600">
+              Siklus: <span class="font-semibold text-navy">${escapeHtml(insp.inspection_code)}</span> • Rig: <span class="font-semibold">${escapeHtml(getParentUnitName(insp.parent_unit_id))}</span>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div>
+                <label class="block text-xs font-semibold text-slate-700 mb-1">No Urut *</label>
+                <input type="number" name="no_urut" required min="1" value="${data.no_urut}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+              </div>
+              <div class="md:col-span-2">
+                <label class="block text-xs font-semibold text-slate-700 mb-1">Equipment</label>
+                <select name="equipment_id" id="finding-eq-select" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">
+                  ${eqOpts}
+                </select>
+                <p class="text-xs text-slate-500 mt-1">${equipmentList.length} equipment di rig ${escapeHtml(getParentUnitName(insp.parent_unit_id))}.</p>
+              </div>
+            </div>
+
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Nama Equipment (snapshot) *</label>
+              <input type="text" name="equipment_name_snapshot" id="finding-eq-name" required value="${escapeHtml(data.equipment_name_snapshot || '')}" placeholder="Auto-fill dari pilihan di atas, atau ketik manual" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div>
+                <label class="block text-xs font-semibold text-slate-700 mb-1">Qty</label>
+                <input type="text" name="qty" value="${escapeHtml(data.qty || '')}" placeholder="1ea" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+              </div>
+              <div class="md:col-span-2">
+                <label class="block text-xs font-semibold text-slate-700 mb-1">Bagian <span id="finding-bagian-hint" class="text-slate-400 font-normal">(opsional)</span></label>
+                <div id="finding-bagian-wrapper">
+                  <input type="text" name="bagian" value="${escapeHtml(data.bagian || '')}" placeholder="contoh: Crown Block" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+                </div>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs font-semibold text-slate-700 mb-1">Category *</label>
+                <select name="category" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">
+                  <option value="Critical" ${data.category==='Critical'?'selected':''}>Critical (kerusakan utama / nyawa)</option>
+                  <option value="Major" ${data.category==='Major'?'selected':''}>Major (kerusakan menghambat operasi)</option>
+                  <option value="N/A" ${data.category==='N/A'?'selected':''}>N/A (kondisi baik)</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-700 mb-1">MPI Result</label>
+                <select name="mpi_result" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">
+                  <option value="N/A" ${data.mpi_result==='N/A'?'selected':''}>N/A</option>
+                  <option value="No Discontinuity" ${data.mpi_result==='No Discontinuity'?'selected':''}>No Discontinuity</option>
+                  <option value="Discontinuity" ${data.mpi_result==='Discontinuity'?'selected':''}>Discontinuity</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Finding (Deskripsi)</label>
+              <textarea name="finding" rows="2" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm">${escapeHtml(data.finding || '')}</textarea>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs font-semibold text-slate-700 mb-1">Acceptance Criteria</label>
+                <input type="text" name="acceptance_criteria" value="${escapeHtml(data.acceptance_criteria || '')}" placeholder="contoh: API RP 8B Section 5.3.2.4" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-700 mb-1">Recommendation</label>
+                <input type="text" name="recommendation" value="${escapeHtml(data.recommendation || '')}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div>
+                <label class="block text-xs font-semibold text-slate-700 mb-1">Tgl Ditemukan *</label>
+                <input type="date" name="tgl_ditemukan" required value="${escapeHtml(data.tgl_ditemukan || today)}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-700 mb-1">Status</label>
+                <select name="status" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">
+                  <option value="Open" ${data.status==='Open'?'selected':''}>Open</option>
+                  <option value="Closed" ${data.status==='Closed'?'selected':''}>Closed</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-700 mb-1">Tgl Closed</label>
+                <input type="date" name="tgl_closed" value="${escapeHtml(data.tgl_closed || '')}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+              </div>
+            </div>
+
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">PIC Perbaikan</label>
+              <input type="text" name="pic_perbaikan" value="${escapeHtml(data.pic_perbaikan || '')}" placeholder="Tim Mekanik / Vendor" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+            </div>
+
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Catatan</label>
+              <textarea name="catatan" rows="2" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm">${escapeHtml(data.catatan || '')}</textarea>
+            </div>
+
+            <div id="finding-form-error" class="hide bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-3"></div>
+          </form>
+        `,
+        footer: `
+          <button id="finding-cancel-btn" onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
+          <button id="finding-submit-btn" onclick="submitFindingForm(${isEdit ? `'${existing.id}'` : 'null'})" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy-700 text-white text-sm font-semibold">
+            ${isEdit ? '💾 Simpan' : '+ Tambah Temuan'}
+          </button>
+        `,
+      });
+
+      // Wire up: when equipment changes, auto-fill nama snapshot + check Mast for bagian
+      setTimeout(() => {
+        const eqSel = document.getElementById('finding-eq-select');
+        const eqName = document.getElementById('finding-eq-name');
+        const refreshBagianField = (kategoriId, currentValue) => {
+          const wrap = document.getElementById('finding-bagian-wrapper');
+          const hint = document.getElementById('finding-bagian-hint');
+          if (!wrap) return;
+          if (isMastCategory(Number(kategoriId))) {
+            // Conditional dropdown Mast
+            wrap.innerHTML = `<select name="bagian" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">
+              <option value="">— pilih bagian Mast —</option>
+              ${MAST_BAGIAN_OPTIONS().map(b => `<option value="${b}" ${currentValue === b ? 'selected' : ''}>${b}</option>`).join('')}
+            </select>`;
+            if (hint) hint.textContent = '(wajib pilih untuk Mast)';
+          } else {
+            wrap.innerHTML = `<input type="text" name="bagian" value="${escapeHtml(currentValue || '')}" placeholder="opsional" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />`;
+            if (hint) hint.textContent = '(opsional)';
+          }
+        };
+
+        // Initial render
+        if (data.equipment_id) {
+          const e = equipmentList.find(x => x.id === data.equipment_id);
+          if (e) refreshBagianField(e.kategori_id, data.bagian);
+        }
+
+        eqSel.addEventListener('change', (ev) => {
+          const opt = ev.target.options[ev.target.selectedIndex];
+          if (opt && opt.value) {
+            eqName.value = opt.getAttribute('data-name') || eqName.value;
+            const katId = opt.getAttribute('data-kategori');
+            refreshBagianField(katId, '');
+          } else {
+            // No equipment selected — reset bagian to text input
+            refreshBagianField(null, '');
+          }
+        });
+      }, 0);
+    }
+    window.openFindingFormModal = openFindingFormModal;
+
+    async function submitFindingForm(id) {
+      const form = document.getElementById('finding-form');
+      const submitBtn = document.getElementById('finding-submit-btn');
+      const cancelBtn = document.getElementById('finding-cancel-btn');
+      const errBox = document.getElementById('finding-form-error');
+      hide(errBox);
+
+      const insp = window.__currentInspection;
+      if (!insp) return;
+
+      const payload = {
+        inspection_id: insp.id,
+        no_urut: Number(form.elements.no_urut.value),
+        equipment_id: form.elements.equipment_id.value || null,
+        equipment_name_snapshot: form.elements.equipment_name_snapshot.value.trim(),
+        qty: form.elements.qty.value || null,
+        bagian: form.elements.bagian.value || null,
+        category: form.elements.category.value,
+        finding: form.elements.finding.value || null,
+        mpi_result: form.elements.mpi_result.value || null,
+        acceptance_criteria: form.elements.acceptance_criteria.value || null,
+        recommendation: form.elements.recommendation.value || null,
+        tgl_ditemukan: form.elements.tgl_ditemukan.value,
+        status: form.elements.status.value,
+        tgl_closed: form.elements.tgl_closed.value || null,
+        pic_perbaikan: form.elements.pic_perbaikan.value || null,
+        catatan: form.elements.catatan.value || null,
+      };
+
+      // Validation
+      if (!payload.no_urut)               { errBox.textContent = 'No urut wajib diisi.'; show(errBox); return; }
+      if (!payload.equipment_name_snapshot) { errBox.textContent = 'Nama Equipment wajib diisi.'; show(errBox); return; }
+      if (!payload.category)              { errBox.textContent = 'Category wajib dipilih.'; show(errBox); return; }
+      if (!payload.tgl_ditemukan)         { errBox.textContent = 'Tanggal ditemukan wajib diisi.'; show(errBox); return; }
+      if (payload.status === 'Closed' && !payload.tgl_closed) { errBox.textContent = 'Status Closed butuh Tanggal Closed.'; show(errBox); return; }
+
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Menyimpan…'; }
+      if (cancelBtn) cancelBtn.disabled = true;
+      try {
+        let saved;
+        if (id) {
+          saved = await updateFinding(id, payload);
+          logActivity('updated', 'finding', id, payload.equipment_name_snapshot);
+          toast('Temuan berhasil di-update.', 'success');
+        } else {
+          saved = await createFinding(payload);
+          logActivity('created', 'finding', saved.id, payload.equipment_name_snapshot, { siklus: insp.inspection_code, category: payload.category });
+          toast('Temuan baru berhasil dibuat.', 'success');
+          // 🔔 Telegram alert untuk Critical baru
+          if (payload.category === 'Critical') {
+            sendTelegramAlert(
+              `🚨 <b>CRITICAL FINDING</b>\n` +
+              `Siklus: <b>${insp.inspection_code}</b>\n` +
+              `Rig: ${getParentUnitName(insp.parent_unit_id)}\n` +
+              `Equipment: <b>${payload.equipment_name_snapshot}</b>${payload.bagian ? ' (' + payload.bagian + ')' : ''}\n` +
+              `📝 ${payload.finding || '—'}\n` +
+              (payload.recommendation ? `💡 ${payload.recommendation}\n` : '') +
+              `👤 ${state.profile.full_name || state.profile.email}`
+            );
+          }
+        }
+        closeModal();
+        // Refresh detail view
+        setInspectionView('detail', insp.id, 'temuan');
+      } catch (err) {
+        errBox.textContent = `Gagal: ${err.message}`;
+        show(errBox);
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = id ? '💾 Simpan' : '+ Tambah Temuan'; }
+        if (cancelBtn) cancelBtn.disabled = false;
+      }
+    }
+    window.submitFindingForm = submitFindingForm;
+
+    async function confirmDeleteFinding(id, label) {
+      const ok = await confirmDialog({
+        title: 'Hapus Temuan?',
+        message: `Yakin mau hapus temuan "${label}"? Foto & link maintenance_log ikut terhapus.`,
+        confirmText: 'Hapus',
+        danger: true,
+      });
+      if (!ok) return;
+      try {
+        await deleteFinding(id);
+        logActivity('deleted', 'finding', id, label);
+        toast('Temuan dihapus.', 'success');
+        if (window.__currentInspection) setInspectionView('detail', window.__currentInspection.id, 'temuan');
+      } catch (err) {
+        toast('Gagal hapus: ' + err.message, 'error');
+      }
+    }
+    window.confirmDeleteFinding = confirmDeleteFinding;
+
+    // ============================================================
+    // 9c.8. INSPEKSI — FOTO HANDLER PER FINDING
+    // ============================================================
+    async function handleFindingPhotoUpload(event, findingId, slot) {
+      const files = Array.from(event.target.files || []);
+      if (!files.length) return;
+      const finding = (window.__currentFindings || []).find(f => f.id === findingId);
+      if (!finding) { toast('Finding gak ketemu.', 'error'); return; }
+      const existing = Array.isArray(slot === 'before' ? finding.photos_before : finding.photos_after)
+        ? (slot === 'before' ? finding.photos_before : finding.photos_after)
+        : [];
+      const maxToAdd = 4 - existing.length;
+      if (maxToAdd <= 0) { toast('Slot foto sudah penuh (max 4).', 'warn'); return; }
+      const toUpload = files.slice(0, maxToAdd);
+
+      toast(`Mengupload ${toUpload.length} foto…`, 'info');
+      const newUrls = [];
+      for (const file of toUpload) {
+        try {
+          const url = await uploadFindingPhoto(findingId, slot, file);
+          newUrls.push(url);
+        } catch (err) {
+          toast(`Gagal upload ${file.name}: ${err.message}`, 'error');
+        }
+      }
+      if (newUrls.length === 0) return;
+
+      const newList = [...existing, ...newUrls];
+      try {
+        const update = slot === 'before' ? { photos_before: newList } : { photos_after: newList };
+        await updateFinding(findingId, update);
+        logActivity('photo_uploaded', 'finding', findingId, finding.equipment_name_snapshot, { slot, count: newUrls.length });
+        toast(`✅ ${newUrls.length} foto ter-upload.`, 'success');
+        event.target.value = '';
+        if (window.__currentInspection) setInspectionView('detail', window.__currentInspection.id, 'temuan');
+      } catch (err) {
+        toast('Gagal update foto: ' + err.message, 'error');
+      }
+    }
+    window.handleFindingPhotoUpload = handleFindingPhotoUpload;
+
+    async function deleteFindingPhoto(findingId, slot, photoUrl) {
+      const ok = await confirmDialog({
+        title: 'Hapus Foto?',
+        message: 'Foto akan dihapus permanen dari storage. Lanjut?',
+        confirmText: 'Hapus',
+        danger: true,
+      });
+      if (!ok) return;
+      const finding = (window.__currentFindings || []).find(f => f.id === findingId);
+      if (!finding) return;
+      const existing = Array.isArray(slot === 'before' ? finding.photos_before : finding.photos_after)
+        ? (slot === 'before' ? finding.photos_before : finding.photos_after)
+        : [];
+      const newList = existing.filter(u => u !== photoUrl);
+      try {
+        const update = slot === 'before' ? { photos_before: newList } : { photos_after: newList };
+        await updateFinding(findingId, update);
+        await deleteFindingPhotoFromStorage(photoUrl);
+        logActivity('photo_deleted', 'finding', findingId, finding.equipment_name_snapshot, { slot });
+        toast('Foto dihapus.', 'success');
+        if (window.__currentInspection) setInspectionView('detail', window.__currentInspection.id, 'temuan');
+      } catch (err) {
+        toast('Gagal hapus: ' + err.message, 'error');
+      }
+    }
+    window.deleteFindingPhoto = deleteFindingPhoto;
 
     // ============================================================
     // 9d. EQUIPMENT LIST VIEW
