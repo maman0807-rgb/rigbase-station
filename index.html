@@ -297,6 +297,7 @@
       currentInspectionId: null,
       inspectionDetailTab: 'temuan', // 'temuan' | 'pdf' | 'catatan'
       inspectionFilters: { kategori: '', parent_unit_id: '', status: '', tahun: '', search: '' },
+      findingFilters: { status: '', category: '' },
     };
 
     // ============================================================
@@ -2485,19 +2486,59 @@
     function renderTemuanList(findings) {
       const insp = window.__currentInspection;
       const isAdmin = state.profile.role === 'admin';
-      const addBtn = `
-        <div class="flex justify-end mb-3">
-          <button onclick="openFindingFormModal()" class="bg-safety hover:bg-safety-700 text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 shadow-sm">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
-            Tambah Temuan
-          </button>
-        </div>`;
+      const f = state.findingFilters;
+      // Apply filter
+      const filtered = findings.filter(item => {
+        if (f.status   && item.status   !== f.status)   return false;
+        if (f.category && item.category !== f.category) return false;
+        return true;
+      });
+      const hasActive = !!(f.status || f.category);
+
+      // Count per status & category buat info badge
+      const counts = {
+        open:     findings.filter(x => x.status === 'Open').length,
+        closed:   findings.filter(x => x.status === 'Closed').length,
+        critical: findings.filter(x => x.category === 'Critical').length,
+        major:    findings.filter(x => x.category === 'Major').length,
+        na:       findings.filter(x => x.category === 'N/A').length,
+      };
+
+      const filterBar = `
+        <div class="bg-slate-50 border border-slate-200 rounded-lg p-3 mb-3 space-y-2">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="text-xs font-bold text-slate-600 uppercase">Filter:</span>
+            <select id="finding-filter-status" onchange="state.findingFilters.status=this.value; refreshTemuanTab();" class="px-3 py-1.5 border border-slate-300 rounded text-sm bg-white">
+              <option value="">Semua Status (${findings.length})</option>
+              <option value="Open"   ${f.status==='Open'?'selected':''}>Open / On Progress (${counts.open})</option>
+              <option value="Closed" ${f.status==='Closed'?'selected':''}>Closed (${counts.closed})</option>
+            </select>
+            <select id="finding-filter-category" onchange="state.findingFilters.category=this.value; refreshTemuanTab();" class="px-3 py-1.5 border border-slate-300 rounded text-sm bg-white">
+              <option value="">Semua Kategori</option>
+              <option value="Critical" ${f.category==='Critical'?'selected':''}>🚨 Critical (${counts.critical})</option>
+              <option value="Major"    ${f.category==='Major'?'selected':''}>⚠ Major (${counts.major})</option>
+              <option value="N/A"      ${f.category==='N/A'?'selected':''}>N/A (${counts.na})</option>
+            </select>
+            ${hasActive ? `<button onclick="resetFindingFilters()" class="px-3 py-1.5 border border-safety text-safety hover:bg-safety hover:text-white rounded text-xs font-semibold transition">↻ Reset</button>` : ''}
+            <div class="flex-1"></div>
+            <button onclick="openFindingFormModal()" class="bg-safety hover:bg-safety-700 text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 shadow-sm">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+              Tambah Temuan
+            </button>
+          </div>
+          ${hasActive ? `<div class="text-xs text-slate-600">Menampilkan <b>${filtered.length}</b> dari <b>${findings.length}</b> temuan</div>` : ''}
+        </div>
+      `;
+
       if (findings.length === 0) {
-        return addBtn + '<div class="text-center py-6 text-slate-400 text-sm bg-slate-50 rounded-lg">Belum ada temuan untuk siklus ini.</div>';
+        return filterBar + '<div class="text-center py-6 text-slate-400 text-sm bg-slate-50 rounded-lg">Belum ada temuan untuk siklus ini.</div>';
       }
-      return addBtn + `
+      if (filtered.length === 0) {
+        return filterBar + '<div class="text-center py-6 text-slate-400 text-sm bg-slate-50 rounded-lg">Tidak ada temuan yang cocok dengan filter. Coba reset filter.</div>';
+      }
+      return filterBar + `
         <div class="space-y-3">
-          ${findings.map(f => {
+          ${filtered.map(f => {
             const photosBefore = Array.isArray(f.photos_before) ? f.photos_before : [];
             const photosAfter = Array.isArray(f.photos_after) ? f.photos_after : [];
             const eqLink = f.equipment_id
@@ -2578,6 +2619,20 @@
         </div>
       `;
     }
+
+    // Refresh tab Temuan tanpa reload full detail (hemat fetch)
+    function refreshTemuanTab() {
+      const c = document.getElementById('insp-tab-content');
+      if (!c) return;
+      c.innerHTML = renderTemuanList(window.__currentFindings || []);
+    }
+    window.refreshTemuanTab = refreshTemuanTab;
+
+    function resetFindingFilters() {
+      state.findingFilters = { status: '', category: '' };
+      refreshTemuanTab();
+    }
+    window.resetFindingFilters = resetFindingFilters;
 
     function openFindingPhotoLightbox(findingId, slot, idx) {
       const findings = window.__currentFindings || [];
