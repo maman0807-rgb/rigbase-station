@@ -3233,10 +3233,69 @@
       // DD/MM/YYYY or DD-MM-YYYY
       m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
       if (m) return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
-      // Try parse as date string
+      // DD Bulan YYYY (Indonesia) — "15 Mei 2026"
+      const monthsId = {
+        januari: 1, februari: 2, maret: 3, april: 4, mei: 5, juni: 6,
+        juli: 7, agustus: 8, september: 9, oktober: 10, november: 11, desember: 12,
+        jan: 1, feb: 2, mar: 3, apr: 4, jun: 6, jul: 7, ags: 8, agu: 8,
+        sep: 9, okt: 10, nov: 11, des: 12
+      };
+      m = s.match(/^(\d{1,2})\s+([a-zA-Z]+)\s+(\d{4})/);
+      if (m) {
+        const monthIdx = monthsId[m[2].toLowerCase()];
+        if (monthIdx) return `${m[3]}-${String(monthIdx).padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+      }
+      // Try parse as date string fallback
       const d = new Date(s);
       if (!isNaN(d)) return d.toISOString().slice(0, 10);
       return s;
+    }
+
+    // Parse numeric with unit/text: "96 feet" → 96, "97,5 Ton Metric" → 97.5, "350 HP" → 350
+    function parseNumericWithUnit(v) {
+      if (v == null || v === '') return null;
+      if (typeof v === 'number') return v;
+      const s = String(v).trim();
+      // Cari angka pertama (handle decimal koma dan titik)
+      const m = s.match(/-?[\d.,]+/);
+      if (!m) return null;
+      // Indonesia decimal: koma → titik. Kalau ada titik & koma, asumsikan titik = thousand separator
+      let numStr = m[0];
+      if (numStr.includes(',') && numStr.includes('.')) {
+        // "1.234,56" → "1234.56"
+        numStr = numStr.replace(/\./g, '').replace(',', '.');
+      } else if (numStr.includes(',')) {
+        numStr = numStr.replace(',', '.');
+      }
+      const n = parseFloat(numStr);
+      return isNaN(n) ? null : n;
+    }
+
+    // Extract qty dari nama equipment: "Spider Slip 3ea" → { name: "Spider Slip", qty: "3ea" }
+    function extractQtyFromName(name) {
+      if (!name) return { name: '', qty: null };
+      const s = String(name).trim();
+      const m = s.match(/^(.+?)\s+(\d+\s*(?:ea|pcs|set|pc|unit|buah))$/i);
+      if (m) return { name: m[1].trim(), qty: m[2].replace(/\s+/g, '') };
+      return { name: s, qty: null };
+    }
+
+    // Strip rig prefix: "RIG BW H35KD" → "BW H35KD"
+    function stripRigPrefix(name) {
+      return String(name || '').trim().replace(/^RIG\s+/i, '');
+    }
+
+    // Auto-detect bagian Mast dari nama equipment (case-insensitive)
+    function detectMastBagian(equipmentName) {
+      const n = String(equipmentName || '').toLowerCase().trim();
+      const parts = ['A-Frame', 'Crown Block', 'Upper', 'Lower', 'Monkey Board'];
+      for (const p of parts) {
+        // Match exact or contains as word
+        if (n === p.toLowerCase()) return p;
+        const regex = new RegExp(`\\b${p.toLowerCase().replace(/-/g, '[-\\s]?')}\\b`);
+        if (regex.test(n)) return p;
+      }
+      return null;
     }
 
     // Generate template Excel kosong
@@ -3362,24 +3421,24 @@
         data.status = 'On Progress';
       }
 
-      // Resolve rig
+      // Resolve rig (strip prefix "RIG " kalau ada — sesuai format laporan PI)
       if (data._rig_name) {
-        const rigName = String(data._rig_name).trim();
+        const rigName = stripRigPrefix(data._rig_name);
         const unit = state.parentUnits.find(u => u.name === rigName);
         if (!unit) data._errors.push(`Rig "${rigName}" tidak ditemukan di parent_units`);
         else data.parent_unit_id = unit.id;
       }
 
-      // Parse dates
+      // Parse dates (support format ID: "15 Mei 2026")
       if (data.start_date) data.start_date = parseExcelDate(data.start_date);
       if (data.end_date)   data.end_date = parseExcelDate(data.end_date);
 
-      // Numeric coercion
+      // Numeric coercion pakai parseNumericWithUnit (strip unit + handle koma decimal)
       ['progress_akumulatif', 'year_manufactured', 'height_of_mast', 'hook_load', 'power_hp'].forEach(f => {
         if (data[f] != null && data[f] !== '') {
-          const n = Number(data[f]);
-          if (!isNaN(n)) data[f] = n;
-          else { data[f] = null; data._warnings.push(`${f} bukan angka: ${data[f]} (di-skip)`); }
+          const n = parseNumericWithUnit(data[f]);
+          if (n != null) data[f] = n;
+          else { data._warnings.push(`${f} bukan angka: ${data[f]} (di-skip)`); data[f] = null; }
         }
       });
 
@@ -3448,21 +3507,52 @@
         } catch (e) { /* ignore */ }
       }
 
-      // Equipment resolution
+      // Step 1: Extract qty dari nama equipment (kalau qty kosong)
+      if (!data.qty && (data.equipment_name_snapshot || data._equipment_query)) {
+        const source = data.equipment_name_snapshot || data._equipment_query;
+        const { name, qty } = extractQtyFromName(source);
+        if (qty) {
+          data.qty = qty;
+          // Update sumber yang lebih bersih (tanpa qty di belakang)
+          if (data.equipment_name_snapshot) data.equipment_name_snapshot = name;
+          if (data._equipment_query) data._equipment_query = name;
+        }
+      }
+
+      // Step 2: Auto-detect bagian Mast dari nama equipment (kalau bagian kosong)
+      // Contoh: equipment "Crown Block" → bagian="Crown Block", equipment_query di-redirect ke MAST-XXX
+      if (!data.bagian && (data.equipment_name_snapshot || data._equipment_query)) {
+        const source = data.equipment_name_snapshot || data._equipment_query;
+        const detected = detectMastBagian(source);
+        if (detected) {
+          data.bagian = detected;
+          // Auto-redirect query ke equipment Mast di rig ini (kalau ada)
+          if (parentUnitId) {
+            const candidates = equipmentByRig[parentUnitId] || [];
+            const mastEq = candidates.find(e => /^mast/i.test(e.nama_equipment) || /^mast/i.test(e.tag_number));
+            if (mastEq) {
+              data._equipment_query = mastEq.tag_number;
+              if (!data.equipment_name_snapshot || data.equipment_name_snapshot === source) {
+                data.equipment_name_snapshot = mastEq.nama_equipment;
+              }
+              data._warnings.push(`Auto-detect: "${detected}" dianggap bagian Mast → link ke ${mastEq.tag_number}`);
+            }
+          }
+        }
+      }
+
+      // Step 3: Equipment resolution (tag exact → name exact → name partial)
       if (data._equipment_query && parentUnitId) {
         const q = String(data._equipment_query).trim().toLowerCase();
         const candidates = equipmentByRig[parentUnitId] || [];
-        // Match by tag (exact, case-insensitive)
         let eq = candidates.find(e => e.tag_number.toLowerCase() === q);
-        // Fallback by name
         if (!eq) eq = candidates.find(e => e.nama_equipment.toLowerCase() === q);
-        // Partial match nama
         if (!eq) eq = candidates.find(e => e.nama_equipment.toLowerCase().includes(q));
         if (eq) {
           data.equipment_id = eq.id;
           if (!data.equipment_name_snapshot) data.equipment_name_snapshot = eq.nama_equipment;
         } else {
-          data._warnings.push(`Equipment "${data._equipment_query}" tidak ke-resolve (akan disimpan sebagai unresolved)`);
+          data._warnings.push(`Equipment "${data._equipment_query}" tidak ke-resolve (disimpan sebagai unresolved)`);
           if (!data.equipment_name_snapshot) data.equipment_name_snapshot = String(data._equipment_query);
         }
       } else if (!data.equipment_name_snapshot && data._equipment_query) {
