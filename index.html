@@ -296,7 +296,7 @@
       inspectionView: 'list', // 'list' | 'detail'
       currentInspectionId: null,
       inspectionDetailTab: 'temuan', // 'temuan' | 'pdf' | 'catatan'
-      inspectionFilters: { kategori: '', parent_unit_id: '', status: '', search: '' },
+      inspectionFilters: { kategori: '', parent_unit_id: '', status: '', tahun: '', search: '' },
     };
 
     // ============================================================
@@ -707,6 +707,10 @@
       if (f.kategori)       q = q.eq('kategori_inspeksi', f.kategori);
       if (f.parent_unit_id) q = q.eq('parent_unit_id', Number(f.parent_unit_id));
       if (f.status)         q = q.eq('status', f.status);
+      if (f.tahun) {
+        // Filter berdasarkan tahun start_date
+        q = q.gte('start_date', `${f.tahun}-01-01`).lte('start_date', `${f.tahun}-12-31`);
+      }
       if (f.search) {
         const s = f.search.trim();
         if (s) q = q.or(`inspection_code.ilike.%${s}%,pi_company.ilike.%${s}%,rig_inspector.ilike.%${s}%`);
@@ -714,6 +718,20 @@
       const { data, error } = await q;
       if (error) throw error;
       return data || [];
+    }
+
+    // Fetch unique tahun pelaksanaan dari semua siklus inspeksi
+    async function fetchInspectionYears() {
+      const { data, error } = await state.supabase
+        .from('inspections')
+        .select('start_date')
+        .order('start_date', { ascending: false });
+      if (error) return [];
+      const years = new Set();
+      (data || []).forEach(r => {
+        if (r.start_date) years.add(new Date(r.start_date).getFullYear());
+      });
+      return [...years].sort((a, b) => b - a);
     }
 
     async function fetchInspection(id) {
@@ -2132,7 +2150,10 @@
                 class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-navy outline-none text-sm" />
             </div>
           </div>
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+            <select id="insp-tahun" class="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">
+              <option value="">Semua Tahun</option>
+            </select>
             <select id="insp-kategori" class="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">
               <option value="">Semua Kategori</option>
               <option value="Cat 3" ${state.inspectionFilters.kategori==='Cat 3'?'selected':''}>Cat 3 (Rutin)</option>
@@ -2166,7 +2187,23 @@
       })();
 
       setTimeout(() => {
+        // Populate dropdown tahun dari data actual
+        (async () => {
+          const years = await fetchInspectionYears();
+          const sel = $('#insp-tahun');
+          if (sel && years.length > 0) {
+            years.forEach(y => {
+              const opt = document.createElement('option');
+              opt.value = y;
+              opt.textContent = y;
+              if (state.inspectionFilters.tahun == y) opt.selected = true;
+              sel.appendChild(opt);
+            });
+          }
+        })();
+
         $('#insp-search').addEventListener('input', debounce(e => { state.inspectionFilters.search = e.target.value; reloadInspectionList(); }, 350));
+        $('#insp-tahun').onchange    = e => { state.inspectionFilters.tahun = e.target.value; reloadInspectionList(); };
         $('#insp-kategori').onchange = e => { state.inspectionFilters.kategori = e.target.value; reloadInspectionList(); };
         $('#insp-rig').onchange      = e => { state.inspectionFilters.parent_unit_id = e.target.value; reloadInspectionList(); };
         $('#insp-status').onchange   = e => { state.inspectionFilters.status = e.target.value; reloadInspectionList(); };
