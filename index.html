@@ -756,20 +756,22 @@
 
     async function fetchInspectionStats() {
       // KPI cards: total rig, siklus aktif, critical open, total open
-      const [insp, findOpen, findCritical] = await Promise.all([
+      // OPTIMIZED: 2 query parallel (bukan 3) — fetch findings sekali, agregate di client
+      const [insp, openFindings] = await Promise.all([
         state.supabase.from('inspections').select('id, status, parent_unit_id'),
-        state.supabase.from('inspection_findings').select('id', { count: 'exact', head: true }).eq('status', 'Open'),
-        state.supabase.from('inspection_findings').select('id', { count: 'exact', head: true }).eq('status', 'Open').eq('category', 'Critical'),
+        state.supabase.from('inspection_findings').select('category').eq('status', 'Open'),
       ]);
       const inspections = insp.data || [];
+      const findings = openFindings.data || [];
       const uniqueRigs = new Set(inspections.map(i => i.parent_unit_id)).size;
       const activeCycles = inspections.filter(i => i.status === 'On Progress').length;
+      const criticalOpen = findings.filter(f => f.category === 'Critical').length;
       return {
         total_rigs_inspected: uniqueRigs,
         active_cycles: activeCycles,
         total_cycles: inspections.length,
-        critical_open: findCritical.count || 0,
-        total_open: findOpen.count || 0,
+        critical_open: criticalOpen,
+        total_open: findings.length,
       };
     }
 
@@ -2320,24 +2322,44 @@
     async function reloadInspectionList() {
       const c = document.getElementById('insp-list-container');
       if (!c) return;
-      c.innerHTML = '<div class="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-400 text-sm">Memuat data…</div>';
+      // Skeleton loader (lebih informatif daripada "Memuat...")
+      c.innerHTML = `
+        <div class="space-y-2">
+          ${[1,2,3].map(() => `
+            <div class="bg-white border border-slate-200 rounded-xl p-4 animate-pulse">
+              <div class="h-5 bg-slate-200 rounded w-1/3 mb-2"></div>
+              <div class="h-4 bg-slate-100 rounded w-1/2 mb-2"></div>
+              <div class="h-3 bg-slate-100 rounded w-2/3"></div>
+            </div>
+          `).join('')}
+        </div>
+      `;
       try {
         const list = await fetchInspectionsList();
         if (list.length === 0) {
           c.innerHTML = '<div class="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-500">Belum ada siklus inspeksi yang cocok dengan filter.</div>';
           return;
         }
-        // Hitung findings count per siklus (paralel)
-        const counts = await Promise.all(list.map(async (i) => {
-          const { data } = await state.supabase.from('inspection_findings').select('id, status, category').eq('inspection_id', i.id);
-          const findings = data || [];
-          return {
-            total: findings.length,
-            open: findings.filter(f => f.status === 'Open').length,
-            critical_open: findings.filter(f => f.status === 'Open' && f.category === 'Critical').length,
-            major_open: findings.filter(f => f.status === 'Open' && f.category === 'Major').length,
-          };
-        }));
+        // OPTIMIZED: 1 query untuk semua counts (bukan N+1)
+        const inspIds = list.map(i => i.id);
+        const { data: allFindings } = await state.supabase
+          .from('inspection_findings')
+          .select('inspection_id, status, category')
+          .in('inspection_id', inspIds);
+        // Group counts per siklus
+        const countsMap = {};
+        inspIds.forEach(id => countsMap[id] = { total: 0, open: 0, critical_open: 0, major_open: 0 });
+        (allFindings || []).forEach(f => {
+          const cnt = countsMap[f.inspection_id];
+          if (!cnt) return;
+          cnt.total++;
+          if (f.status === 'Open') {
+            cnt.open++;
+            if (f.category === 'Critical') cnt.critical_open++;
+            else if (f.category === 'Major') cnt.major_open++;
+          }
+        });
+        const counts = list.map(i => countsMap[i.id]);
         c.innerHTML = list.map((i, idx) => {
           const cnt = counts[idx];
           const katBadge = i.kategori_inspeksi === 'Cat 4'
