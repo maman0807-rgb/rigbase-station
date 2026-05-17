@@ -4410,6 +4410,7 @@
                 ['maintenance','🛠️ Maintenance'],
                 ['sertifikasi','📜 Sertifikasi'],
                 ['dokumen','📎 Dokumen'],
+                ['inspeksi','🔍 Riwayat Inspeksi'],
                 ['history','🔄 History'],
               ].map(([id, lbl]) => `
                 <button onclick="state.equipmentDetailTab='${id}'; renderDetailTab(window.__currentEq)"
@@ -4438,7 +4439,7 @@
       const parent = c.parentElement.querySelector('.flex.border-b');
       if (parent) {
         parent.querySelectorAll('button').forEach((btn, i) => {
-          const ids = ['info','maintenance','sertifikasi','dokumen','history'];
+          const ids = ['info','maintenance','sertifikasi','dokumen','inspeksi','history'];
           btn.className = `px-4 py-3 text-sm font-medium whitespace-nowrap ${state.equipmentDetailTab===ids[i] ? 'border-b-2 border-safety text-safety bg-safety/5' : 'text-slate-600 hover:text-navy'}`;
         });
       }
@@ -4447,6 +4448,7 @@
         case 'sertifikasi': c.innerHTML = renderSertifikasiTab(eq); break;
         case 'maintenance': c.innerHTML = '<div class="text-slate-400">Memuat…</div>'; renderMaintenanceTab(eq, c); break;
         case 'dokumen':     c.innerHTML = '<div class="text-slate-400">Memuat…</div>'; renderDokumenTab(eq, c); break;
+        case 'inspeksi':    c.innerHTML = '<div class="text-slate-400">Memuat…</div>'; renderInspeksiHistoryTab(eq, c); break;
         case 'history':     c.innerHTML = '<div class="text-slate-400">Memuat…</div>'; renderHistoryTab(eq, c); break;
       }
     }
@@ -4733,6 +4735,113 @@
       else if (e.key === 'ArrowLeft') navigateLightbox(-1);
       else if (e.key === 'ArrowRight') navigateLightbox(1);
     }
+
+    // ============================================================
+    // 9e.2. RIWAYAT INSPEKSI TAB di Equipment Detail
+    // Tampilkan semua findings yang nyebut equipment ini, lintas siklus
+    // + auto-detect recurring (findings di bagian sama yang muncul ≥2x)
+    // ============================================================
+    async function renderInspeksiHistoryTab(eq, container) {
+      try {
+        const findings = await fetchFindingsByEquipment(eq.id);
+        if (findings.length === 0) {
+          container.innerHTML = '<div class="text-center py-6 text-slate-400 text-sm bg-slate-50 rounded-lg">Equipment ini belum pernah diinspeksi.</div>';
+          return;
+        }
+
+        // Stats
+        const counts = {
+          total: findings.length,
+          critical: findings.filter(f => f.category === 'Critical').length,
+          major:    findings.filter(f => f.category === 'Major').length,
+          minor:    findings.filter(f => f.category === 'Minor').length,
+          na:       findings.filter(f => f.category === 'N/A').length,
+          open:     findings.filter(f => f.status === 'Open').length,
+          siklus:   new Set(findings.map(f => f.inspection_id)).size,
+        };
+
+        // Deteksi recurring per bagian (kalau bagian sama muncul ≥2x dengan category non-N/A)
+        const recurringMap = {};  // { 'Crown Block': [finding1, finding2, ...] }
+        findings.forEach(f => {
+          if (f.category === 'N/A' || !f.bagian) return;
+          const key = f.bagian;
+          if (!recurringMap[key]) recurringMap[key] = [];
+          recurringMap[key].push(f);
+        });
+        const recurring = Object.entries(recurringMap).filter(([_, arr]) => arr.length >= 2);
+
+        // Index finding → occurrence number (untuk badge "Ke-N")
+        const findingOccurrence = {};
+        Object.entries(recurringMap).forEach(([bagian, arr]) => {
+          arr.sort((a, b) => (a.tgl_ditemukan || '').localeCompare(b.tgl_ditemukan || ''));
+          arr.forEach((f, idx) => { findingOccurrence[f.id] = idx + 1; });
+        });
+
+        const recurringAlert = recurring.length > 0 ? `
+          <div class="bg-red-50 border-2 border-red-300 rounded-lg p-4 mb-4">
+            <div class="flex items-center gap-2 mb-2">
+              <span class="text-2xl">🔁</span>
+              <h4 class="font-bold text-red-900">Temuan Berulang Terdeteksi</h4>
+            </div>
+            <div class="text-sm text-red-800 mb-2">Equipment ini punya finding berulang di bagian/area yang sama. Pertimbangkan <b>replacement permanen</b> atau <b>overhaul</b>:</div>
+            <ul class="text-sm text-red-800 space-y-1">
+              ${recurring.map(([bagian, arr]) => `
+                <li>• <b>${escapeHtml(bagian)}</b>: ${arr.length}× temuan (${arr.map(a => fmtDate(a.tgl_ditemukan)).join(', ')})</li>
+              `).join('')}
+            </ul>
+          </div>
+        ` : '';
+
+        container.innerHTML = `
+          <div class="space-y-4">
+            <!-- Stats card -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-center text-xs">
+              <div class="bg-slate-100 rounded p-2"><div class="font-bold text-lg text-slate-900">${counts.total}</div><div class="text-slate-600">Total Temuan</div></div>
+              <div class="bg-blue-50 rounded p-2"><div class="font-bold text-lg text-blue-700">${counts.siklus}</div><div class="text-blue-700">Siklus</div></div>
+              <div class="bg-red-50 rounded p-2"><div class="font-bold text-lg text-red-700">${counts.critical + counts.major + counts.minor}</div><div class="text-red-700">Major+ Findings</div></div>
+              <div class="bg-orange-50 rounded p-2"><div class="font-bold text-lg text-orange-700">${counts.open}</div><div class="text-orange-700">Masih Open</div></div>
+            </div>
+
+            ${recurringAlert}
+
+            <!-- Findings timeline -->
+            <div>
+              <h4 class="font-bold text-slate-800 mb-2">Riwayat (terbaru di atas)</h4>
+              <div class="space-y-2">
+                ${findings.map(f => {
+                  const occurrence = findingOccurrence[f.id];
+                  const recurringBadge = occurrence ? `<span class="px-2 py-0.5 bg-orange-100 text-orange-800 text-xs font-bold rounded">🔁 Ke-${occurrence}</span>` : '';
+                  return `
+                    <div class="border border-slate-200 rounded-lg p-3 ${f.category === 'Critical' ? 'bg-red-50/40' : f.category === 'Major' ? 'bg-amber-50/40' : f.category === 'Minor' ? 'bg-yellow-50/40' : 'bg-white'}">
+                      <div class="flex items-start justify-between gap-2 flex-wrap mb-1">
+                        <div class="flex items-center gap-2 flex-wrap">
+                          ${findingCategoryBadge(f.category)}
+                          ${findingStatusBadge(f.status)}
+                          ${recurringBadge}
+                          ${f.bagian ? `<span class="text-xs text-slate-600">• Bagian: <b>${escapeHtml(f.bagian)}</b></span>` : ''}
+                        </div>
+                        <div class="text-xs text-slate-500">${fmtDate(f.tgl_ditemukan)}</div>
+                      </div>
+                      ${f.finding ? `<div class="text-sm text-slate-700 mt-1">${escapeHtml(f.finding)}</div>` : ''}
+                      ${f.recommendation ? `<div class="text-xs text-slate-600 mt-1"><b>Rekomendasi:</b> ${escapeHtml(f.recommendation)}</div>` : ''}
+                      <div class="mt-2 flex items-center justify-between gap-2 text-xs text-slate-500">
+                        <button onclick="setInspectionView('detail','${f.inspection_id}','temuan'); navigate('inspections')" class="text-navy hover:underline font-semibold">
+                          📋 ${escapeHtml(f.inspection?.inspection_code || '—')}
+                        </button>
+                        <span>${escapeHtml(f.inspection?.pi_company || '—')}</span>
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+          </div>
+        `;
+      } catch (err) {
+        container.innerHTML = `<div class="bg-red-50 text-red-700 p-3 rounded">Gagal load: ${escapeHtml(err.message)}</div>`;
+      }
+    }
+    window.renderInspeksiHistoryTab = renderInspeksiHistoryTab;
 
     async function renderHistoryTab(eq, container) {
       try {
