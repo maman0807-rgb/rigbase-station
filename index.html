@@ -2239,9 +2239,18 @@
               <input type="text" id="insp-search" placeholder="🔍 Cari kode siklus / PI / inspector..." value="${escapeHtml(state.inspectionFilters.search)}"
                 class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-navy outline-none text-sm" />
             </div>
+            <button onclick="downloadInspectionTemplate()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-1.5" title="Download template Excel kosong">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+              <span class="hidden md:inline">Template</span>
+            </button>
+            <label class="bg-green-600 hover:bg-green-700 text-white px-3 py-2.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-1.5 cursor-pointer shadow-sm" title="Upload Excel bulk">
+              <input type="file" accept=".xlsx,.xls" class="hidden" onchange="handleInspectionExcelUpload(event)" />
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+              <span class="hidden md:inline">Upload Excel</span>
+            </label>
             <button onclick="openInspectionFormModal()" class="bg-safety hover:bg-safety-700 text-white px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 shadow-sm">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
-              Siklus Baru
+              <span class="hidden md:inline">Siklus Baru</span>
             </button>
           </div>
           <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
@@ -3131,6 +3140,569 @@
       }
     }
     window.handleFindingPhotoUpload = handleFindingPhotoUpload;
+
+    // ============================================================
+    // 9c.9. INSPEKSI — BULK UPLOAD EXCEL
+    // ============================================================
+
+    // Definisi kolom expected (header excel → DB field)
+    const SIKLUS_COLUMN_MAP = {
+      'id siklus':         'inspection_code',
+      'kode siklus':       'inspection_code',
+      'rig':               '_rig_name',  // resolve to parent_unit_id
+      'kategori':          'kategori_inspeksi',
+      'pi':                'pi_company',
+      'pi company':        'pi_company',
+      'inspector':         'rig_inspector',
+      'rig inspector':     'rig_inspector',
+      'tanggal mulai':     'start_date',
+      'start date':        'start_date',
+      'tanggal selesai':   'end_date',
+      'end date':          'end_date',
+      'status':            'status',
+      'progress':          'progress_akumulatif',
+      'progress %':        'progress_akumulatif',
+      'client':            'client',
+      'service':           'service',
+      'rig type':          'rig_type',
+      'manufacturer':      'manufacturer',
+      'year':              'year_manufactured',
+      'tahun':             'year_manufactured',
+      'model/serial':      'model_serial',
+      'model':             'model_serial',
+      'mast height':       'height_of_mast',
+      'height of mast':    'height_of_mast',
+      'hook load':         'hook_load',
+      'power hp':          'power_hp',
+      'power':             'power_hp',
+      'place':             'place_of_inspection',
+      'tempat':            'place_of_inspection',
+      'catatan':           'catatan',
+      'notes':             'catatan',
+    };
+
+    const TEMUAN_COLUMN_MAP = {
+      'id siklus':         'inspection_code',
+      'kode siklus':       'inspection_code',
+      'no':                'no_urut',
+      'no urut':           'no_urut',
+      'equipment':         '_equipment_query',
+      'equipment tag':     '_equipment_query',
+      'tag':               '_equipment_query',
+      'nama equipment':    'equipment_name_snapshot',
+      'equipment/bagian':  '_equipment_query',
+      'qty':               'qty',
+      'bagian':            'bagian',
+      'category':          'category',
+      'kategori':          'category',
+      'finding':           'finding',
+      'mpi result':        'mpi_result',
+      'mpi':               'mpi_result',
+      'acceptance criteria': 'acceptance_criteria',
+      'standard':          'acceptance_criteria',
+      'recommendation':    'recommendation',
+      'rekomendasi':       'recommendation',
+      'tanggal ditemukan': 'tgl_ditemukan',
+      'date found':        'tgl_ditemukan',
+      'status':            'status',
+      'tanggal closed':    'tgl_closed',
+      'tgl closed':        'tgl_closed',
+      'date closed':       'tgl_closed',
+      'pic perbaikan':     'pic_perbaikan',
+      'pic':               'pic_perbaikan',
+      'catatan':           'catatan',
+      'notes':             'catatan',
+    };
+
+    function normalizeHeader(h) {
+      return String(h || '').toLowerCase().trim().replace(/\s+/g, ' ');
+    }
+
+    function parseExcelDate(v) {
+      if (v == null || v === '') return null;
+      if (v instanceof Date) return v.toISOString().slice(0, 10);
+      if (typeof v === 'number') {
+        // Excel serial date
+        const d = new Date(Date.UTC(1899, 11, 30) + v * 86400000);
+        return d.toISOString().slice(0, 10);
+      }
+      const s = String(v).trim();
+      // YYYY-MM-DD
+      let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+      // DD/MM/YYYY or DD-MM-YYYY
+      m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+      if (m) return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+      // Try parse as date string
+      const d = new Date(s);
+      if (!isNaN(d)) return d.toISOString().slice(0, 10);
+      return s;
+    }
+
+    // Generate template Excel kosong
+    function downloadInspectionTemplate() {
+      const wb = XLSX.utils.book_new();
+
+      // Sheet 1: PETUNJUK
+      const petunjuk = [
+        ['🛢️ RIGBASE STATION — Template Rekap Inspeksi v1'],
+        [],
+        ['CARA PAKAI:'],
+        ['1. Isi sheet "SIKLUS INSPEKSI" untuk header siklus baru (1 baris per siklus)'],
+        ['2. Isi sheet "TEMUAN" untuk detail temuan per equipment (banyak baris per siklus)'],
+        ['3. Pastikan kolom "ID Siklus" konsisten antara sheet SIKLUS & TEMUAN'],
+        ['4. Upload file ini lewat tombol "Upload Excel" di halaman Inspeksi'],
+        ['5. Foto Before/After upload terpisah via UI setelah import sukses'],
+        [],
+        ['CATATAN PENTING:'],
+        ['- Kategori valid: Cat 3, Cat 4'],
+        ['- Category temuan valid: Critical, Major, N/A'],
+        ['- Status valid: Open, Closed (status Closed wajib isi Tanggal Closed)'],
+        ['- Format tanggal: YYYY-MM-DD atau DD/MM/YYYY'],
+        ['- Equipment yang tidak ke-resolve akan disimpan sebagai unresolved (equipment_name tetap kepake)'],
+        ['- Rig harus match dengan parent_units di Rigbase (case-sensitive, lihat list di app)'],
+      ];
+      const wsP = XLSX.utils.aoa_to_sheet(petunjuk);
+      wsP['!cols'] = [{ wch: 90 }];
+      XLSX.utils.book_append_sheet(wb, wsP, 'PETUNJUK');
+
+      // Sheet 2: SIKLUS INSPEKSI
+      const siklusHeader = ['ID Siklus', 'Rig', 'Kategori', 'PI', 'Inspector', 'Tanggal Mulai', 'Tanggal Selesai', 'Status', 'Progress', 'Client', 'Service', 'Rig Type', 'Manufacturer', 'Year', 'Model/Serial', 'Mast Height', 'Hook Load', 'Power HP', 'Place', 'Catatan'];
+      const siklusSample = ['SIKLUS-2026-003', 'BW KB150.A', 'Cat 3', 'PT PJ-Tek Mandiri', 'Ir. Sample Inspector', '2026-06-01', '', 'On Progress', 0, 'PT Pertamina EP', 'Workover Service', 'Mobile Rig 350 HP', 'Cooper', 1990, 'KB150A-SN12345', 30.0, 70.0, 350, 'Wellpad XYZ', 'Sample siklus baru'];
+      const wsS = XLSX.utils.aoa_to_sheet([siklusHeader, siklusSample]);
+      wsS['!cols'] = siklusHeader.map(h => ({ wch: Math.max(h.length + 2, 14) }));
+      XLSX.utils.book_append_sheet(wb, wsS, 'SIKLUS INSPEKSI');
+
+      // Sheet 3: TEMUAN
+      const temuanHeader = ['ID Siklus', 'No', 'Equipment Tag', 'Nama Equipment', 'Qty', 'Bagian', 'Category', 'Finding', 'MPI Result', 'Acceptance Criteria', 'Recommendation', 'Tanggal Ditemukan', 'Status', 'Tanggal Closed', 'PIC Perbaikan', 'Catatan'];
+      const temuanSamples = [
+        ['SIKLUS-2026-003', 1, 'DW-KB150A', 'Drawwork BW KB150.A', '1ea', '', 'Major', 'Kampas brake aus', 'N/A', 'API Spec 7K', 'Ganti kampas set', '2026-06-02', 'Open', '', 'Tim Mekanik', 'Sample temuan major'],
+        ['SIKLUS-2026-003', 2, 'MAST-KB150A', 'Mast BW KB150.A', '1ea', 'Crown Block', 'Critical', 'Crack pada wirerope socket', 'Discontinuity', 'API RP 8B Sect 5.3.2.4', 'Replace socket', '2026-06-03', 'Open', '', 'PT Welltech', 'Sample temuan critical'],
+        ['SIKLUS-2026-003', 3, 'GS-KB150A', 'Genset BW KB150.A', '1ea', '', 'N/A', 'Kondisi baik, load test OK', 'No Discontinuity', 'IEC 60034', 'Continue normal operation', '2026-06-04', 'Closed', '2026-06-04', '-', 'Sample N/A closed'],
+      ];
+      const wsT = XLSX.utils.aoa_to_sheet([temuanHeader, ...temuanSamples]);
+      wsT['!cols'] = temuanHeader.map(h => ({ wch: Math.max(h.length + 2, 14) }));
+      XLSX.utils.book_append_sheet(wb, wsT, 'TEMUAN');
+
+      const ts = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      XLSX.writeFile(wb, `template_inspeksi_${ts}.xlsx`);
+      toast('Template Excel ter-download. Isi sample row dengan data real lalu upload kembali.', 'success');
+    }
+    window.downloadInspectionTemplate = downloadInspectionTemplate;
+
+    // Parse Excel + validate
+    async function handleInspectionExcelUpload(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      event.target.value = '';
+      if (file.size > 10 * 1024 * 1024) { toast('File terlalu besar (max 10MB).', 'error'); return; }
+      toast('Parsing Excel…', 'info');
+
+      try {
+        const buffer = await file.arrayBuffer();
+        const wb = XLSX.read(buffer, { type: 'array', cellDates: true });
+        // Find sheets
+        const siklusSheet = wb.Sheets[wb.SheetNames.find(n => /siklus/i.test(n))];
+        const temuanSheet = wb.Sheets[wb.SheetNames.find(n => /temuan/i.test(n))];
+        if (!siklusSheet && !temuanSheet) { toast('Sheet "SIKLUS INSPEKSI" atau "TEMUAN" tidak ditemukan.', 'error'); return; }
+
+        const siklusRows = siklusSheet ? XLSX.utils.sheet_to_json(siklusSheet, { defval: null }) : [];
+        const temuanRows = temuanSheet ? XLSX.utils.sheet_to_json(temuanSheet, { defval: null }) : [];
+
+        // Validate siklus
+        const siklusParsed = siklusRows.map((row, idx) => parseAndValidateSiklus(row, idx + 2));
+        // Validate temuan
+        const equipmentByRig = await fetchAllEquipmentForResolution();
+        const tempParsed = await Promise.all(temuanRows.map((row, idx) => parseAndValidateTemuan(row, idx + 2, equipmentByRig, siklusParsed)));
+
+        openImportPreviewModal(siklusParsed, tempParsed);
+      } catch (err) {
+        toast('Gagal parse Excel: ' + err.message, 'error');
+      }
+    }
+    window.handleInspectionExcelUpload = handleInspectionExcelUpload;
+
+    async function fetchAllEquipmentForResolution() {
+      // Map: { [parent_unit_id]: [{id, tag_number, nama_equipment}, ...] }
+      const { data, error } = await state.supabase.from('equipment').select('id, tag_number, nama_equipment, assigned_unit_id');
+      if (error) throw error;
+      const map = {};
+      (data || []).forEach(e => {
+        if (!map[e.assigned_unit_id]) map[e.assigned_unit_id] = [];
+        map[e.assigned_unit_id].push(e);
+      });
+      return map;
+    }
+
+    function parseAndValidateSiklus(row, excelRowNum) {
+      // Map row keys (header) → field name
+      const data = { _excelRow: excelRowNum, _errors: [], _warnings: [], _status: 'valid' };
+      for (const [k, v] of Object.entries(row)) {
+        const norm = normalizeHeader(k);
+        const field = SIKLUS_COLUMN_MAP[norm];
+        if (field) data[field] = v;
+      }
+
+      // Validate required
+      if (!data.inspection_code) data._errors.push('ID Siklus kosong');
+      if (!data._rig_name)       data._errors.push('Rig kosong');
+      if (!data.kategori_inspeksi) data._errors.push('Kategori kosong');
+      if (!data.start_date)      data._errors.push('Tanggal Mulai kosong');
+      if (!data.pi_company)      data._errors.push('PI kosong');
+      if (!data.rig_inspector)   data._errors.push('Inspector kosong');
+
+      // Validate enum
+      if (data.kategori_inspeksi && !['Cat 3', 'Cat 4'].includes(String(data.kategori_inspeksi).trim())) {
+        data._errors.push(`Kategori invalid: ${data.kategori_inspeksi} (harus Cat 3 atau Cat 4)`);
+      } else if (data.kategori_inspeksi) {
+        data.kategori_inspeksi = String(data.kategori_inspeksi).trim();
+      }
+      if (data.status && !['On Progress', 'Completed'].includes(String(data.status).trim())) {
+        data._warnings.push(`Status invalid: ${data.status} (default ke On Progress)`);
+        data.status = 'On Progress';
+      }
+
+      // Resolve rig
+      if (data._rig_name) {
+        const rigName = String(data._rig_name).trim();
+        const unit = state.parentUnits.find(u => u.name === rigName);
+        if (!unit) data._errors.push(`Rig "${rigName}" tidak ditemukan di parent_units`);
+        else data.parent_unit_id = unit.id;
+      }
+
+      // Parse dates
+      if (data.start_date) data.start_date = parseExcelDate(data.start_date);
+      if (data.end_date)   data.end_date = parseExcelDate(data.end_date);
+
+      // Numeric coercion
+      ['progress_akumulatif', 'year_manufactured', 'height_of_mast', 'hook_load', 'power_hp'].forEach(f => {
+        if (data[f] != null && data[f] !== '') {
+          const n = Number(data[f]);
+          if (!isNaN(n)) data[f] = n;
+          else { data[f] = null; data._warnings.push(`${f} bukan angka: ${data[f]} (di-skip)`); }
+        }
+      });
+
+      if (data._errors.length > 0) data._status = 'error';
+      else if (data._warnings.length > 0) data._status = 'warning';
+      return data;
+    }
+
+    async function parseAndValidateTemuan(row, excelRowNum, equipmentByRig, siklusParsed) {
+      const data = { _excelRow: excelRowNum, _errors: [], _warnings: [], _status: 'valid' };
+      for (const [k, v] of Object.entries(row)) {
+        const norm = normalizeHeader(k);
+        const field = TEMUAN_COLUMN_MAP[norm];
+        if (field === '_equipment_query') data._equipment_query = v;
+        else if (field) data[field] = v;
+      }
+
+      // Required
+      if (!data.inspection_code) data._errors.push('ID Siklus kosong');
+      if (!data.no_urut)         data._errors.push('No urut kosong');
+      if (!data.equipment_name_snapshot && !data._equipment_query) data._errors.push('Equipment kosong');
+      if (!data.category)        data._errors.push('Category kosong');
+      if (!data.tgl_ditemukan)   data._errors.push('Tanggal Ditemukan kosong');
+
+      // Enum
+      if (data.category && !['Critical', 'Major', 'N/A'].includes(String(data.category).trim())) {
+        data._errors.push(`Category invalid: ${data.category} (harus Critical/Major/N/A)`);
+      } else if (data.category) {
+        data.category = String(data.category).trim();
+      }
+      if (data.status && !['Open', 'Closed'].includes(String(data.status).trim())) {
+        data._warnings.push(`Status invalid: ${data.status} (default ke Open)`);
+        data.status = 'Open';
+      }
+      if (!data.status) data.status = 'Open';
+      if (data.mpi_result && !['Discontinuity', 'No Discontinuity', 'N/A'].includes(String(data.mpi_result).trim())) {
+        data._warnings.push(`MPI invalid: ${data.mpi_result}`);
+        data.mpi_result = null;
+      } else if (data.mpi_result) {
+        data.mpi_result = String(data.mpi_result).trim();
+      }
+
+      // Status Closed → tgl_closed required
+      if (data.status === 'Closed' && !data.tgl_closed) data._errors.push('Status Closed butuh Tanggal Closed');
+
+      // Parse dates
+      if (data.tgl_ditemukan) data.tgl_ditemukan = parseExcelDate(data.tgl_ditemukan);
+      if (data.tgl_closed)    data.tgl_closed = parseExcelDate(data.tgl_closed);
+
+      // Numeric
+      if (data.no_urut != null) {
+        const n = Number(data.no_urut);
+        if (!isNaN(n)) data.no_urut = n;
+        else data._errors.push(`No urut bukan angka: ${data.no_urut}`);
+      }
+
+      // Resolve equipment via siklus → rig → equipment
+      const siklus = siklusParsed.find(s => s.inspection_code === data.inspection_code);
+      // Kalau siklus gak ada di sheet (mungkin siklus existing), cari di DB
+      let parentUnitId = siklus?.parent_unit_id;
+      if (!parentUnitId && data.inspection_code) {
+        try {
+          const { data: ex } = await state.supabase.from('inspections').select('parent_unit_id').eq('inspection_code', data.inspection_code).maybeSingle();
+          if (ex) parentUnitId = ex.parent_unit_id;
+          else data._warnings.push(`ID Siklus "${data.inspection_code}" gak ada di sheet maupun DB`);
+        } catch (e) { /* ignore */ }
+      }
+
+      // Equipment resolution
+      if (data._equipment_query && parentUnitId) {
+        const q = String(data._equipment_query).trim().toLowerCase();
+        const candidates = equipmentByRig[parentUnitId] || [];
+        // Match by tag (exact, case-insensitive)
+        let eq = candidates.find(e => e.tag_number.toLowerCase() === q);
+        // Fallback by name
+        if (!eq) eq = candidates.find(e => e.nama_equipment.toLowerCase() === q);
+        // Partial match nama
+        if (!eq) eq = candidates.find(e => e.nama_equipment.toLowerCase().includes(q));
+        if (eq) {
+          data.equipment_id = eq.id;
+          if (!data.equipment_name_snapshot) data.equipment_name_snapshot = eq.nama_equipment;
+        } else {
+          data._warnings.push(`Equipment "${data._equipment_query}" tidak ke-resolve (akan disimpan sebagai unresolved)`);
+          if (!data.equipment_name_snapshot) data.equipment_name_snapshot = String(data._equipment_query);
+        }
+      } else if (!data.equipment_name_snapshot && data._equipment_query) {
+        data.equipment_name_snapshot = String(data._equipment_query);
+      }
+
+      if (data._errors.length > 0) data._status = 'error';
+      else if (data._warnings.length > 0) data._status = 'warning';
+      return data;
+    }
+
+    function openImportPreviewModal(siklusList, temuanList) {
+      const totalValid = siklusList.filter(s => s._status === 'valid').length + temuanList.filter(t => t._status === 'valid').length;
+      const totalWarn  = siklusList.filter(s => s._status === 'warning').length + temuanList.filter(t => t._status === 'warning').length;
+      const totalErr   = siklusList.filter(s => s._status === 'error').length + temuanList.filter(t => t._status === 'error').length;
+      window.__importData = { siklusList, temuanList };
+
+      const statusBadge = (s) => {
+        const cls = { valid: 'bg-green-100 text-green-800', warning: 'bg-amber-100 text-amber-800', error: 'bg-red-100 text-red-800' }[s];
+        const icon = { valid: '🟢', warning: '🟡', error: '🔴' }[s];
+        return `<span class="px-1.5 py-0.5 rounded text-xs font-medium ${cls}">${icon} ${s}</span>`;
+      };
+
+      const renderTable = (rows, columns, isSiklus) => {
+        if (rows.length === 0) return '<div class="p-4 text-center text-slate-400 text-sm">Sheet kosong / tidak ada baris.</div>';
+        return `
+          <div class="overflow-x-auto">
+            <table class="w-full text-xs">
+              <thead class="bg-slate-50">
+                <tr>
+                  <th class="px-2 py-1 text-left font-bold text-slate-700">Row</th>
+                  <th class="px-2 py-1 text-left font-bold text-slate-700">Status</th>
+                  ${columns.map(c => `<th class="px-2 py-1 text-left font-bold text-slate-700">${escapeHtml(c.label)}</th>`).join('')}
+                  <th class="px-2 py-1 text-left font-bold text-slate-700">Issues</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100">
+                ${rows.map(r => `
+                  <tr class="${r._status === 'error' ? 'bg-red-50' : r._status === 'warning' ? 'bg-amber-50' : ''}">
+                    <td class="px-2 py-1 text-slate-500">${r._excelRow}</td>
+                    <td class="px-2 py-1">${statusBadge(r._status)}</td>
+                    ${columns.map(c => `<td class="px-2 py-1">${escapeHtml(String(r[c.field] ?? '—'))}</td>`).join('')}
+                    <td class="px-2 py-1 text-xs">
+                      ${r._errors.length > 0 ? `<div class="text-red-700">${r._errors.map(escapeHtml).join('; ')}</div>` : ''}
+                      ${r._warnings.length > 0 ? `<div class="text-amber-700">${r._warnings.map(escapeHtml).join('; ')}</div>` : ''}
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        `;
+      };
+
+      const siklusCols = [
+        { field: 'inspection_code', label: 'Kode' },
+        { field: '_rig_name', label: 'Rig' },
+        { field: 'kategori_inspeksi', label: 'Kategori' },
+        { field: 'pi_company', label: 'PI' },
+        { field: 'start_date', label: 'Tgl Mulai' },
+      ];
+      const temuanCols = [
+        { field: 'inspection_code', label: 'Kode' },
+        { field: 'no_urut', label: 'No' },
+        { field: 'equipment_name_snapshot', label: 'Equipment' },
+        { field: 'bagian', label: 'Bagian' },
+        { field: 'category', label: 'Cat' },
+        { field: 'tgl_ditemukan', label: 'Tgl' },
+        { field: 'status', label: 'Status' },
+      ];
+
+      openModal({
+        title: 'Preview Import Excel',
+        maxWidth: 'max-w-6xl',
+        body: `
+          <div class="space-y-3">
+            <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm flex items-center gap-3 flex-wrap">
+              <span class="font-bold text-blue-900">Summary:</span>
+              <span class="text-green-700 font-semibold">🟢 ${totalValid} valid</span>
+              <span class="text-amber-700 font-semibold">🟡 ${totalWarn} warning</span>
+              <span class="text-red-700 font-semibold">🔴 ${totalErr} error</span>
+              ${totalErr > 0 ? '<span class="text-xs text-red-700">— Tombol Import disabled selama ada error. Perbaiki di Excel & re-upload.</span>' : ''}
+            </div>
+            <div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
+              <div class="flex border-b border-slate-200">
+                <button id="prev-tab-siklus" onclick="document.getElementById('prev-content-siklus').classList.remove('hide');document.getElementById('prev-content-temuan').classList.add('hide');this.classList.add('border-b-2','border-safety','text-safety');document.getElementById('prev-tab-temuan').classList.remove('border-b-2','border-safety','text-safety');" class="px-4 py-2 text-sm font-medium border-b-2 border-safety text-safety">
+                  🔄 Siklus (${siklusList.length})
+                </button>
+                <button id="prev-tab-temuan" onclick="document.getElementById('prev-content-temuan').classList.remove('hide');document.getElementById('prev-content-siklus').classList.add('hide');this.classList.add('border-b-2','border-safety','text-safety');document.getElementById('prev-tab-siklus').classList.remove('border-b-2','border-safety','text-safety');" class="px-4 py-2 text-sm font-medium">
+                  📋 Temuan (${temuanList.length})
+                </button>
+              </div>
+              <div id="prev-content-siklus">${renderTable(siklusList, siklusCols, true)}</div>
+              <div id="prev-content-temuan" class="hide">${renderTable(temuanList, temuanCols, false)}</div>
+            </div>
+          </div>
+        `,
+        footer: `
+          ${totalErr > 0 ? `<button onclick="downloadErrorReport()" class="px-4 py-2 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-800 text-sm font-medium">📥 Download Error Report</button>` : ''}
+          <button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
+          <button id="import-commit-btn" ${totalErr > 0 ? 'disabled' : ''} onclick="commitInspectionImport()" class="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold">
+            ✅ Import Semua (${totalValid + totalWarn} baris)
+          </button>
+        `,
+      });
+    }
+    window.openImportPreviewModal = openImportPreviewModal;
+
+    async function commitInspectionImport() {
+      const data = window.__importData;
+      if (!data) return;
+      const btn = document.getElementById('import-commit-btn');
+      if (btn) { btn.disabled = true; btn.textContent = 'Mengimpor…'; }
+
+      const validSiklus = data.siklusList.filter(s => s._status !== 'error');
+      const validTemuan = data.temuanList.filter(t => t._status !== 'error');
+
+      let imported = { siklus_inserted: 0, siklus_updated: 0, temuan_inserted: 0, failed: 0 };
+      const codeToId = {};  // inspection_code → inspection_id
+
+      try {
+        // 1. Upsert siklus
+        for (const s of validSiklus) {
+          const payload = {
+            inspection_code: s.inspection_code,
+            parent_unit_id: s.parent_unit_id,
+            kategori_inspeksi: s.kategori_inspeksi,
+            client: s.client || null,
+            service: s.service || null,
+            rig_type: s.rig_type || null,
+            manufacturer: s.manufacturer || null,
+            year_manufactured: s.year_manufactured || null,
+            model_serial: s.model_serial || null,
+            height_of_mast: s.height_of_mast || null,
+            hook_load: s.hook_load || null,
+            power_hp: s.power_hp || null,
+            place_of_inspection: s.place_of_inspection || null,
+            start_date: s.start_date,
+            end_date: s.end_date || null,
+            pi_company: s.pi_company,
+            rig_inspector: s.rig_inspector,
+            status: s.status || 'On Progress',
+            progress_akumulatif: s.progress_akumulatif != null ? s.progress_akumulatif : 0,
+            catatan: s.catatan || null,
+          };
+          // Check existing
+          const { data: existing } = await state.supabase.from('inspections').select('id').eq('inspection_code', s.inspection_code).maybeSingle();
+          if (existing) {
+            payload.updated_by = state.user.id;
+            await state.supabase.from('inspections').update(payload).eq('id', existing.id);
+            codeToId[s.inspection_code] = existing.id;
+            imported.siklus_updated++;
+          } else {
+            payload.created_by = state.user.id;
+            payload.updated_by = state.user.id;
+            const { data: ins, error } = await state.supabase.from('inspections').insert(payload).select().single();
+            if (error) { imported.failed++; continue; }
+            codeToId[s.inspection_code] = ins.id;
+            imported.siklus_inserted++;
+          }
+        }
+
+        // 2. Insert temuan
+        for (const t of validTemuan) {
+          // Resolve inspection_id from code
+          let inspId = codeToId[t.inspection_code];
+          if (!inspId) {
+            const { data: ex } = await state.supabase.from('inspections').select('id').eq('inspection_code', t.inspection_code).maybeSingle();
+            inspId = ex?.id;
+          }
+          if (!inspId) { imported.failed++; continue; }
+
+          const payload = {
+            inspection_id: inspId,
+            no_urut: t.no_urut,
+            equipment_id: t.equipment_id || null,
+            equipment_name_snapshot: t.equipment_name_snapshot,
+            qty: t.qty || null,
+            bagian: t.bagian || null,
+            category: t.category,
+            finding: t.finding || null,
+            mpi_result: t.mpi_result || null,
+            acceptance_criteria: t.acceptance_criteria || null,
+            recommendation: t.recommendation || null,
+            tgl_ditemukan: t.tgl_ditemukan,
+            status: t.status || 'Open',
+            tgl_closed: t.tgl_closed || null,
+            pic_perbaikan: t.pic_perbaikan || null,
+            catatan: t.catatan || null,
+            created_by: state.user.id,
+            updated_by: state.user.id,
+          };
+          const { error } = await state.supabase.from('inspection_findings').insert(payload);
+          if (error) { imported.failed++; console.warn('Failed insert temuan:', error.message); continue; }
+          imported.temuan_inserted++;
+        }
+
+        // 🔔 Telegram alert
+        sendTelegramAlert(
+          `📊 <b>Bulk Import Inspeksi</b>\n` +
+          `Siklus: ${imported.siklus_inserted} baru, ${imported.siklus_updated} update\n` +
+          `Temuan: ${imported.temuan_inserted} baru\n` +
+          (imported.failed > 0 ? `⚠ ${imported.failed} gagal\n` : '') +
+          `👤 ${state.profile.full_name || state.profile.email}`
+        );
+        logActivity('bulk_imported', 'inspection', null, `${imported.siklus_inserted + imported.siklus_updated} siklus, ${imported.temuan_inserted} temuan`, imported);
+
+        toast(`✅ Import selesai! ${imported.siklus_inserted + imported.siklus_updated} siklus, ${imported.temuan_inserted} temuan.${imported.failed > 0 ? ' ⚠ ' + imported.failed + ' gagal.' : ''}`, 'success');
+        closeModal();
+        // Pindah ke siklus pertama yang diimport (kalau ada)
+        const firstCode = validSiklus[0]?.inspection_code;
+        if (firstCode && codeToId[firstCode]) setInspectionView('detail', codeToId[firstCode], 'temuan');
+        else setInspectionView('list');
+      } catch (err) {
+        toast('Gagal commit: ' + err.message, 'error');
+        if (btn) { btn.disabled = false; btn.textContent = '✅ Import Semua'; }
+      }
+    }
+    window.commitInspectionImport = commitInspectionImport;
+
+    function downloadErrorReport() {
+      const data = window.__importData;
+      if (!data) return;
+      const errorRows = [...data.siklusList, ...data.temuanList].filter(r => r._status === 'error').map(r => ({
+        'Excel Row': r._excelRow,
+        'Type': r.no_urut != null ? 'Temuan' : 'Siklus',
+        'ID Siklus': r.inspection_code || '',
+        'Equipment / Rig': r.equipment_name_snapshot || r._rig_name || '',
+        'Errors': r._errors.join('; '),
+        'Warnings': r._warnings.join('; '),
+      }));
+      if (errorRows.length === 0) { toast('Gak ada error.', 'info'); return; }
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(errorRows);
+      XLSX.utils.book_append_sheet(wb, ws, 'Errors');
+      const ts = new Date().toISOString().slice(0, 16).replace(/[:\-T]/g, '');
+      XLSX.writeFile(wb, `inspeksi_import_errors_${ts}.xlsx`);
+      toast(`${errorRows.length} error rows ter-export.`, 'success');
+    }
+    window.downloadErrorReport = downloadErrorReport;
 
     async function deleteFindingPhoto(findingId, slot, photoUrl) {
       const ok = await confirmDialog({
