@@ -789,7 +789,7 @@
     async function fetchFindingsByEquipment(equipmentId) {
       const { data, error } = await state.supabase
         .from('inspection_findings')
-        .select('*, inspection:inspection_id (id, inspection_code, start_date, pi_company, parent_unit_id)')
+        .select('*, inspection:inspection_id (id, inspection_code, kategori_inspeksi, start_date, pi_company, parent_unit_id)')
         .eq('equipment_id', equipmentId)
         .order('tgl_ditemukan', { ascending: false });
       if (error) throw error;
@@ -5295,36 +5295,56 @@
 
             ${recurringAlert}
 
-            <!-- Findings timeline -->
+            <!-- Daftar Siklus Inspeksi (compact, link only) -->
             <div>
-              <h4 class="font-bold text-slate-800 mb-2">📋 Riwayat Temuan (terbaru di atas)</h4>
-              <div class="space-y-2">
-                ${findings.map(f => {
-                  const occurrence = findingOccurrence[f.id];
-                  const recurringBadge = occurrence ? `<span class="px-2 py-0.5 bg-orange-100 text-orange-800 text-xs font-bold rounded">🔁 Ke-${occurrence}</span>` : '';
-                  return `
-                    <div class="border border-slate-200 rounded-lg p-3 ${f.category === 'Critical' ? 'bg-red-50/40' : f.category === 'Major' ? 'bg-amber-50/40' : f.category === 'Minor' ? 'bg-yellow-50/40' : 'bg-white'}">
-                      <div class="flex items-start justify-between gap-2 flex-wrap mb-1">
-                        <div class="flex items-center gap-2 flex-wrap">
-                          ${findingCategoryBadge(f.category)}
-                          ${findingStatusBadge(f.status)}
-                          ${recurringBadge}
-                          ${f.bagian ? `<span class="text-xs text-slate-600">• Bagian: <b>${escapeHtml(f.bagian)}</b></span>` : ''}
+              <h4 class="font-bold text-slate-800 mb-2">📋 Daftar Siklus Inspeksi (terbaru di atas)</h4>
+              <div class="space-y-1.5">
+                ${(() => {
+                  // Group findings per inspection_id
+                  const siklusMap = {};
+                  findings.forEach(f => {
+                    const id = f.inspection_id;
+                    if (!siklusMap[id]) {
+                      siklusMap[id] = {
+                        id,
+                        code: f.inspection?.inspection_code || '—',
+                        kategori: f.inspection?.kategori_inspeksi || '—',
+                        start_date: f.inspection?.start_date || f.tgl_ditemukan,
+                        pi_company: f.inspection?.pi_company || '—',
+                        total: 0, closed: 0, open: 0,
+                      };
+                    }
+                    siklusMap[id].total++;
+                    if (f.status === 'Closed') siklusMap[id].closed++;
+                    else siklusMap[id].open++;
+                  });
+                  const siklusList = Object.values(siklusMap)
+                    .sort((a, b) => (b.start_date || '').localeCompare(a.start_date || ''));
+
+                  return siklusList.map(s => {
+                    const katBadge = s.kategori === 'Cat 4'
+                      ? '<span class="px-1.5 py-0.5 bg-purple-100 text-purple-800 text-xs font-bold rounded">Cat 4</span>'
+                      : '<span class="px-1.5 py-0.5 bg-indigo-100 text-indigo-800 text-xs font-bold rounded">Cat 3</span>';
+                    return `
+                      <button onclick="setInspectionView('detail','${s.id}','temuan'); navigate('inspections')"
+                        class="w-full text-left bg-white border border-slate-200 hover:border-safety hover:bg-safety/5 rounded-lg p-3 flex items-center justify-between gap-3 transition">
+                        <div class="flex items-center gap-2 flex-wrap min-w-0">
+                          ${katBadge}
+                          <span class="font-semibold text-navy text-sm">${escapeHtml(s.code)}</span>
+                          <span class="text-xs text-slate-500">• ${fmtDate(s.start_date)}</span>
+                          <span class="text-xs text-slate-400 hidden md:inline">• ${escapeHtml(s.pi_company)}</span>
                         </div>
-                        <div class="text-xs text-slate-500">${fmtDate(f.tgl_ditemukan)}</div>
-                      </div>
-                      ${f.finding ? `<div class="text-sm text-slate-700 mt-1">${escapeHtml(f.finding)}</div>` : ''}
-                      ${f.recommendation ? `<div class="text-xs text-slate-600 mt-1"><b>Rekomendasi:</b> ${escapeHtml(f.recommendation)}</div>` : ''}
-                      <div class="mt-2 flex items-center justify-between gap-2 text-xs text-slate-500">
-                        <button onclick="setInspectionView('detail','${f.inspection_id}','temuan'); navigate('inspections')" class="text-navy hover:underline font-semibold">
-                          📋 ${escapeHtml(f.inspection?.inspection_code || '—')}
-                        </button>
-                        <span>${escapeHtml(f.inspection?.pi_company || '—')}</span>
-                      </div>
-                    </div>
-                  `;
-                }).join('')}
+                        <div class="flex items-center gap-2 text-xs flex-shrink-0">
+                          <span class="font-bold text-slate-700">${s.total} temuan</span>
+                          ${s.open > 0 ? `<span class="text-orange-700">(${s.open} open)</span>` : `<span class="text-green-700">(all closed)</span>`}
+                          <span class="text-slate-400">→</span>
+                        </div>
+                      </button>
+                    `;
+                  }).join('');
+                })()}
               </div>
+              <p class="text-xs text-slate-500 mt-2">💡 Klik salah satu siklus untuk lihat detail temuan + foto.</p>
             </div>
           </div>
         `;
