@@ -297,7 +297,7 @@
       currentInspectionId: null,
       inspectionDetailTab: 'temuan', // 'temuan' | 'pdf' | 'catatan'
       inspectionFilters: { kategori: '', parent_unit_id: '', status: '', tahun: '', search: '' },
-      findingFilters: { status: '', category: '' },
+      findingFilters: { status: '', category: '', dateFrom: '', dateTo: '' },
     };
 
     // ============================================================
@@ -2923,9 +2923,11 @@
       const filtered = findings.filter(item => {
         if (f.status   && item.status   !== f.status)   return false;
         if (f.category && item.category !== f.category) return false;
+        if (f.dateFrom && (!item.tgl_ditemukan || item.tgl_ditemukan < f.dateFrom)) return false;
+        if (f.dateTo   && (!item.tgl_ditemukan || item.tgl_ditemukan > f.dateTo))   return false;
         return true;
       });
-      const hasActive = !!(f.status || f.category);
+      const hasActive = !!(f.status || f.category || f.dateFrom || f.dateTo);
 
       // Count per status & category buat info badge
       const counts = {
@@ -2953,6 +2955,10 @@
               <option value="Minor"    ${f.category==='Minor'?'selected':''}>⚡ Minor (${counts.minor})</option>
               <option value="N/A"      ${f.category==='N/A'?'selected':''}>N/A (${counts.na})</option>
             </select>
+            <span class="text-xs font-bold text-slate-600 uppercase ml-2">Tgl Ditemukan:</span>
+            <input type="date" id="finding-filter-date-from" value="${f.dateFrom}" onchange="state.findingFilters.dateFrom=this.value; refreshTemuanTab();" title="Dari tanggal" class="px-2 py-1.5 border border-slate-300 rounded text-sm bg-white" />
+            <span class="text-xs text-slate-500">s/d</span>
+            <input type="date" id="finding-filter-date-to"   value="${f.dateTo}"   onchange="state.findingFilters.dateTo=this.value; refreshTemuanTab();"   title="Sampai tanggal" class="px-2 py-1.5 border border-slate-300 rounded text-sm bg-white" />
             ${hasActive ? `<button onclick="resetFindingFilters()" class="px-3 py-1.5 border border-safety text-safety hover:bg-safety hover:text-white rounded text-xs font-semibold transition">↻ Reset</button>` : ''}
             <div class="flex-1"></div>
             <button onclick="openFindingFormModal()" class="bg-safety hover:bg-safety-700 text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 shadow-sm">
@@ -3070,7 +3076,7 @@
     window.refreshTemuanTab = refreshTemuanTab;
 
     function resetFindingFilters() {
-      state.findingFilters = { status: '', category: '' };
+      state.findingFilters = { status: '', category: '', dateFrom: '', dateTo: '' };
       refreshTemuanTab();
     }
     window.resetFindingFilters = resetFindingFilters;
