@@ -2591,7 +2591,9 @@
         const counts = {
           total: findings.length,
           critical_open: findings.filter(f => f.status === 'Open' && f.category === 'Critical').length,
-          major_open: findings.filter(f => f.status === 'Open' && f.category === 'Major').length,
+          major_open:    findings.filter(f => f.status === 'Open' && f.category === 'Major').length,
+          minor_open:    findings.filter(f => f.status === 'Open' && f.category === 'Minor').length,
+          na_open:       findings.filter(f => f.status === 'Open' && f.category === 'N/A').length,
           closed: findings.filter(f => f.status === 'Closed').length,
         };
         const katBadge = insp.kategori_inspeksi === 'Cat 4'
@@ -2632,11 +2634,13 @@
                 </div>
               </div>
             </div>
-            <div class="mt-4 grid grid-cols-2 md:grid-cols-4 gap-2 text-center text-xs">
+            <div class="mt-4 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 text-center text-xs">
               <div class="bg-slate-100 rounded p-2"><div class="font-bold text-lg text-slate-900">${counts.total}</div><div class="text-slate-600">Total Temuan</div></div>
-              <div class="bg-red-50 rounded p-2"><div class="font-bold text-lg text-red-700">${counts.critical_open}</div><div class="text-red-700">Critical Open</div></div>
-              <div class="bg-amber-50 rounded p-2"><div class="font-bold text-lg text-amber-700">${counts.major_open}</div><div class="text-amber-700">Major Open</div></div>
-              <div class="bg-green-50 rounded p-2"><div class="font-bold text-lg text-green-700">${counts.closed}</div><div class="text-green-700">Closed</div></div>
+              <div class="bg-red-50 rounded p-2"><div class="font-bold text-lg text-red-700">${counts.critical_open}</div><div class="text-red-700">🚨 Critical Open</div></div>
+              <div class="bg-amber-50 rounded p-2"><div class="font-bold text-lg text-amber-700">${counts.major_open}</div><div class="text-amber-700">⚠ Major Open</div></div>
+              <div class="bg-yellow-50 rounded p-2"><div class="font-bold text-lg text-yellow-700">${counts.minor_open}</div><div class="text-yellow-700">⚡ Minor Open</div></div>
+              <div class="bg-slate-50 rounded p-2 border border-slate-200"><div class="font-bold text-lg text-slate-700">${counts.na_open}</div><div class="text-slate-600">N/A Open</div></div>
+              <div class="bg-green-50 rounded p-2"><div class="font-bold text-lg text-green-700">${counts.closed}</div><div class="text-green-700">✓ Closed</div></div>
             </div>
           </div>
 
