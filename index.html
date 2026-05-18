@@ -5179,6 +5179,32 @@
           siklus:   new Set(findings.map(f => f.inspection_id)).size,
         };
 
+        // Rekap per Tahun (pakai tahun dari tgl_ditemukan)
+        const yearMap = {};  // { 2026: { findings: [], siklusSet: Set } }
+        findings.forEach(f => {
+          const year = f.tgl_ditemukan ? f.tgl_ditemukan.slice(0, 4) : '—';
+          if (!yearMap[year]) yearMap[year] = { findings: [], siklusSet: new Set() };
+          yearMap[year].findings.push(f);
+          if (f.inspection_id) yearMap[year].siklusSet.add(f.inspection_id);
+        });
+        const yearStats = Object.entries(yearMap)
+          .map(([year, { findings: yf, siklusSet }]) => {
+            const closed = yf.filter(x => x.status === 'Closed').length;
+            const open   = yf.length - closed;
+            const closingRate = yf.length > 0 ? Math.round((closed / yf.length) * 100) : 0;
+            return {
+              year,
+              total: yf.length,
+              siklus: siklusSet.size,
+              critical: yf.filter(x => x.category === 'Critical').length,
+              major:    yf.filter(x => x.category === 'Major').length,
+              minor:    yf.filter(x => x.category === 'Minor').length,
+              na:       yf.filter(x => x.category === 'N/A').length,
+              closed, open, closingRate,
+            };
+          })
+          .sort((a, b) => b.year.localeCompare(a.year));  // terbaru di atas
+
         // Deteksi recurring per bagian (kalau bagian sama muncul ≥2x dengan category non-N/A)
         const recurringMap = {};  // { 'Crown Block': [finding1, finding2, ...] }
         findings.forEach(f => {
@@ -5221,11 +5247,50 @@
               <div class="bg-orange-50 rounded p-2"><div class="font-bold text-lg text-orange-700">${counts.open}</div><div class="text-orange-700">Masih Open</div></div>
             </div>
 
+            <!-- Rekap per Tahun -->
+            <div>
+              <h4 class="font-bold text-slate-800 mb-2 flex items-center gap-2">
+                <span>📅</span> Rekap per Tahun
+              </h4>
+              <div class="space-y-2">
+                ${yearStats.map(ys => {
+                  const barColor = ys.closingRate >= 80 ? 'bg-green-500'
+                                  : ys.closingRate >= 50 ? 'bg-amber-500'
+                                  : 'bg-red-500';
+                  return `
+                    <div class="bg-white border border-slate-200 rounded-lg p-3">
+                      <div class="flex items-center justify-between flex-wrap gap-2 mb-2">
+                        <div class="flex items-center gap-2">
+                          <span class="text-lg font-bold text-navy">${escapeHtml(ys.year)}</span>
+                          <span class="text-xs text-slate-500">• ${ys.siklus} siklus • ${ys.total} temuan</span>
+                        </div>
+                        <div class="flex items-center gap-2 text-xs">
+                          <span class="text-green-700 font-semibold">✓ ${ys.closed} Closed</span>
+                          <span class="text-slate-400">|</span>
+                          <span class="text-orange-700 font-semibold">⏳ ${ys.open} Open</span>
+                          <span class="px-2 py-0.5 rounded font-bold ${ys.closingRate >= 80 ? 'bg-green-100 text-green-800' : ys.closingRate >= 50 ? 'bg-amber-100 text-amber-800' : 'bg-red-100 text-red-800'}">${ys.closingRate}%</span>
+                        </div>
+                      </div>
+                      <div class="w-full bg-slate-100 rounded-full h-1.5 mb-2 overflow-hidden">
+                        <div class="${barColor} h-1.5 transition-all" style="width:${ys.closingRate}%"></div>
+                      </div>
+                      <div class="flex flex-wrap gap-1.5 text-xs">
+                        ${ys.critical > 0 ? `<span class="px-2 py-0.5 bg-red-50 border border-red-200 text-red-700 rounded font-semibold">🚨 ${ys.critical} Critical</span>` : ''}
+                        ${ys.major > 0    ? `<span class="px-2 py-0.5 bg-amber-50 border border-amber-200 text-amber-700 rounded font-semibold">⚠ ${ys.major} Major</span>` : ''}
+                        ${ys.minor > 0    ? `<span class="px-2 py-0.5 bg-yellow-50 border border-yellow-200 text-yellow-700 rounded font-semibold">⚡ ${ys.minor} Minor</span>` : ''}
+                        ${ys.na > 0       ? `<span class="px-2 py-0.5 bg-slate-50 border border-slate-200 text-slate-600 rounded font-semibold">N/A ${ys.na}</span>` : ''}
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+
             ${recurringAlert}
 
             <!-- Findings timeline -->
             <div>
-              <h4 class="font-bold text-slate-800 mb-2">Riwayat (terbaru di atas)</h4>
+              <h4 class="font-bold text-slate-800 mb-2">📋 Riwayat Temuan (terbaru di atas)</h4>
               <div class="space-y-2">
                 ${findings.map(f => {
                   const occurrence = findingOccurrence[f.id];
