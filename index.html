@@ -4177,7 +4177,7 @@
       const validSiklus = data.siklusList.filter(s => s._status !== 'error');
       const validTemuan = data.temuanList.filter(t => t._status !== 'error');
 
-      let imported = { siklus_inserted: 0, siklus_updated: 0, temuan_inserted: 0, failed: 0 };
+      let imported = { siklus_inserted: 0, siklus_updated: 0, temuan_inserted: 0, temuan_deleted: 0, failed: 0 };
       const codeToId = {};  // inspection_code → inspection_id
 
       try {
@@ -4222,6 +4222,52 @@
           }
         }
 
+        // 1b. REPLACE MODE: hapus temuan lama untuk siklus yang di-import ulang
+        //     (biar upload ulang = ganti data, bukan numpuk dobel)
+        const replaceCodes = [...new Set(validTemuan.map(t => t.inspection_code))];
+        const replaceIds = [];
+        for (const code of replaceCodes) {
+          let id = codeToId[code];
+          if (!id) {
+            const { data: ex } = await state.supabase.from('inspections').select('id').eq('inspection_code', code).maybeSingle();
+            id = ex?.id;
+          }
+          if (id) replaceIds.push(id);
+        }
+        if (replaceIds.length > 0) {
+          // Hitung temuan lama yang bakal ketimpa
+          const { count: oldCount } = await state.supabase
+            .from('inspection_findings')
+            .select('id', { count: 'exact', head: true })
+            .in('inspection_id', replaceIds);
+          if (oldCount > 0) {
+            const ok = await confirmDialog({
+              title: 'Ganti Temuan Lama?',
+              message: `Siklus yang di-import sudah punya ${oldCount} temuan di database. Lanjut import akan MENGHAPUS temuan lama itu lalu menggantinya dengan ${validTemuan.length} temuan dari Excel (foto yang sudah di-upload ke temuan lama akan ikut hilang link-nya). Mau lanjut?`,
+              confirmText: 'Ya, ganti',
+              cancelText: 'Batal',
+              danger: true,
+            });
+            if (!ok) {
+              if (btn) { btn.disabled = false; btn.textContent = '✅ Import Semua'; }
+              toast('Import dibatalkan. Data lama tidak diubah.', 'info');
+              return;
+            }
+            const { error: delErr, count: delCount } = await state.supabase
+              .from('inspection_findings')
+              .delete({ count: 'exact' })
+              .in('inspection_id', replaceIds);
+            if (delErr) { toast('Gagal hapus temuan lama: ' + delErr.message, 'error'); if (btn) { btn.disabled = false; btn.textContent = '✅ Import Semua'; } return; }
+            if (!delCount) {
+              // RLS: hapus temuan butuh hak Admin. Batalkan biar gak jadi dobel.
+              toast('Gagal ganti temuan lama — butuh hak Admin untuk menghapus. Import dibatalkan.', 'error');
+              if (btn) { btn.disabled = false; btn.textContent = '✅ Import Semua'; }
+              return;
+            }
+            imported.temuan_deleted = delCount;
+          }
+        }
+
         // 2. Insert temuan
         for (const t of validTemuan) {
           // Resolve inspection_id from code
@@ -4261,13 +4307,13 @@
         sendTelegramAlert(
           `📊 <b>Bulk Import Inspeksi</b>\n` +
           `Siklus: ${imported.siklus_inserted} baru, ${imported.siklus_updated} update\n` +
-          `Temuan: ${imported.temuan_inserted} baru\n` +
+          `Temuan: ${imported.temuan_inserted} baru` + (imported.temuan_deleted > 0 ? ` (${imported.temuan_deleted} lama diganti)` : '') + `\n` +
           (imported.failed > 0 ? `⚠ ${imported.failed} gagal\n` : '') +
           `👤 ${state.profile.full_name || state.profile.email}`
         );
         logActivity('bulk_imported', 'inspection', null, `${imported.siklus_inserted + imported.siklus_updated} siklus, ${imported.temuan_inserted} temuan`, imported);
 
-        toast(`✅ Import selesai! ${imported.siklus_inserted + imported.siklus_updated} siklus, ${imported.temuan_inserted} temuan.${imported.failed > 0 ? ' ⚠ ' + imported.failed + ' gagal.' : ''}`, 'success');
+        toast(`✅ Import selesai! ${imported.siklus_inserted + imported.siklus_updated} siklus, ${imported.temuan_inserted} temuan${imported.temuan_deleted > 0 ? ' (' + imported.temuan_deleted + ' lama diganti)' : ''}.${imported.failed > 0 ? ' ⚠ ' + imported.failed + ' gagal.' : ''}`, 'success');
         closeModal();
         // Pindah ke siklus pertama yang diimport (kalau ada)
         const firstCode = validSiklus[0]?.inspection_code;
