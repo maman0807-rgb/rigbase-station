@@ -304,15 +304,15 @@
     // 3. KONFIGURASI NAVIGASI
     // ============================================================
     const NAV_ITEMS = [
-      { id: 'dashboard',   label: 'Dashboard',   icon: '📊',  bottomNav: true  },
-      { id: 'equipment',   label: 'Equipment',   icon: '🔧',  bottomNav: true  },
-      { id: 'inspections', label: 'Inspeksi',    icon: '🔍',  bottomNav: true  },
-      { id: 'alerts',      label: 'Alert',       icon: '🔔',  bottomNav: true  },
-      { id: 'reliability', label: 'RAM', icon: '📊', srOnly: true },
-      { id: 'categories',  label: 'Kategori',    icon: '🏷️',  adminOnly: true  },
-      { id: 'users',       label: 'User',        icon: '👥',  adminOnly: true  },
-      { id: 'activity',    label: 'Activity Log', icon: '📜',  adminOnly: true  },
-      { id: 'settings',    label: 'Pengaturan',  icon: '⚙️',  bottomNav: true  },
+      { id: 'dashboard',   label: 'Dashboard',    icon: '📊', group: 'Operasional',  bottomNav: true },
+      { id: 'equipment',   label: 'Equipment',    icon: '🔧', group: 'Operasional',  bottomNav: true },
+      { id: 'inspections', label: 'Inspeksi',     icon: '🔍', group: 'Operasional',  bottomNav: true },
+      { id: 'alerts',      label: 'Alert',        icon: '🔔', group: 'Operasional',  bottomNav: true },
+      { id: 'reliability', label: 'RAM',          icon: '📈', group: 'Analisa',      srOnly: true },
+      { id: 'categories',  label: 'Kategori',     icon: '🏷️', group: 'Administrasi', adminOnly: true },
+      { id: 'users',       label: 'User',         icon: '👥', group: 'Administrasi', adminOnly: true },
+      { id: 'activity',    label: 'Activity Log', icon: '📜', group: 'Administrasi', adminOnly: true },
+      { id: 'settings',    label: 'Pengaturan',   icon: '⚙️', bottomNav: true },
     ];
 
     // ============================================================
@@ -1322,7 +1322,15 @@
     function renderSidebar() {
       const nav = $('#sidebar-nav');
       nav.innerHTML = '';
+      let lastGroup = null;
       visibleNavItems().forEach(item => {
+        if (item.group && item.group !== lastGroup) {
+          const h = document.createElement('div');
+          h.className = 'px-3 pt-4 pb-1 text-[10px] font-bold uppercase tracking-wider text-blue-300/70';
+          h.textContent = item.group;
+          nav.appendChild(h);
+          lastGroup = item.group;
+        }
         const btn = document.createElement('button');
         btn.className = `w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-navy-700 transition text-left ${state.currentPage === item.id ? 'nav-active' : ''}`;
         btn.innerHTML = `<span class="text-lg">${item.icon}</span><span>${item.label}</span>`;
