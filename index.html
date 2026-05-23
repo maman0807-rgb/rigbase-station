@@ -309,9 +309,7 @@
       { id: 'inspections', label: 'Inspeksi',    icon: '🔍',  bottomNav: true  },
       { id: 'maintenance', label: 'Maintenance', icon: '🛠️',  bottomNav: true  },
       { id: 'alerts',      label: 'Alert',       icon: '🔔',  bottomNav: true  },
-      { id: 'stress',      label: 'Stress Score', icon: '🚛', srOnly: true     },
-      { id: 'cspp',        label: 'CSPP',         icon: '📦', srOnly: true     },
-      { id: 'fmea',        label: 'FMEA',         icon: '⚠️', srOnly: true     },
+      { id: 'reliability', label: 'Reliability', icon: '🎯', srOnly: true     },
       { id: 'categories',  label: 'Kategori',    icon: '🏷️',  adminOnly: true  },
       { id: 'users',       label: 'User',        icon: '👥',  adminOnly: true  },
       { id: 'activity',    label: 'Activity Log', icon: '📜',  adminOnly: true  },
@@ -7157,7 +7155,7 @@
         window.__jmpFile = null; window.__jmpFileName = null;
         toast(`Tersimpan. Skor ${sc.total} (${STRESS_CAT_META[sc.category].label}) → ${eqRows.length} equipment.`, 'success');
         closeModal();
-        navigate('stress');
+        state.reliabilityTab = 'stress'; navigate('reliability');
       } catch (e) {
         toast('Gagal simpan: ' + e.message, 'error');
       }
@@ -7523,7 +7521,7 @@
         }
         toast('FMEA tersimpan.', 'success');
         closeModal();
-        if (state.currentPage === 'fmea') navigate('fmea');
+        if (state.currentPage === 'reliability') { state.reliabilityTab = 'fmea'; navigate('reliability'); }
         else if (window.__currentEq) renderDetailTab(window.__currentEq);
       } catch (e) { toast('Gagal simpan: ' + e.message, 'error'); }
     }
@@ -7535,7 +7533,7 @@
       const { error } = await state.supabase.from('fmea_entries').delete().eq('id', id);
       if (error) { toast('Gagal hapus: ' + error.message, 'error'); return; }
       toast('FMEA dihapus.', 'success');
-      if (state.currentPage === 'fmea') navigate('fmea');
+      if (state.currentPage === 'reliability') { state.reliabilityTab = 'fmea'; navigate('reliability'); }
       else if (window.__currentEq) renderDetailTab(window.__currentEq);
     }
     window.deleteFmea = deleteFmea;
@@ -7564,6 +7562,88 @@
         });
     }
     window.renderFmeaForEquipmentTab = renderFmeaForEquipmentTab;
+
+    // ============================================================
+    // 10w. RELIABILITY CENTER — satu menu: Overview + Stress + FMEA + CSPP
+    // ============================================================
+    PAGES.reliability = function () {
+      if (!state.reliabilityTab) state.reliabilityTab = 'overview';
+      const div = document.createElement('div');
+      div.className = 'page space-y-4';
+      const tabs = [['overview', '📊 Overview'], ['stress', '🚛 Stress Score'], ['fmea', '⚠️ FMEA'], ['cspp', '📦 CSPP']];
+      div.innerHTML = `
+        <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div class="flex border-b border-slate-200 overflow-x-auto" id="rel-tabs">
+            ${tabs.map(([id, lbl]) => `<button onclick="setReliabilityTab('${id}')" data-tab="${id}" class="px-4 py-3 text-sm font-medium whitespace-nowrap ${state.reliabilityTab === id ? 'border-b-2 border-safety text-safety bg-safety/5' : 'text-slate-600 hover:text-navy'}">${lbl}</button>`).join('')}
+          </div>
+        </div>
+        <div id="rel-content"></div>`;
+      renderReliabilityTab(div.querySelector('#rel-content'));
+      return div;
+    };
+
+    function renderReliabilityTab(host) {
+      host = host || document.getElementById('rel-content');
+      if (!host) return;
+      host.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat…</div>';
+      const t = state.reliabilityTab;
+      if (t === 'stress') renderStressPage(host);
+      else if (t === 'fmea') renderFmeaPage(host);
+      else if (t === 'cspp') renderCsppPage(host);
+      else renderReliabilityOverview(host);
+    }
+    function setReliabilityTab(t) {
+      state.reliabilityTab = t;
+      document.querySelectorAll('#rel-tabs button').forEach(b => {
+        b.className = `px-4 py-3 text-sm font-medium whitespace-nowrap ${b.dataset.tab === t ? 'border-b-2 border-safety text-safety bg-safety/5' : 'text-slate-600 hover:text-navy'}`;
+      });
+      renderReliabilityTab();
+    }
+    window.setReliabilityTab = setReliabilityTab;
+
+    async function renderReliabilityOverview(host) {
+      let stress = [], fmea = [];
+      try {
+        const [s, f] = await Promise.all([
+          state.supabase.from('v_stress_per_equipment').select('*'),
+          state.supabase.from('fmea_entries').select('equipment_id, equipment_tag, equipment_name, rpn'),
+        ]);
+        if (s.error) throw s.error; if (f.error) throw f.error;
+        stress = s.data || []; fmea = f.data || [];
+      } catch (e) {
+        host.innerHTML = `<div class="bg-red-50 text-red-700 p-4 rounded-xl text-sm">Gagal memuat: ${escapeHtml(e.message)}</div>`;
+        return;
+      }
+      const map = {};
+      stress.forEach(r => { map[r.equipment_id] = { id: r.equipment_id, tag: r.equipment_tag, name: r.equipment_name, stress: Number(r.total_stress) || 0, mob: Number(r.mob_count) || 0, maxRpn: 0, fmeaCount: 0 }; });
+      fmea.forEach(r => { const k = r.equipment_id; if (!map[k]) map[k] = { id: k, tag: r.equipment_tag, name: r.equipment_name, stress: 0, mob: 0, maxRpn: 0, fmeaCount: 0 }; map[k].maxRpn = Math.max(map[k].maxRpn, Number(r.rpn) || 0); map[k].fmeaCount++; });
+      const list = Object.values(map).sort((a, b) => (b.maxRpn - a.maxRpn) || (b.stress - a.stress));
+      const rows = list.slice(0, 100).map(r => `
+        <tr class="border-b border-slate-100 hover:bg-slate-50 cursor-pointer" onclick="setEquipmentView('detail','${r.id}'); navigate('equipment')">
+          <td class="px-3 py-2 text-sm"><div class="font-mono text-xs text-navy">${escapeHtml(r.tag || '—')}</div><div class="text-slate-500 text-xs">${escapeHtml(r.name || '')}</div></td>
+          <td class="px-3 py-2 text-sm font-bold">${r.stress || '—'}</td>
+          <td class="px-3 py-2 text-sm text-slate-500">${r.mob || '—'}</td>
+          <td class="px-3 py-2">${r.maxRpn ? rpnBadge(r.maxRpn) : '<span class="text-slate-400 text-sm">—</span>'}</td>
+          <td class="px-3 py-2 text-sm text-slate-500">${r.fmeaCount || '—'}</td>
+        </tr>`).join('');
+      host.innerHTML = `
+        <div class="bg-white rounded-xl border border-slate-200 p-5">
+          <h3 class="text-lg font-bold text-slate-900 mb-1">🎯 Reliability Center</h3>
+          <p class="text-sm text-slate-600 mb-3">Tiga modul saling terhubung jadi satu alur keputusan perawatan:</p>
+          <div class="text-xs bg-slate-50 border border-slate-200 rounded-lg p-3 leading-relaxed">
+            <b>🚛 Stress Score</b> (berat mobilisasi) → menaikkan <b>Occurrence</b> di <b>⚠️ FMEA</b> → komponen <b>RPN</b> tinggi → spare-nya jadi prioritas di <b>📦 CSPP</b>.
+            <div class="text-slate-500 mt-1">Buka tab di atas untuk tiap modul. Tabel di bawah = gabungan risiko per equipment.</div>
+          </div>
+        </div>
+        <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div class="px-4 py-3 border-b border-slate-100 font-semibold text-slate-800 text-sm">Equipment Paling Berisiko (Stress + FMEA) <span class="text-slate-400 font-normal">— klik buka detail</span></div>
+          <div class="overflow-x-auto max-h-[28rem] overflow-y-auto"><table class="w-full">
+            <thead class="sticky top-0 bg-slate-50"><tr class="text-left text-xs text-slate-500"><th class="px-3 py-2">Equipment</th><th class="px-3 py-2">Σ Stress</th><th class="px-3 py-2">Mob</th><th class="px-3 py-2">FMEA Max RPN</th><th class="px-3 py-2"># FMEA</th></tr></thead>
+            <tbody>${rows || '<tr><td colspan="5" class="px-3 py-6 text-center text-slate-400 text-sm">Belum ada data stress/FMEA.</td></tr>'}</tbody>
+          </table></div>
+        </div>`;
+    }
+    window.renderReliabilityTab = renderReliabilityTab;
 
     // ============================================================
     // 11. BOOT
