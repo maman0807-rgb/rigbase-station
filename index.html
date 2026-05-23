@@ -3078,7 +3078,7 @@
         const chunk = region.slice(idx[i].pos, i + 1 < idx.length ? idx[i + 1].pos : region.length).trim();
         const mm = chunk.match(/^\d+\.\s+([\s\S]*?)\s+(N\/A|Critical|Major|Minor)\s+Finding\s*:?/i);
         if (!mm) continue;
-        let equip = mm[1].trim(); const cat = mm[2];
+        let equip = mm[1].replace(/\s+/g, ' ').trim(); const cat = mm[2];
         let qty = ''; const qm = equip.match(/(\d+\s*ea)\s*$/i); if (qm) { qty = qm[1]; equip = equip.slice(0, qm.index).trim(); }
         const g = (r) => { const x = chunk.match(r); return x ? x[1].replace(/\s+/g, ' ').trim() : ''; };
         out.push({
