@@ -310,6 +310,7 @@
       { id: 'maintenance', label: 'Maintenance', icon: '🛠️',  bottomNav: true  },
       { id: 'alerts',      label: 'Alert',       icon: '🔔',  bottomNav: true  },
       { id: 'stress',      label: 'Stress Score', icon: '🚛', srOnly: true     },
+      { id: 'cspp',        label: 'CSPP',         icon: '📦', srOnly: true     },
       { id: 'categories',  label: 'Kategori',    icon: '🏷️',  adminOnly: true  },
       { id: 'users',       label: 'User',        icon: '👥',  adminOnly: true  },
       { id: 'activity',    label: 'Activity Log', icon: '📜',  adminOnly: true  },
@@ -7159,6 +7160,128 @@
       }
     }
     window.saveMobilization = saveMobilization;
+
+    // ============================================================
+    // 10y. CSPP — Critical Spare Parts Planning (analisa Sr Mekanik+)
+    // Phase 1: dashboard risiko stok (read-only). Forecast/enrichment menyusul.
+    // ============================================================
+    let csppMats = [];
+    let csppFilter = { category: '', q: '', critOnly: false, outOnly: false, belowOnly: false };
+
+    PAGES.cspp = function () {
+      const div = document.createElement('div');
+      div.className = 'page space-y-5';
+      div.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat data CSPP…</div>';
+      renderCsppPage(div);
+      return div;
+    };
+
+    async function renderCsppPage(host) {
+      try {
+        const all = [];
+        for (let f = 0; ; f += 1000) {
+          const { data, error } = await state.supabase.from('materials')
+            .select('part_number, description, category, satuan, stok, safety_stock, lead_time_days, penyimpanan').range(f, f + 999);
+          if (error) throw error;
+          all.push(...(data || []));
+          if (!data || data.length < 1000) break;
+        }
+        csppMats = all;
+      } catch (e) {
+        host.innerHTML = `<div class="bg-red-50 text-red-700 p-4 rounded-xl text-sm">Gagal memuat: ${escapeHtml(e.message)}</div>`;
+        return;
+      }
+      const n = v => Number(v) || 0;
+      const isCrit = m => String(m.category || '').toLowerCase() === 'critical';
+      const total = csppMats.length;
+      const critical = csppMats.filter(isCrit).length;
+      const critOut = csppMats.filter(m => isCrit(m) && n(m.stok) === 0).length;
+      const belowSafety = csppMats.filter(m => n(m.safety_stock) > 0 && n(m.stok) < n(m.safety_stock)).length;
+
+      const kpi = (label, val) => `<div class="bg-white rounded-xl border border-slate-200 p-4"><div class="text-xs text-slate-500 mb-1">${label}</div><div class="text-2xl font-extrabold text-slate-900">${val}</div></div>`;
+      const kpiBtn = (label, val, onclick) => `<button onclick="${onclick}" class="text-left bg-white rounded-xl border border-slate-200 p-4 hover:border-navy transition"><div class="text-xs text-slate-500 mb-1">${label}</div><div class="text-2xl font-extrabold text-slate-900">${val}</div></button>`;
+
+      host.innerHTML = `
+        <div>
+          <h3 class="text-xl font-bold text-slate-900">📦 CSPP — Critical Spare Parts</h3>
+          <p class="text-sm text-slate-500">Perencanaan suku cadang kritis — risiko kehabisan stok part penting. Klik kartu merah/kuning untuk filter cepat.</p>
+        </div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+          ${kpi('Total Spare Parts', total)}
+          ${kpi('Critical Parts', critical)}
+          ${kpiBtn('🔴 Critical Habis', critOut, "setCsppPreset('critout')")}
+          ${kpiBtn('⚠️ Di Bawah Safety', belowSafety, "setCsppPreset('below')")}
+        </div>
+        <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div class="px-4 py-3 border-b border-slate-100 space-y-2">
+            <div class="font-semibold text-slate-800 text-sm">Daftar Spare Parts <span id="cspp-count" class="text-slate-400 font-normal"></span></div>
+            <div class="flex flex-wrap gap-2 items-center">
+              <select id="cspp-cat" onchange="setCsppFilter('category', this.value)" class="px-2 py-1.5 border border-slate-300 rounded-lg text-xs bg-white outline-none focus:ring-2 focus:ring-navy">
+                <option value="">Semua Kategori</option>
+                ${['Critical', 'Fast Moving', 'Slow Moving', 'Consumable', 'Lubricant'].map(c => `<option value="${c}">${c}</option>`).join('')}
+              </select>
+              <input id="cspp-q" oninput="setCsppFilterQ(this.value)" placeholder="Cari part number / deskripsi…" class="flex-1 min-w-[140px] px-2 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-navy">
+              <label class="text-xs flex items-center gap-1"><input type="checkbox" id="cspp-crit" onchange="setCsppFilter('critOnly', this.checked)"> Critical</label>
+              <label class="text-xs flex items-center gap-1"><input type="checkbox" id="cspp-out" onchange="setCsppFilter('outOnly', this.checked)"> Habis stok</label>
+            </div>
+          </div>
+          <div class="overflow-x-auto max-h-[28rem] overflow-y-auto"><table class="w-full">
+            <thead class="sticky top-0 bg-slate-50"><tr class="text-left text-xs text-slate-500">
+              <th class="px-3 py-2">#</th><th class="px-3 py-2">Part Number</th><th class="px-3 py-2">Deskripsi</th><th class="px-3 py-2">Kategori</th><th class="px-3 py-2">Stok</th><th class="px-3 py-2">Safety</th><th class="px-3 py-2">Status</th>
+            </tr></thead>
+            <tbody id="cspp-body"></tbody>
+          </table></div>
+        </div>`;
+      renderCsppList();
+    }
+
+    function csppStatus(m) {
+      const n = v => Number(v) || 0; const s = n(m.stok), sf = n(m.safety_stock);
+      if (s === 0) return '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700">🔴 Habis</span>';
+      if (sf > 0 && s < sf) return '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700">🟠 Rendah</span>';
+      return '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700">🟢 Aman</span>';
+    }
+    function csppFiltered() {
+      const n = v => Number(v) || 0; const f = csppFilter; const q = (f.q || '').toLowerCase().trim();
+      return csppMats.filter(m => {
+        if (f.category && m.category !== f.category) return false;
+        if (f.critOnly && String(m.category || '').toLowerCase() !== 'critical') return false;
+        if (f.outOnly && n(m.stok) !== 0) return false;
+        if (f.belowOnly && !(n(m.safety_stock) > 0 && n(m.stok) < n(m.safety_stock))) return false;
+        if (q && !((m.part_number || '').toLowerCase().includes(q) || (m.description || '').toLowerCase().includes(q))) return false;
+        return true;
+      }).sort((a, b) => n(a.stok) - n(b.stok));
+    }
+    function renderCsppList() {
+      const body = document.getElementById('cspp-body'); if (!body) return;
+      const n = v => Number(v) || 0; const list = csppFiltered();
+      body.innerHTML = list.length ? list.slice(0, 500).map((m, i) => `
+        <tr class="border-b border-slate-100">
+          <td class="px-3 py-2 text-sm text-slate-400">${i + 1}</td>
+          <td class="px-3 py-2 text-sm font-mono">${escapeHtml(m.part_number || '—')}</td>
+          <td class="px-3 py-2 text-sm">${escapeHtml(m.description || '')}</td>
+          <td class="px-3 py-2 text-sm text-slate-500">${escapeHtml(m.category || '')}</td>
+          <td class="px-3 py-2 text-sm font-bold">${n(m.stok)}</td>
+          <td class="px-3 py-2 text-sm text-slate-500">${n(m.safety_stock) || '—'}</td>
+          <td class="px-3 py-2">${csppStatus(m)}</td>
+        </tr>`).join('') : '<tr><td colspan="7" class="px-3 py-6 text-center text-slate-400 text-sm">Tidak ada part sesuai filter.</td></tr>';
+      const cnt = document.getElementById('cspp-count'); if (cnt) cnt.textContent = `(${list.length}${list.length > 500 ? ', tampil 500' : ''})`;
+    }
+    let _csppDeb;
+    function setCsppFilter(k, v) { csppFilter.belowOnly = false; csppFilter[k] = v; renderCsppList(); }
+    function setCsppFilterQ(v) { csppFilter.belowOnly = false; csppFilter.q = v; clearTimeout(_csppDeb); _csppDeb = setTimeout(renderCsppList, 300); }
+    function setCsppPreset(p) {
+      csppFilter = { category: '', q: '', critOnly: false, outOnly: false, belowOnly: false };
+      if (p === 'critout') { csppFilter.critOnly = true; csppFilter.outOnly = true; }
+      if (p === 'below') { csppFilter.belowOnly = true; }
+      const set = (id, prop, val) => { const el = document.getElementById(id); if (el) el[prop] = val; };
+      set('cspp-crit', 'checked', csppFilter.critOnly); set('cspp-out', 'checked', csppFilter.outOnly);
+      set('cspp-cat', 'value', ''); set('cspp-q', 'value', '');
+      renderCsppList();
+    }
+    window.setCsppFilter = setCsppFilter;
+    window.setCsppFilterQ = setCsppFilterQ;
+    window.setCsppPreset = setCsppPreset;
 
     // ============================================================
     // 11. BOOT
