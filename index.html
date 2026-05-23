@@ -5567,9 +5567,11 @@
 
     async function renderHistoryTab(eq, container) {
       try {
-        const [muts, loans] = await Promise.all([
+        const [muts, loans, dt] = await Promise.all([
           fetchMutationLog(eq.id),
           fetchLoanHistory(eq.id).catch(() => []),
+          state.supabase.from('downtime_events').select('*').eq('equipment_id', eq.id)
+            .then(r => r.data || []).catch(() => []),
         ]);
 
         // Gabung events ke timeline yg sama, sort by date desc
@@ -5607,10 +5609,32 @@
             });
           }
         });
+        // Downtime & Perbaikan
+        dt.forEach(d => {
+          const cat = (typeof DT_CAT !== 'undefined' && DT_CAT[d.category]) || d.category || 'Lainnya';
+          events.push({
+            kind: 'down',
+            date: d.start_at,
+            title: `🔴 DOWN: ${cat}`,
+            detail: d.notes,
+            color: 'bg-red-500',
+            status: d.end_at ? null : 'down',
+          });
+          if (d.end_at) {
+            const dur = Number(d.duration_hours) || ((new Date(d.end_at) - new Date(d.start_at)) / 3600000);
+            events.push({
+              kind: 'repaired',
+              date: d.end_at,
+              title: `🟢 SELESAI PERBAIKAN (lama ${fmtH(dur)})`,
+              detail: d.notes,
+              color: 'bg-green-600',
+            });
+          }
+        });
         events.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
 
         container.innerHTML = `
-          <h4 class="font-bold text-slate-800 mb-3">Riwayat Mutasi & Pinjaman (${events.length})</h4>
+          <h4 class="font-bold text-slate-800 mb-3">Riwayat Mutasi, Pinjaman & Downtime (${events.length})</h4>
           ${events.length === 0 ? '<div class="text-center py-6 text-slate-400 text-sm bg-slate-50 rounded-lg">Belum ada riwayat.</div>' :
             `<div class="relative pl-6 space-y-3">
               ${events.map((ev, idx) => `
@@ -5623,6 +5647,7 @@
                       <span class="text-slate-500">•</span>
                       <span class="text-slate-700">${escapeHtml(ev.title)}</span>
                       ${ev.kind === 'pinjam' && ev.status === 'active' ? '<span class="px-2 py-0.5 bg-amber-100 text-amber-800 text-xs font-semibold rounded">aktif</span>' : ''}
+                      ${ev.kind === 'down' && ev.status === 'down' ? '<span class="px-2 py-0.5 bg-red-100 text-red-800 text-xs font-semibold rounded">masih down</span>' : ''}
                     </div>
                     ${ev.detail ? `<div class="text-xs text-slate-600">${escapeHtml(ev.detail)}</div>` : ''}
                   </div>
