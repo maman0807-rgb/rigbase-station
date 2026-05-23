@@ -7294,6 +7294,14 @@
       in_progress: { l: 'Proses', cls: 'bg-yellow-100 text-yellow-700' },
       closed:      { l: 'Closed', cls: 'bg-green-100 text-green-700' },
     };
+    // Gabungkan kategori sejenis jadi satu grup besar di tampilan FMEA.
+    // Kategori yang tidak terdaftar di sini pakai namanya sendiri.
+    const FMEA_SUPERGROUP = {
+      'BOP Annular': 'BOP', 'BOP Single Ram': 'BOP', 'BOP Double Ram': 'BOP',
+      'Mudpump': 'Pompa / Mudpump', 'MUDPUMP Acid': 'Pompa / Mudpump', 'Pompa': 'Pompa / Mudpump',
+      'Engine Mudpump': 'Engine', 'Mobile Engine': 'Engine',
+      'Mast': 'Mast', 'Mast Component': 'Mast',
+    };
     function rpnBand(rpn) {
       rpn = Number(rpn) || 0;
       if (rpn >= 200) return { key: 'kritis', label: 'Kritis', cls: 'bg-red-100 text-red-700', emoji: '🔴' };
@@ -7324,7 +7332,7 @@
         if (fr.error) throw fr.error; if (er.error) throw er.error;
         rows = fr.data || [];
         const eqCat = {}; (er.data || []).forEach(e => { eqCat[e.id] = e.kategori_id; });
-        rows.forEach(r => { const gn = getCategoryName(eqCat[r.equipment_id]); r._group = (gn && gn !== '—') ? gn : 'Lainnya'; });
+        rows.forEach(r => { const gn = getCategoryName(eqCat[r.equipment_id]); const c = (gn && gn !== '—') ? gn : 'Lainnya'; r._group = FMEA_SUPERGROUP[c] || c; });
       } catch (e) {
         host.innerHTML = `<div class="bg-red-50 text-red-700 p-4 rounded-xl text-sm">Gagal memuat: ${escapeHtml(e.message)}</div>`;
         return;
