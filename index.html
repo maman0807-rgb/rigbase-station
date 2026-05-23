@@ -7570,7 +7570,7 @@
       if (!state.reliabilityTab) state.reliabilityTab = 'overview';
       const div = document.createElement('div');
       div.className = 'page space-y-4';
-      const tabs = [['overview', '📊 Overview'], ['stress', '🚛 Stress Score'], ['fmea', '⚠️ FMEA'], ['cspp', '📦 CSPP']];
+      const tabs = [['overview', '📊 Overview'], ['stress', '🚛 Stress Score'], ['fmea', '⚠️ FMEA'], ['cspp', '📦 CSPP'], ['avail', '🟢 Availability']];
       div.innerHTML = `
         <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           <div class="flex border-b border-slate-200 overflow-x-auto" id="rel-tabs">
@@ -7590,6 +7590,7 @@
       if (t === 'stress') renderStressPage(host);
       else if (t === 'fmea') renderFmeaPage(host);
       else if (t === 'cspp') renderCsppPage(host);
+      else if (t === 'avail') renderAvailabilityPage(host);
       else renderReliabilityOverview(host);
     }
     function setReliabilityTab(t) {
@@ -7644,6 +7645,167 @@
         </div>`;
     }
     window.renderReliabilityTab = renderReliabilityTab;
+
+    // ============================================================
+    // 10v. AVAILABILITY — downtime tracking & uptime % (analisa Sr Mekanik+)
+    // ============================================================
+    const DT_CAT = {
+      breakdown: 'Breakdown', tunggu_spare: 'Tunggu Spare', pm: 'PM', mobilisasi: 'Mobilisasi', lainnya: 'Lainnya',
+    };
+    let availPeriodDays = 365;
+    let availData = [];
+
+    function availPct(p) { p = Number(p) || 0; const cls = p >= 95 ? 'bg-green-100 text-green-700' : p >= 85 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'; return `<span class="px-2 py-0.5 rounded-full text-xs font-semibold ${cls}">${p.toFixed(1)}%</span>`; }
+    function fmtH(h) { h = Number(h) || 0; if (h < 24) return h.toFixed(1) + ' jam'; return (h / 24).toFixed(1) + ' hari'; }
+    function toLocalInput(iso) { if (!iso) return ''; const d = new Date(iso); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); }
+
+    async function renderAvailabilityPage(host) {
+      try {
+        const { data, error } = await state.supabase.from('downtime_events').select('*').order('start_at', { ascending: false });
+        if (error) throw error; availData = data || [];
+      } catch (e) {
+        host.innerHTML = `<div class="bg-red-50 text-red-700 p-4 rounded-xl text-sm">Gagal memuat: ${escapeHtml(e.message)}</div>`;
+        return;
+      }
+      const now = Date.now(), start = now - availPeriodDays * 86400000, periodH = availPeriodDays * 24;
+      const byEq = {};
+      availData.forEach(d => {
+        const k = d.equipment_id; if (!byEq[k]) byEq[k] = { id: k, tag: d.equipment_tag, name: d.equipment_name, events: 0, downH: 0, dur: [] };
+        byEq[k].events++;
+        const s = new Date(d.start_at).getTime(), e = d.end_at ? new Date(d.end_at).getTime() : now;
+        byEq[k].downH += Math.max(0, Math.min(e, now) - Math.max(s, start)) / 3600000;
+        if (d.end_at) byEq[k].dur.push((e - s) / 3600000);
+      });
+      const eqList = Object.values(byEq).map(o => ({ ...o, avail: Math.max(0, Math.min(100, (periodH - o.downH) / periodH * 100)), mttr: o.dur.length ? o.dur.reduce((a, b) => a + b, 0) / o.dur.length : null })).sort((a, b) => a.avail - b.avail);
+      const ongoing = availData.filter(d => !d.end_at);
+      const allDur = availData.filter(d => d.end_at).map(d => Number(d.duration_hours) || 0);
+      const mttr = allDur.length ? allDur.reduce((a, b) => a + b, 0) / allDur.length : null;
+      const totalDownH = eqList.reduce((a, b) => a + b.downH, 0);
+      const totalFail = availData.length;
+      const mtbf = totalFail ? (eqList.length * periodH - totalDownH) / totalFail : null;
+      const fleetAvail = eqList.length ? eqList.reduce((a, b) => a + b.avail, 0) / eqList.length : 100;
+      // breakdown kategori
+      const cat = {}; availData.forEach(d => { const c = DT_CAT[d.category] || 'Lainnya'; if (!cat[c]) cat[c] = { n: 0, h: 0 }; cat[c].n++; cat[c].h += Number(d.duration_hours) || 0; });
+
+      const kpi = (label, val) => `<div class="bg-white rounded-xl border border-slate-200 p-4"><div class="text-xs text-slate-500 mb-1">${label}</div><div class="text-2xl font-extrabold text-slate-900">${val}</div></div>`;
+      const ongoingRows = ongoing.map(d => `<tr class="border-b border-slate-100">
+        <td class="px-3 py-2 text-sm font-mono text-navy">${escapeHtml(d.equipment_tag || '—')}</td>
+        <td class="px-3 py-2 text-sm">${escapeHtml(DT_CAT[d.category] || '-')}</td>
+        <td class="px-3 py-2 text-sm">${escapeHtml(d.start_at ? new Date(d.start_at).toLocaleString('id-ID') : '—')}</td>
+        <td class="px-3 py-2 text-sm text-red-600 font-semibold">${fmtH((now - new Date(d.start_at).getTime()) / 3600000)}</td>
+        <td class="px-3 py-2 text-right whitespace-nowrap"><button onclick="markDowntimeDone('${d.id}')" class="px-2 py-1 rounded bg-green-100 hover:bg-green-200 text-green-700 text-xs font-semibold">✓ Selesai</button> <button onclick="openDowntimeEdit('${d.id}')" class="px-2 py-1 rounded bg-navy hover:bg-navy-700 text-white text-xs">✏</button></td>
+      </tr>`).join('');
+      const eqRows = eqList.map(o => `<tr class="border-b border-slate-100 hover:bg-slate-50 cursor-pointer" onclick="setEquipmentView('detail','${o.id}'); navigate('equipment')">
+        <td class="px-3 py-2 text-sm font-mono text-navy">${escapeHtml(o.tag || '—')}</td>
+        <td class="px-3 py-2 text-sm">${escapeHtml(o.name || '')}</td>
+        <td class="px-3 py-2">${availPct(o.avail)}</td>
+        <td class="px-3 py-2 text-sm">${o.events}x</td>
+        <td class="px-3 py-2 text-sm">${fmtH(o.downH)}</td>
+        <td class="px-3 py-2 text-sm">${o.mttr != null ? fmtH(o.mttr) : '—'}</td>
+      </tr>`).join('');
+      const catRows = Object.entries(cat).sort((a, b) => b[1].h - a[1].h).map(([c, v]) => `<div class="flex items-center justify-between text-sm py-1.5 border-b border-slate-100"><span>${escapeHtml(c)}</span><span class="text-slate-500">${v.n}x · ${fmtH(v.h)}</span></div>`).join('');
+
+      host.innerHTML = `
+        <div class="flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <h3 class="text-xl font-bold text-slate-900">🟢 Availability — Kesiapan Equipment</h3>
+            <p class="text-sm text-slate-500">% waktu equipment siap pakai (tidak down). Dihitung dari catatan downtime.</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <select onchange="setAvailPeriod(this.value)" class="px-2 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-navy">
+              <option value="30" ${availPeriodDays==30?'selected':''}>30 hari</option>
+              <option value="90" ${availPeriodDays==90?'selected':''}>90 hari</option>
+              <option value="365" ${availPeriodDays==365?'selected':''}>1 tahun</option>
+            </select>
+            <button onclick="openDowntimeForm()" class="bg-safety hover:bg-safety/90 text-white px-4 py-2.5 rounded-lg text-sm font-semibold whitespace-nowrap">+ Catat Downtime</button>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+          ${kpi('Availability rata-rata', eqList.length ? fleetAvail.toFixed(1) + '%' : '—')}
+          ${kpi('Sedang Down', ongoing.length)}
+          ${kpi('MTTR (rata² perbaikan)', mttr != null ? fmtH(mttr) : '—')}
+          ${kpi('MTBF (rata² antar rusak)', mtbf != null ? fmtH(mtbf) : '—')}
+        </div>
+        ${ongoing.length ? `<div class="bg-white rounded-xl border border-red-200 overflow-hidden">
+          <div class="px-4 py-3 border-b border-slate-100 font-semibold text-red-700 text-sm">🔴 Sedang Down (${ongoing.length})</div>
+          <div class="overflow-x-auto"><table class="w-full"><thead><tr class="bg-slate-50 text-left text-xs text-slate-500"><th class="px-3 py-2">Equipment</th><th class="px-3 py-2">Penyebab</th><th class="px-3 py-2">Mulai</th><th class="px-3 py-2">Lama</th><th class="px-3 py-2"></th></tr></thead><tbody>${ongoingRows}</tbody></table></div>
+        </div>` : ''}
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div class="lg:col-span-2 bg-white rounded-xl border border-slate-200 overflow-hidden">
+            <div class="px-4 py-3 border-b border-slate-100 font-semibold text-slate-800 text-sm">Availability per Equipment (${availPeriodDays} hari) <span class="text-slate-400 font-normal">— klik buka detail</span></div>
+            <div class="overflow-x-auto max-h-96 overflow-y-auto"><table class="w-full"><thead class="sticky top-0 bg-slate-50"><tr class="text-left text-xs text-slate-500"><th class="px-3 py-2">Tag</th><th class="px-3 py-2">Nama</th><th class="px-3 py-2">Availability</th><th class="px-3 py-2">Down</th><th class="px-3 py-2">Total</th><th class="px-3 py-2">MTTR</th></tr></thead><tbody>${eqRows || '<tr><td colspan="6" class="px-3 py-6 text-center text-slate-400 text-sm">Belum ada catatan downtime.</td></tr>'}</tbody></table></div>
+          </div>
+          <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+            <div class="px-4 py-3 border-b border-slate-100 font-semibold text-slate-800 text-sm">Penyebab Down</div>
+            <div class="p-4">${catRows || '<div class="text-slate-400 text-sm text-center py-4">Belum ada data.</div>'}</div>
+          </div>
+        </div>`;
+    }
+    function setAvailPeriod(d) { availPeriodDays = Number(d) || 365; renderAvailabilityPage(document.getElementById('rel-content')); }
+    window.setAvailPeriod = setAvailPeriod;
+    window.renderAvailabilityPage = renderAvailabilityPage;
+
+    async function openDowntimeForm(existing) {
+      if (!isSrMekanikOrAbove()) { toast('Khusus Sr Mekanik ke atas.', 'warn'); return; }
+      let eqs = [];
+      try { const { data } = await state.supabase.from('equipment').select('id, tag_number, nama_equipment, assigned_unit_id').order('tag_number'); eqs = data || []; } catch (e) {}
+      const e = existing || {};
+      const opts = `<option value="">— pilih equipment —</option>` + eqs.map(x => `<option value="${x.id}" data-tag="${escapeHtml(x.tag_number)}" data-name="${escapeHtml(x.nama_equipment || '')}" data-unit="${x.assigned_unit_id || ''}" ${x.id === e.equipment_id ? 'selected' : ''}>${escapeHtml(x.tag_number)} — ${escapeHtml(x.nama_equipment || '')}</option>`).join('');
+      const startVal = e.start_at ? toLocalInput(e.start_at) : toLocalInput(new Date().toISOString());
+      const body = `
+        <div class="space-y-3">
+          <div><label class="text-xs font-semibold text-slate-500 uppercase">Equipment *</label>
+            <select id="dt-eq" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-navy">${opts}</select></div>
+          <div class="grid grid-cols-2 gap-3">
+            <div><label class="text-xs text-slate-500">Mulai Down *</label><input id="dt-start" type="datetime-local" value="${startVal}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy"></div>
+            <div><label class="text-xs text-slate-500">Selesai (kosongkan kalau masih down)</label><input id="dt-end" type="datetime-local" value="${e.end_at ? toLocalInput(e.end_at) : ''}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy"></div>
+          </div>
+          <div><label class="text-xs text-slate-500">Penyebab</label>
+            <select id="dt-cat" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-navy">
+              ${Object.entries(DT_CAT).map(([k, l]) => `<option value="${k}" ${e.category === k ? 'selected' : ''}>${l}</option>`).join('')}
+            </select></div>
+          <div><label class="text-xs text-slate-500">Catatan</label><input id="dt-notes" value="${escapeHtml(e.notes || '')}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy"></div>
+        </div>`;
+      const footer = `<button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
+        <button onclick="saveDowntime('${existing?.id || ''}')" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy-700 text-white text-sm font-semibold">💾 Simpan</button>`;
+      openModal({ title: existing ? 'Edit Downtime' : 'Catat Downtime', body, footer, maxWidth: 'max-w-lg' });
+    }
+    window.openDowntimeForm = openDowntimeForm;
+    function openDowntimeEdit(id) { const d = (availData || []).find(x => x.id === id); if (d) openDowntimeForm(d); }
+    window.openDowntimeEdit = openDowntimeEdit;
+
+    async function saveDowntime(id) {
+      const eqSel = document.getElementById('dt-eq'); const eqId = eqSel?.value;
+      if (!eqId) { toast('Pilih equipment dulu.', 'warn'); return; }
+      const startV = document.getElementById('dt-start')?.value;
+      if (!startV) { toast('Isi waktu mulai down.', 'warn'); return; }
+      const endV = document.getElementById('dt-end')?.value;
+      if (endV && new Date(endV) < new Date(startV)) { toast('Waktu selesai tidak boleh sebelum mulai.', 'warn'); return; }
+      const opt = eqSel.selectedOptions[0];
+      const unitId = opt?.dataset?.unit ? Number(opt.dataset.unit) : null;
+      const payload = {
+        equipment_id: eqId, equipment_tag: opt?.dataset?.tag || null, equipment_name: opt?.dataset?.name || null,
+        unit_id: unitId, unit_name: unitId ? getParentUnitName(unitId) : null,
+        start_at: new Date(startV).toISOString(), end_at: endV ? new Date(endV).toISOString() : null,
+        category: document.getElementById('dt-cat')?.value || 'lainnya',
+        notes: (document.getElementById('dt-notes')?.value || '').trim() || null,
+      };
+      try {
+        if (id) { const { error } = await state.supabase.from('downtime_events').update(payload).eq('id', id); if (error) throw error; }
+        else { payload.created_by = state.user.id; payload.created_by_name = state.profile?.full_name || state.profile?.email || ''; const { error } = await state.supabase.from('downtime_events').insert(payload); if (error) throw error; }
+        toast('Downtime tersimpan.', 'success'); closeModal();
+        renderAvailabilityPage(document.getElementById('rel-content'));
+      } catch (e) { toast('Gagal simpan: ' + e.message, 'error'); }
+    }
+    window.saveDowntime = saveDowntime;
+
+    async function markDowntimeDone(id) {
+      const { error } = await state.supabase.from('downtime_events').update({ end_at: new Date().toISOString() }).eq('id', id);
+      if (error) { toast('Gagal: ' + error.message, 'error'); return; }
+      toast('Ditandai selesai.', 'success');
+      renderAvailabilityPage(document.getElementById('rel-content'));
+    }
+    window.markDowntimeDone = markDowntimeDone;
 
     // ============================================================
     // 11. BOOT
