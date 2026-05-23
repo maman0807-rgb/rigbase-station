@@ -7913,17 +7913,25 @@
     // ============================================================
     // 10u. REPORT JUSTIFIKASI (cetak/PDF + blok tanda tangan)
     // ============================================================
-    function printReportDoc(title, summaryHtml, introHtml, tableHtml, kesimpulanHtml, ttd) {
+    function chartBars(title, items) {
+      const max = Math.max(1, ...items.map(i => Number(i.value) || 0));
+      const rows = items.map(i => { const v = Number(i.value) || 0; return `<div style="display:flex;align-items:center;gap:8px;margin:3px 0;font-size:11px"><div style="width:130px;text-align:right;color:#374151">${escapeHtml(i.label)}</div><div style="flex:1;background:#f1f5f9;border-radius:3px;height:15px"><div style="width:${(v / max * 100).toFixed(1)}%;background:${i.color};height:15px;border-radius:3px;min-width:2px"></div></div><div style="width:46px;font-weight:bold">${v}</div></div>`; }).join('');
+      return `<div style="margin:12px 0;padding:10px;border:1px solid #e5e7eb;border-radius:6px"><div style="font-size:11px;font-weight:bold;color:#11335d;margin-bottom:6px">${escapeHtml(title)}</div>${rows}</div>`;
+    }
+
+    function printReportDoc(data, ttd, docNo) {
+      const { title, summary: summaryHtml, chart: chartHtml, intro: introHtml, table: tableHtml, kesimpulan: kesimpulanHtml } = data || {};
       const tgl = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
       const who = escapeHtml(state.profile?.full_name || state.profile?.email || '');
       const yr = new Date().getFullYear();
+      const noDok = docNo ? escapeHtml(docNo) : ('........./........./' + yr);
       const tt = ttd || {};
       const sDibuat = tt.dibuat ? escapeHtml(tt.dibuat) : who;
       const sPeriksa = tt.diperiksa ? escapeHtml(tt.diperiksa) : '( ............... )';
       const sSetuju = tt.disetujui ? escapeHtml(tt.disetujui) : '( ............... )';
       const html = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
         <style>
-          *{box-sizing:border-box} body{font-family:Arial,Helvetica,sans-serif;color:#1f2937;padding:32px;font-size:12px;line-height:1.5}
+          *{box-sizing:border-box} body{font-family:Arial,Helvetica,sans-serif;color:#1f2937;padding:32px;font-size:12px;line-height:1.5;-webkit-print-color-adjust:exact;print-color-adjust:exact}
           .kop{display:flex;align-items:center;gap:12px;border-bottom:3px solid #11335d;padding-bottom:10px;margin-bottom:8px}
           .kop .t{font-size:16px;font-weight:bold;color:#11335d} .kop .s{font-size:11px;color:#6b7280}
           h1{font-size:15px;text-align:center;margin:14px 0 2px;text-transform:uppercase}
@@ -7939,8 +7947,9 @@
         </style></head><body>
         <div class="kop"><div style="font-size:28px">🛢️</div><div><div class="t">PT PERTAMINA HULU ROKAN — Hoist &amp; Heavy Equipment</div><div class="s">Rigbase Station · Asset Reliability (RAM)</div></div></div>
         <h1>${escapeHtml(title)}</h1>
-        <div class="meta">Nomor: ........./........./${yr} &nbsp;·&nbsp; Tanggal: ${tgl}</div>
+        <div class="meta">Nomor: ${noDok} &nbsp;·&nbsp; Tanggal: ${tgl}</div>
         ${summaryHtml || ''}
+        ${chartHtml || ''}
         ${introHtml}
         ${tableHtml}
         <div class="kesimpulan"><b>Kesimpulan &amp; Rekomendasi</b><br>${kesimpulanHtml}</div>
@@ -7963,6 +7972,8 @@
       const body = `
         <div class="space-y-3">
           <p class="text-xs text-slate-500">Isi nama penandatangan agar langsung tercetak di dokumen. Kosongkan kalau mau diisi manual setelah dicetak.</p>
+          <div><label class="text-xs text-slate-500">No. Dokumen</label>
+            <input id="ttd-docno" placeholder="otomatis…" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy"></div>
           <div><label class="text-xs text-slate-500">Dibuat oleh (Sr Mekanik)</label>
             <input id="ttd-dibuat" value="${who}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy"></div>
           <div><label class="text-xs text-slate-500">Diperiksa (SPV / Sr SPV)</label>
@@ -7974,6 +7985,18 @@
         <button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
         <button onclick="doPrintReport()" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy-700 text-white text-sm font-semibold">🖨 Cetak / PDF</button>`;
       openModal({ title: 'Penandatangan Dokumen', body, footer, maxWidth: 'max-w-md' });
+      // Auto No. Dokumen (berurutan dari DB) — boleh diedit
+      (async () => {
+        try {
+          const yr = new Date().getFullYear();
+          const type = data.type || 'RAM';
+          const { data: seq, error } = await state.supabase.rpc('next_doc_seq', { p_key: `${type}-${yr}` });
+          if (!error && seq != null) {
+            const el = document.getElementById('ttd-docno');
+            if (el && !el.value) el.value = `${String(seq).padStart(3, '0')}/RAM-${type}/PHR/${yr}`;
+          }
+        } catch (e) { /* fungsi belum ada → biar manual */ }
+      })();
     }
     function doPrintReport() {
       const d = window.__reportData; if (!d) return;
@@ -7982,8 +8005,9 @@
         diperiksa: (document.getElementById('ttd-periksa')?.value || '').trim(),
         disetujui: (document.getElementById('ttd-setuju')?.value || '').trim(),
       };
+      const docNo = (document.getElementById('ttd-docno')?.value || '').trim();
       closeModal();
-      printReportDoc(d.title, d.summary, d.intro, d.table, d.kesimpulan, ttd);
+      printReportDoc(d, ttd, docNo);
     }
     window.openSignDialog = openSignDialog;
     window.doPrintReport = doPrintReport;
@@ -8005,7 +8029,9 @@
       }).join('');
       const table = `<table><thead><tr><th>No</th><th>Part Number</th><th>Deskripsi</th><th>Kategori</th><th>Stok</th><th>Safety</th><th>Status</th></tr></thead><tbody>${rows || '<tr><td colspan="7" style="text-align:center">Tidak ada data</td></tr>'}</tbody></table>`;
       const kesimpulan = `<b style="color:#dc2626">⚠️ Dampak bila tidak ditindaklanjuti:</b> ${habis} suku cadang kritis kosong → equipment berisiko gagal tanpa pengganti → potensi <b>rig down</b> &amp; kehilangan jam operasi.<br><br><b style="color:#16a34a">✅ Permohonan:</b> mohon persetujuan pengadaan <b>${habis} item kritis</b> di atas untuk menjaga ketersediaan (Availability) &amp; keandalan equipment.`;
-      openSignDialog({ title: 'Justifikasi Pengadaan Suku Cadang', summary, intro, table, kesimpulan });
+      const aman = list.length - habis - rendah;
+      const chart = chartBars('Distribusi Status Stok', [{ label: 'Habis', value: habis, color: '#dc2626' }, { label: 'Rendah', value: rendah, color: '#d97706' }, { label: 'Aman', value: aman, color: '#16a34a' }]);
+      openSignDialog({ title: 'Justifikasi Pengadaan Suku Cadang', type: 'CSPP', summary, chart, intro, table, kesimpulan });
     }
     window.cetakCsppReport = cetakCsppReport;
 
@@ -8025,7 +8051,10 @@
       const rows = list.slice(0, 300).map((e, i) => `<tr><td style="text-align:center">${i + 1}</td><td>${escapeHtml(e.equipment_tag || '-')}<br><span style="color:#6b7280">${escapeHtml(e.equipment_name || '')}</span></td><td>${escapeHtml(e.failure_mode || '')}</td><td style="text-align:center">${e.severity}</td><td style="text-align:center">${e.occurrence}</td><td style="text-align:center">${e.detection}</td>${rpnCell(e.rpn)}<td>${escapeHtml(e.recommended_action || '-')}</td></tr>`).join('');
       const table = `<table><thead><tr><th>No</th><th>Equipment</th><th>Mode Kegagalan</th><th>S</th><th>O</th><th>D</th><th>RPN</th><th>Rekomendasi Tindakan</th></tr></thead><tbody>${rows || '<tr><td colspan="8" style="text-align:center">Tidak ada data</td></tr>'}</tbody></table>`;
       const kesimpulan = `<b style="color:#dc2626">⚠️ Dampak bila tidak ditindaklanjuti:</b> ${kritis} mode kegagalan kritis berpotensi menyebabkan kerusakan besar, berhentinya operasi, atau risiko keselamatan.<br><br><b style="color:#16a34a">✅ Permohonan:</b> mohon persetujuan penerbitan <b>SPK (Surat Perintah Kerja)</b> untuk melaksanakan rekomendasi tindakan di atas.`;
-      openSignDialog({ title: 'Justifikasi Tindakan Perbaikan (SPK)', summary, intro, table, kesimpulan });
+      const sedang = list.filter(e => { const r = Number(e.rpn) || 0; return r >= 40 && r < 100; }).length;
+      const rendah = list.filter(e => (Number(e.rpn) || 0) < 40).length;
+      const chart = chartBars('Distribusi RPN', [{ label: 'Kritis ≥200', value: kritis, color: '#dc2626' }, { label: 'Tinggi ≥100', value: tinggi, color: '#d97706' }, { label: 'Sedang ≥40', value: sedang, color: '#ca8a04' }, { label: 'Rendah <40', value: rendah, color: '#16a34a' }]);
+      openSignDialog({ title: 'Justifikasi Tindakan Perbaikan (SPK)', type: 'FMEA', summary, chart, intro, table, kesimpulan });
     }
     window.cetakFmeaReport = cetakFmeaReport;
 
@@ -8057,7 +8086,9 @@
       const rows = eqList.slice(0, 300).map((o, i) => `<tr><td style="text-align:center">${i + 1}</td><td>${escapeHtml(o.tag || '-')}<br><span style="color:#6b7280">${escapeHtml(o.name || '')}</span></td>${availCell(o.avail)}<td style="text-align:center">${o.events}</td><td style="text-align:center">${fmtH(o.downH)}</td><td style="text-align:center">${fmtH(o.mttr)}</td></tr>`).join('');
       const table = `<table><thead><tr><th>No</th><th>Equipment</th><th>Availability</th><th>Jml Down</th><th>Total Down</th><th>MTTR</th></tr></thead><tbody>${rows || '<tr><td colspan="6" style="text-align:center">Belum ada catatan downtime</td></tr>'}</tbody></table>`;
       const kesimpulan = `<b style="color:#dc2626">⚠️ Dampak:</b> equipment dengan availability rendah / sedang down menurunkan kesiapan rig &amp; berpotensi menghambat operasi.<br><br><b style="color:#16a34a">✅ Permohonan:</b> mohon dukungan mempercepat perbaikan (suku cadang/SPK) pada equipment availability terendah di atas guna memulihkan kesiapan operasi.`;
-      openSignDialog({ title: 'Laporan Availability Equipment', summary, intro, table, kesimpulan });
+      const catMap = {}; data.forEach(d2 => { const c = DT_CAT[d2.category] || 'Lainnya'; catMap[c] = (catMap[c] || 0) + (Number(d2.duration_hours) || 0); });
+      const chart = chartBars('Jam Downtime per Penyebab', Object.entries(catMap).map(([k, v]) => ({ label: k, value: Math.round(v), color: '#11335d' })));
+      openSignDialog({ title: 'Laporan Availability Equipment', type: 'AVAIL', summary, chart, intro, table, kesimpulan });
     }
     window.cetakAvailReport = cetakAvailReport;
 
