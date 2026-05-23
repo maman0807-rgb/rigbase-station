@@ -311,6 +311,7 @@
       { id: 'alerts',      label: 'Alert',       icon: '🔔',  bottomNav: true  },
       { id: 'stress',      label: 'Stress Score', icon: '🚛', srOnly: true     },
       { id: 'cspp',        label: 'CSPP',         icon: '📦', srOnly: true     },
+      { id: 'fmea',        label: 'FMEA',         icon: '⚠️', srOnly: true     },
       { id: 'categories',  label: 'Kategori',    icon: '🏷️',  adminOnly: true  },
       { id: 'users',       label: 'User',        icon: '👥',  adminOnly: true  },
       { id: 'activity',    label: 'Activity Log', icon: '📜',  adminOnly: true  },
@@ -4898,6 +4899,7 @@
                 ['inspeksi','🔍 Riwayat Inspeksi'],
                 ['history','🔄 History'],
                 ['stress','🚛 Riwayat Stress'],
+                ['fmea','⚠️ FMEA'],
               ].map(([id, lbl]) => `
                 <button onclick="state.equipmentDetailTab='${id}'; renderDetailTab(window.__currentEq)"
                   class="px-4 py-3 text-sm font-medium whitespace-nowrap ${state.equipmentDetailTab===id ? 'border-b-2 border-safety text-safety bg-safety/5' : 'text-slate-600 hover:text-navy'}">
@@ -4925,7 +4927,7 @@
       const parent = c.parentElement.querySelector('.flex.border-b');
       if (parent) {
         parent.querySelectorAll('button').forEach((btn, i) => {
-          const ids = ['info','maintenance','sertifikasi','dokumen','inspeksi','history','stress'];
+          const ids = ['info','maintenance','sertifikasi','dokumen','inspeksi','history','stress','fmea'];
           btn.className = `px-4 py-3 text-sm font-medium whitespace-nowrap ${state.equipmentDetailTab===ids[i] ? 'border-b-2 border-safety text-safety bg-safety/5' : 'text-slate-600 hover:text-navy'}`;
         });
       }
@@ -4937,6 +4939,7 @@
         case 'inspeksi':    c.innerHTML = '<div class="text-slate-400">Memuat…</div>'; renderInspeksiHistoryTab(eq, c); break;
         case 'history':     c.innerHTML = '<div class="text-slate-400">Memuat…</div>'; renderHistoryTab(eq, c); break;
         case 'stress':      c.innerHTML = '<div class="text-slate-400">Memuat…</div>'; renderStressHistoryTab(eq, c); break;
+        case 'fmea':        c.innerHTML = '<div class="text-slate-400">Memuat…</div>'; renderFmeaForEquipmentTab(eq, c); break;
       }
     }
     window.renderDetailTab = renderDetailTab;
@@ -7282,6 +7285,247 @@
     window.setCsppFilter = setCsppFilter;
     window.setCsppFilterQ = setCsppFilterQ;
     window.setCsppPreset = setCsppPreset;
+
+    // ============================================================
+    // 10x. FMEA — Failure Mode & Effects Analysis (analisa Sr Mekanik+)
+    // ============================================================
+    const FMEA_STATUS = {
+      open:        { l: 'Open',   cls: 'bg-red-100 text-red-700' },
+      in_progress: { l: 'Proses', cls: 'bg-yellow-100 text-yellow-700' },
+      closed:      { l: 'Closed', cls: 'bg-green-100 text-green-700' },
+    };
+    function rpnBand(rpn) {
+      rpn = Number(rpn) || 0;
+      if (rpn >= 200) return { key: 'kritis', label: 'Kritis', cls: 'bg-red-100 text-red-700', emoji: '🔴' };
+      if (rpn >= 100) return { key: 'tinggi', label: 'Tinggi', cls: 'bg-orange-100 text-orange-700', emoji: '🟠' };
+      if (rpn >= 40)  return { key: 'sedang', label: 'Sedang', cls: 'bg-yellow-100 text-yellow-700', emoji: '🟡' };
+      return { key: 'rendah', label: 'Rendah', cls: 'bg-green-100 text-green-700', emoji: '🟢' };
+    }
+    function rpnBadge(rpn) { const b = rpnBand(rpn); return `<span class="px-2 py-0.5 rounded-full text-xs font-semibold ${b.cls}">${b.emoji} ${Number(rpn) || 0}</span>`; }
+    function fmeaStatusBadge(s) { const m = FMEA_STATUS[s] || FMEA_STATUS.open; return `<span class="px-2 py-0.5 rounded-full text-xs font-semibold ${m.cls}">${m.l}</span>`; }
+
+    let fmeaFilter = { status: '', band: '', q: '' };
+
+    PAGES.fmea = function () {
+      const div = document.createElement('div');
+      div.className = 'page space-y-5';
+      div.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat FMEA…</div>';
+      renderFmeaPage(div);
+      return div;
+    };
+
+    async function renderFmeaPage(host) {
+      let rows = [];
+      try {
+        const { data, error } = await state.supabase.from('fmea_entries').select('*').order('rpn', { ascending: false });
+        if (error) throw error; rows = data || [];
+      } catch (e) {
+        host.innerHTML = `<div class="bg-red-50 text-red-700 p-4 rounded-xl text-sm">Gagal memuat: ${escapeHtml(e.message)}</div>`;
+        return;
+      }
+      window.__fmeaEntries = rows;
+      window.__fmeaById = {}; rows.forEach(r => { window.__fmeaById[r.id] = r; });
+      const kritis = rows.filter(r => Number(r.rpn) >= 200).length;
+      const open = rows.filter(r => r.status !== 'closed').length;
+      const kpi = (label, val) => `<div class="bg-white rounded-xl border border-slate-200 p-4"><div class="text-xs text-slate-500 mb-1">${label}</div><div class="text-2xl font-extrabold text-slate-900">${val}</div></div>`;
+
+      host.innerHTML = `
+        <div class="flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <h3 class="text-xl font-bold text-slate-900">⚠️ FMEA — Analisa Mode Kegagalan</h3>
+            <p class="text-sm text-slate-500">RPN = Severity × Occurrence × Detection. Makin tinggi = makin prioritas.</p>
+          </div>
+          <button onclick="openFmeaForm()" class="bg-safety hover:bg-safety/90 text-white px-4 py-2.5 rounded-lg text-sm font-semibold">+ Tambah FMEA</button>
+        </div>
+        <div class="grid grid-cols-3 gap-3">
+          ${kpi('Total Entri', rows.length)}
+          ${kpi('🔴 RPN Kritis (≥200)', kritis)}
+          ${kpi('Aksi Belum Closed', open)}
+        </div>
+        <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div class="px-4 py-3 border-b border-slate-100 space-y-2">
+            <div class="font-semibold text-slate-800 text-sm">Daftar FMEA <span id="fmea-count" class="text-slate-400 font-normal"></span></div>
+            <div class="flex flex-wrap gap-2">
+              <select onchange="setFmeaFilter('band', this.value)" class="px-2 py-1.5 border border-slate-300 rounded-lg text-xs bg-white outline-none focus:ring-2 focus:ring-navy">
+                <option value="">Semua RPN</option><option value="kritis">🔴 Kritis</option><option value="tinggi">🟠 Tinggi</option><option value="sedang">🟡 Sedang</option><option value="rendah">🟢 Rendah</option>
+              </select>
+              <select onchange="setFmeaFilter('status', this.value)" class="px-2 py-1.5 border border-slate-300 rounded-lg text-xs bg-white outline-none focus:ring-2 focus:ring-navy">
+                <option value="">Semua Status</option><option value="open">Open</option><option value="in_progress">Proses</option><option value="closed">Closed</option>
+              </select>
+              <input oninput="setFmeaFilterQ(this.value)" placeholder="Cari equipment / mode kegagalan…" class="flex-1 min-w-[140px] px-2 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-navy">
+            </div>
+          </div>
+          <div class="overflow-x-auto max-h-[28rem] overflow-y-auto"><table class="w-full">
+            <thead class="sticky top-0 bg-slate-50"><tr class="text-left text-xs text-slate-500">
+              <th class="px-3 py-2">Equipment</th><th class="px-3 py-2">Mode Kegagalan</th><th class="px-3 py-2">S</th><th class="px-3 py-2">O</th><th class="px-3 py-2">D</th><th class="px-3 py-2">RPN</th><th class="px-3 py-2">Status</th><th class="px-3 py-2"></th>
+            </tr></thead><tbody id="fmea-body"></tbody>
+          </table></div>
+        </div>`;
+      renderFmeaList();
+    }
+
+    function fmeaFiltered() {
+      const f = fmeaFilter; const q = (f.q || '').toLowerCase().trim();
+      return (window.__fmeaEntries || []).filter(e => {
+        if (f.status && e.status !== f.status) return false;
+        if (f.band && rpnBand(e.rpn).key !== f.band) return false;
+        if (q && !((e.equipment_tag || '').toLowerCase().includes(q) || (e.equipment_name || '').toLowerCase().includes(q) || (e.failure_mode || '').toLowerCase().includes(q))) return false;
+        return true;
+      });
+    }
+    function renderFmeaList() {
+      const body = document.getElementById('fmea-body'); if (!body) return;
+      const list = fmeaFiltered();
+      body.innerHTML = list.length ? list.map(e => `
+        <tr class="border-b border-slate-100">
+          <td class="px-3 py-2 text-sm"><div class="font-mono text-xs text-navy">${escapeHtml(e.equipment_tag || '—')}</div><div class="text-slate-500 text-xs">${escapeHtml(e.equipment_name || '')}</div></td>
+          <td class="px-3 py-2 text-sm">${escapeHtml(e.failure_mode || '')}</td>
+          <td class="px-3 py-2 text-sm">${e.severity}</td>
+          <td class="px-3 py-2 text-sm">${e.occurrence}</td>
+          <td class="px-3 py-2 text-sm">${e.detection}</td>
+          <td class="px-3 py-2">${rpnBadge(e.rpn)}</td>
+          <td class="px-3 py-2">${fmeaStatusBadge(e.status)}</td>
+          <td class="px-3 py-2 text-right whitespace-nowrap">
+            <button onclick="openFmeaEdit('${e.id}')" class="px-2 py-1 rounded bg-navy hover:bg-navy-700 text-white text-xs">✏</button>
+            <button onclick="deleteFmea('${e.id}')" class="px-2 py-1 rounded bg-red-100 hover:bg-red-200 text-red-700 text-xs">🗑</button>
+          </td>
+        </tr>`).join('') : '<tr><td colspan="8" class="px-3 py-6 text-center text-slate-400 text-sm">Belum ada FMEA. Klik "+ Tambah FMEA".</td></tr>';
+      const cnt = document.getElementById('fmea-count'); if (cnt) cnt.textContent = `(${list.length})`;
+    }
+    let _fmeaDeb;
+    function setFmeaFilter(k, v) { fmeaFilter[k] = v; renderFmeaList(); }
+    function setFmeaFilterQ(v) { fmeaFilter.q = v; clearTimeout(_fmeaDeb); _fmeaDeb = setTimeout(renderFmeaList, 300); }
+    window.setFmeaFilter = setFmeaFilter; window.setFmeaFilterQ = setFmeaFilterQ;
+
+    function renderFmeaRpn() {
+      const g = (id) => Number(document.getElementById(id)?.value) || 0;
+      const rpn = g('fmea-s') * g('fmea-o') * g('fmea-d');
+      const el = document.getElementById('fmea-rpn'); if (el) el.innerHTML = `RPN: <b class="text-lg">${rpn}</b> ${rpnBadge(rpn)}`;
+    }
+    window.renderFmeaRpn = renderFmeaRpn;
+
+    async function openFmeaForm(existing, preset) {
+      if (!isSrMekanikOrAbove()) { toast('Khusus Sr Mekanik ke atas.', 'warn'); return; }
+      let eqs = [];
+      try { const { data } = await state.supabase.from('equipment').select('id, tag_number, nama_equipment').order('tag_number'); eqs = data || []; } catch (e) {}
+      const e = existing || {};
+      const selId = e.equipment_id || preset?.id || '';
+      const locked = !!preset && !existing;
+      const opts = `<option value="">— pilih equipment —</option>` + eqs.map(x => `<option value="${x.id}" data-tag="${escapeHtml(x.tag_number)}" data-name="${escapeHtml(x.nama_equipment || '')}" ${x.id === selId ? 'selected' : ''}>${escapeHtml(x.tag_number)} — ${escapeHtml(x.nama_equipment || '')}</option>`).join('');
+      const sel110 = (id, val, def) => `<select id="${id}" onchange="renderFmeaRpn()" class="w-full px-2 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-navy">${[1,2,3,4,5,6,7,8,9,10].map(n => `<option value="${n}" ${Number(val || def) === n ? 'selected' : ''}>${n}</option>`).join('')}</select>`;
+      const inp = (id, val, ph) => `<input id="${id}" value="${escapeHtml(val || '')}" placeholder="${ph || ''}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy">`;
+      const body = `
+        <div class="space-y-3">
+          <div>
+            <label class="text-xs font-semibold text-slate-500 uppercase">Equipment *</label>
+            <select id="fmea-eq" ${locked ? 'disabled' : ''} class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-navy">${opts}</select>
+            ${locked ? `<input type="hidden" id="fmea-eq-locked" value="${selId}">` : ''}
+          </div>
+          <div><label class="text-xs text-slate-500">Fungsi komponen</label>${inp('fmea-fungsi', e.fungsi, 'mis. menyalurkan daya')}</div>
+          <div><label class="text-xs text-slate-500">Mode Kegagalan *</label>${inp('fmea-mode', e.failure_mode, 'mis. bearing aus / seal bocor')}</div>
+          <div class="grid grid-cols-2 gap-3">
+            <div><label class="text-xs text-slate-500">Efek</label>${inp('fmea-effect', e.effect, 'akibat kegagalan')}</div>
+            <div><label class="text-xs text-slate-500">Penyebab</label>${inp('fmea-cause', e.cause, 'akar penyebab')}</div>
+          </div>
+          <div class="grid grid-cols-3 gap-3">
+            <div><label class="text-xs text-slate-500">Severity (1-10)</label>${sel110('fmea-s', e.severity, 5)}</div>
+            <div><label class="text-xs text-slate-500">Occurrence (1-10)</label>${sel110('fmea-o', e.occurrence, 5)}</div>
+            <div><label class="text-xs text-slate-500">Detection (1-10)</label>${sel110('fmea-d', e.detection, 5)}</div>
+          </div>
+          <div id="fmea-rpn" class="bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 text-sm"></div>
+          <div><label class="text-xs text-slate-500">Rekomendasi Aksi</label>${inp('fmea-action', e.recommended_action, 'tindakan menurunkan risiko')}</div>
+          <div class="grid grid-cols-2 gap-3">
+            <div><label class="text-xs text-slate-500">PIC</label>${inp('fmea-pic', e.pic, '')}</div>
+            <div><label class="text-xs text-slate-500">Status</label>
+              <select id="fmea-status" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-navy">
+                <option value="open" ${e.status === 'open' || !e.status ? 'selected' : ''}>Open</option>
+                <option value="in_progress" ${e.status === 'in_progress' ? 'selected' : ''}>Proses</option>
+                <option value="closed" ${e.status === 'closed' ? 'selected' : ''}>Closed</option>
+              </select></div>
+          </div>
+          <div><label class="text-xs text-slate-500">Catatan</label>${inp('fmea-notes', e.notes, '')}</div>
+        </div>`;
+      const footer = `
+        <button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
+        <button onclick="saveFmea('${existing?.id || ''}')" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy-700 text-white text-sm font-semibold">💾 Simpan</button>`;
+      openModal({ title: existing ? 'Edit FMEA' : 'Tambah FMEA', body, footer, maxWidth: 'max-w-2xl' });
+      renderFmeaRpn();
+    }
+    window.openFmeaForm = openFmeaForm;
+    function openFmeaEdit(id) { openFmeaForm(window.__fmeaById?.[id]); }
+    window.openFmeaEdit = openFmeaEdit;
+
+    async function saveFmea(id) {
+      const eqSel = document.getElementById('fmea-eq');
+      const lockedId = document.getElementById('fmea-eq-locked')?.value;
+      const eqId = lockedId || eqSel?.value;
+      if (!eqId) { toast('Pilih equipment dulu.', 'warn'); return; }
+      const mode = (document.getElementById('fmea-mode')?.value || '').trim();
+      if (!mode) { toast('Isi mode kegagalan.', 'warn'); return; }
+      const opt = eqSel?.selectedOptions?.[0];
+      const v = (x) => (document.getElementById(x)?.value || '').trim() || null;
+      const ni = (x) => Number(document.getElementById(x)?.value) || null;
+      const payload = {
+        equipment_id: eqId,
+        equipment_tag: opt?.dataset?.tag || window.__fmeaById?.[id]?.equipment_tag || null,
+        equipment_name: opt?.dataset?.name || window.__fmeaById?.[id]?.equipment_name || null,
+        fungsi: v('fmea-fungsi'), failure_mode: mode, effect: v('fmea-effect'), cause: v('fmea-cause'),
+        severity: ni('fmea-s'), occurrence: ni('fmea-o'), detection: ni('fmea-d'),
+        recommended_action: v('fmea-action'), pic: v('fmea-pic'),
+        status: document.getElementById('fmea-status')?.value || 'open', notes: v('fmea-notes'),
+      };
+      try {
+        if (id) {
+          const { error } = await state.supabase.from('fmea_entries').update(payload).eq('id', id);
+          if (error) throw error;
+        } else {
+          payload.created_by = state.user.id; payload.created_by_name = state.profile?.full_name || state.profile?.email || '';
+          const { error } = await state.supabase.from('fmea_entries').insert(payload);
+          if (error) throw error;
+        }
+        toast('FMEA tersimpan.', 'success');
+        closeModal();
+        if (state.currentPage === 'fmea') navigate('fmea');
+        else if (window.__currentEq) renderDetailTab(window.__currentEq);
+      } catch (e) { toast('Gagal simpan: ' + e.message, 'error'); }
+    }
+    window.saveFmea = saveFmea;
+
+    async function deleteFmea(id) {
+      const ok = await confirmDialog({ title: 'Hapus FMEA?', message: 'Entri FMEA ini akan dihapus permanen.', confirmText: 'Hapus', danger: true });
+      if (!ok) return;
+      const { error } = await state.supabase.from('fmea_entries').delete().eq('id', id);
+      if (error) { toast('Gagal hapus: ' + error.message, 'error'); return; }
+      toast('FMEA dihapus.', 'success');
+      if (state.currentPage === 'fmea') navigate('fmea');
+      else if (window.__currentEq) renderDetailTab(window.__currentEq);
+    }
+    window.deleteFmea = deleteFmea;
+
+    // Tab FMEA di detail equipment
+    function renderFmeaForEquipmentTab(eq, c) {
+      state.supabase.from('fmea_entries').select('*').eq('equipment_id', eq.id).order('rpn', { ascending: false })
+        .then(({ data, error }) => {
+          if (error) { c.innerHTML = `<div class="bg-red-50 text-red-700 p-3 rounded-lg text-sm">${escapeHtml(error.message)}</div>`; return; }
+          const rows = data || [];
+          rows.forEach(r => { window.__fmeaById = window.__fmeaById || {}; window.__fmeaById[r.id] = r; });
+          const addBtn = isSrMekanikOrAbove()
+            ? `<button onclick='openFmeaForm(null, {id:"${eq.id}", tag:"${escapeAttr(eq.tag_number)}", name:"${escapeAttr(eq.nama_equipment || '')}"})' class="px-3 py-1.5 rounded-lg bg-navy hover:bg-navy-700 text-white text-xs font-semibold">+ Tambah FMEA</button>`
+            : '';
+          const table = rows.length ? `
+            <div class="overflow-x-auto border border-slate-200 rounded-lg"><table class="w-full">
+              <thead><tr class="bg-slate-50 text-left text-xs text-slate-500"><th class="px-3 py-2">Mode Kegagalan</th><th class="px-3 py-2">S</th><th class="px-3 py-2">O</th><th class="px-3 py-2">D</th><th class="px-3 py-2">RPN</th><th class="px-3 py-2">Status</th><th class="px-3 py-2"></th></tr></thead>
+              <tbody>${rows.map(e => `<tr class="border-b border-slate-100">
+                <td class="px-3 py-2 text-sm">${escapeHtml(e.failure_mode || '')}</td>
+                <td class="px-3 py-2 text-sm">${e.severity}</td><td class="px-3 py-2 text-sm">${e.occurrence}</td><td class="px-3 py-2 text-sm">${e.detection}</td>
+                <td class="px-3 py-2">${rpnBadge(e.rpn)}</td><td class="px-3 py-2">${fmeaStatusBadge(e.status)}</td>
+                <td class="px-3 py-2 text-right">${isSrMekanikOrAbove() ? `<button onclick="openFmeaEdit('${e.id}')" class="px-2 py-1 rounded bg-navy hover:bg-navy-700 text-white text-xs">✏</button>` : ''}</td>
+              </tr>`).join('')}</tbody></table></div>`
+            : '<div class="text-slate-400 text-sm py-6 text-center">Belum ada FMEA untuk equipment ini.</div>';
+          c.innerHTML = `<div class="flex justify-end mb-3">${addBtn}</div>${table}`;
+        });
+    }
+    window.renderFmeaForEquipmentTab = renderFmeaForEquipmentTab;
 
     // ============================================================
     // 11. BOOT
