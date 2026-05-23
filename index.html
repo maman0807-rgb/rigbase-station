@@ -7211,9 +7211,12 @@
       const kpiBtn = (label, val, onclick) => `<button onclick="${onclick}" class="text-left bg-white rounded-xl border border-slate-200 p-4 hover:border-navy transition"><div class="text-xs text-slate-500 mb-1">${label}</div><div class="text-2xl font-extrabold text-slate-900">${val}</div></button>`;
 
       host.innerHTML = `
-        <div>
-          <h3 class="text-xl font-bold text-slate-900">📦 CSPP — Critical Spare Parts</h3>
-          <p class="text-sm text-slate-500">Perencanaan suku cadang kritis — risiko kehabisan stok part penting. Klik kartu merah/kuning untuk filter cepat.</p>
+        <div class="flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <h3 class="text-xl font-bold text-slate-900">📦 CSPP — Critical Spare Parts</h3>
+            <p class="text-sm text-slate-500">Perencanaan suku cadang kritis — klik kartu merah/kuning untuk filter cepat.</p>
+          </div>
+          <button onclick="cetakCsppReport()" class="px-4 py-2.5 rounded-lg border border-slate-300 hover:bg-slate-50 text-sm font-semibold text-slate-700 whitespace-nowrap">🖨 Cetak Justifikasi</button>
         </div>
         <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
           ${kpi('Total Spare Parts', total)}
@@ -7361,7 +7364,10 @@
             <h3 class="text-xl font-bold text-slate-900">⚠️ FMEA — Analisa Mode Kegagalan</h3>
             <p class="text-sm text-slate-500">RPN = Severity × Occurrence × Detection. Makin tinggi = makin prioritas.</p>
           </div>
-          <button onclick="openFmeaForm()" class="bg-safety hover:bg-safety/90 text-white px-4 py-2.5 rounded-lg text-sm font-semibold">+ Tambah FMEA</button>
+          <div class="flex gap-2">
+            <button onclick="cetakFmeaReport()" class="px-4 py-2.5 rounded-lg border border-slate-300 hover:bg-slate-50 text-sm font-semibold text-slate-700 whitespace-nowrap">🖨 Cetak SPK</button>
+            <button onclick="openFmeaForm()" class="bg-safety hover:bg-safety/90 text-white px-4 py-2.5 rounded-lg text-sm font-semibold whitespace-nowrap">+ Tambah FMEA</button>
+          </div>
         </div>
         <div class="grid grid-cols-3 gap-3">
           ${kpi('Total Entri', rows.length)}
@@ -7878,6 +7884,67 @@
         </div>`;
     }
     window.renderRamMaintenance = renderRamMaintenance;
+
+    // ============================================================
+    // 10u. REPORT JUSTIFIKASI (cetak/PDF + blok tanda tangan)
+    // ============================================================
+    function printReportDoc(title, introHtml, tableHtml, kesimpulanHtml) {
+      const tgl = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+      const who = escapeHtml(state.profile?.full_name || state.profile?.email || '');
+      const yr = new Date().getFullYear();
+      const html = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
+        <style>
+          *{box-sizing:border-box} body{font-family:Arial,Helvetica,sans-serif;color:#1f2937;padding:32px;font-size:12px;line-height:1.5}
+          .kop{display:flex;align-items:center;gap:12px;border-bottom:3px solid #11335d;padding-bottom:10px;margin-bottom:8px}
+          .kop .t{font-size:16px;font-weight:bold;color:#11335d} .kop .s{font-size:11px;color:#6b7280}
+          h1{font-size:15px;text-align:center;margin:14px 0 2px;text-transform:uppercase}
+          .meta{text-align:center;font-size:11px;color:#374151;margin-bottom:14px}
+          table{width:100%;border-collapse:collapse;font-size:11px;margin:8px 0}
+          th,td{border:1px solid #9ca3af;padding:5px 7px;text-align:left;vertical-align:top} th{background:#e5edf5}
+          .kesimpulan{margin-top:14px;padding:10px;border:1px solid #d1d5db;background:#f8fafc;border-radius:4px}
+          .ttd{display:flex;justify-content:space-between;margin-top:36px;text-align:center;font-size:11px}
+          .ttd .c{width:30%} .ttd .line{margin-top:56px;border-top:1px solid #1f2937;padding-top:3px}
+          @media print{body{padding:0} button{display:none}}
+        </style></head><body>
+        <div class="kop"><div style="font-size:28px">🛢️</div><div><div class="t">PERTAMINA EP — Drilling Operations</div><div class="s">Rigbase Station · Asset Reliability (RAM)</div></div></div>
+        <h1>${escapeHtml(title)}</h1>
+        <div class="meta">Nomor: ........./........./${yr} &nbsp;·&nbsp; Tanggal: ${tgl}</div>
+        ${introHtml}
+        ${tableHtml}
+        <div class="kesimpulan"><b>Kesimpulan &amp; Rekomendasi</b><br>${kesimpulanHtml}</div>
+        <div class="ttd">
+          <div class="c">Dibuat oleh,<div class="line">${who}<br><span style="color:#6b7280">Sr Mekanik</span></div></div>
+          <div class="c">Diperiksa,<div class="line">( ............... )<br><span style="color:#6b7280">SPV / Sr SPV</span></div></div>
+          <div class="c">Disetujui,<div class="line">( ............... )<br><span style="color:#6b7280">Astmen</span></div></div>
+        </div>
+        <script>window.onload=function(){window.print()}<\/script>
+        </body></html>`;
+      const w = window.open('', '_blank');
+      if (!w) { toast('Pop-up diblokir browser. Izinkan pop-up untuk cetak.', 'warn'); return; }
+      w.document.write(html); w.document.close();
+    }
+
+    function cetakCsppReport() {
+      const list = csppFiltered(); const n = v => Number(v) || 0;
+      const habis = list.filter(x => n(x.stok) === 0).length;
+      const intro = `<p>Berikut daftar suku cadang yang memerlukan tindak lanjut pengadaan berdasarkan status stok &amp; kekritisan di sistem RAM Rigbase Station. Total <b>${list.length}</b> item ditinjau, <b>${habis}</b> di antaranya habis stok.</p>`;
+      const rows = list.slice(0, 300).map((m, i) => { const st = n(m.stok) === 0 ? 'HABIS' : (n(m.safety_stock) > 0 && n(m.stok) < n(m.safety_stock) ? 'RENDAH' : 'AMAN'); return `<tr><td style="text-align:center">${i + 1}</td><td>${escapeHtml(m.part_number || '-')}</td><td>${escapeHtml(m.description || '')}</td><td>${escapeHtml(m.category || '')}</td><td style="text-align:center">${n(m.stok)}</td><td style="text-align:center">${n(m.safety_stock) || '-'}</td><td style="text-align:center"><b>${st}</b></td></tr>`; }).join('');
+      const table = `<table><thead><tr><th>No</th><th>Part Number</th><th>Deskripsi</th><th>Kategori</th><th>Stok</th><th>Safety</th><th>Status</th></tr></thead><tbody>${rows || '<tr><td colspan="7" style="text-align:center">Tidak ada data</td></tr>'}</tbody></table>`;
+      const kesimpulan = `Terdapat <b>${habis} suku cadang kritis dalam kondisi habis stok</b> yang berisiko menghambat kesiapan operasi rig. Mohon persetujuan pengadaan suku cadang di atas guna menjamin ketersediaan (Availability) dan menurunkan risiko kegagalan equipment.`;
+      printReportDoc('Justifikasi Pengadaan Suku Cadang', intro, table, kesimpulan);
+    }
+    window.cetakCsppReport = cetakCsppReport;
+
+    function cetakFmeaReport() {
+      const list = fmeaFiltered();
+      const kritis = list.filter(e => Number(e.rpn) >= 200).length;
+      const intro = `<p>Berikut hasil analisa FMEA (Failure Mode &amp; Effects Analysis) yang memerlukan tindakan perbaikan. Total <b>${list.length}</b> mode kegagalan ditinjau, <b>${kritis}</b> di antaranya berkategori RPN Kritis (&ge;200).</p>`;
+      const rows = list.slice(0, 300).map((e, i) => `<tr><td style="text-align:center">${i + 1}</td><td>${escapeHtml(e.equipment_tag || '-')}<br><span style="color:#6b7280">${escapeHtml(e.equipment_name || '')}</span></td><td>${escapeHtml(e.failure_mode || '')}</td><td style="text-align:center">${e.severity}</td><td style="text-align:center">${e.occurrence}</td><td style="text-align:center">${e.detection}</td><td style="text-align:center"><b>${e.rpn}</b></td><td>${escapeHtml(e.recommended_action || '-')}</td></tr>`).join('');
+      const table = `<table><thead><tr><th>No</th><th>Equipment</th><th>Mode Kegagalan</th><th>S</th><th>O</th><th>D</th><th>RPN</th><th>Rekomendasi Tindakan</th></tr></thead><tbody>${rows || '<tr><td colspan="8" style="text-align:center">Tidak ada data</td></tr>'}</tbody></table>`;
+      const kesimpulan = `Terdapat <b>${kritis} mode kegagalan dengan RPN kritis</b> yang memerlukan tindakan segera. Mohon persetujuan penerbitan <b>SPK (Surat Perintah Kerja)</b> untuk melaksanakan rekomendasi tindakan di atas guna menurunkan risiko kegagalan &amp; menjaga keandalan equipment.`;
+      printReportDoc('Justifikasi Tindakan Perbaikan (SPK)', intro, table, kesimpulan);
+    }
+    window.cetakFmeaReport = cetakFmeaReport;
 
     // ============================================================
     // 11. BOOT
