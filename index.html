@@ -309,7 +309,7 @@
       { id: 'inspections', label: 'Inspeksi',    icon: '🔍',  bottomNav: true  },
       { id: 'maintenance', label: 'Maintenance', icon: '🛠️',  bottomNav: true  },
       { id: 'alerts',      label: 'Alert',       icon: '🔔',  bottomNav: true  },
-      { id: 'reliability', label: 'Reliability', icon: '🎯', srOnly: true     },
+      { id: 'reliability', label: 'Asset Performance', icon: '📈', srOnly: true },
       { id: 'categories',  label: 'Kategori',    icon: '🏷️',  adminOnly: true  },
       { id: 'users',       label: 'User',        icon: '👥',  adminOnly: true  },
       { id: 'activity',    label: 'Activity Log', icon: '📜',  adminOnly: true  },
@@ -7629,8 +7629,8 @@
         </tr>`).join('');
       host.innerHTML = `
         <div class="bg-white rounded-xl border border-slate-200 p-5">
-          <h3 class="text-lg font-bold text-slate-900 mb-1">🎯 Reliability Center</h3>
-          <p class="text-sm text-slate-600 mb-3">Tiga modul saling terhubung jadi satu alur keputusan perawatan:</p>
+          <h3 class="text-lg font-bold text-slate-900 mb-1">📈 Asset Performance</h3>
+          <p class="text-sm text-slate-600 mb-3">Modul analisa keandalan & ketersediaan aset — saling terhubung jadi satu alur keputusan perawatan:</p>
           <div class="text-xs bg-slate-50 border border-slate-200 rounded-lg p-3 leading-relaxed">
             <b>🚛 Stress Score</b> (berat mobilisasi) → menaikkan <b>Occurrence</b> di <b>⚠️ FMEA</b> → komponen <b>RPN</b> tinggi → spare-nya jadi prioritas di <b>📦 CSPP</b>.
             <div class="text-slate-500 mt-1">Buka tab di atas untuk tiap modul. Tabel di bawah = gabungan risiko per equipment.</div>
