@@ -6701,17 +6701,14 @@
 
     async function renderStressPage(host) {
       // Agregasi dihitung di DATABASE (view) → hasil ringkas, kebal batas 1000 baris.
-      let recents = [], unitAgg = [], eqAgg = [];
+      let unitAgg = [], eqAgg = [];
       try {
-        const [a, b, c] = await Promise.all([
-          state.supabase.from('mobilization_records')
-            .select('mob_date, unit_name, origin, destination, total_score, category')
-            .order('mob_date', { ascending: false }).limit(15),
+        const [b, c] = await Promise.all([
           state.supabase.from('v_stress_per_unit').select('*'),
           state.supabase.from('v_stress_per_equipment').select('*').order('total_stress', { ascending: false }),
         ]);
-        if (a.error) throw a.error; if (b.error) throw b.error; if (c.error) throw c.error;
-        recents = a.data || []; unitAgg = b.data || []; eqAgg = c.data || [];
+        if (b.error) throw b.error; if (c.error) throw c.error;
+        unitAgg = b.data || []; eqAgg = c.data || [];
       } catch (e) {
         host.innerHTML = `<div class="bg-red-50 text-red-700 p-4 rounded-xl text-sm">Gagal memuat: ${escapeHtml(e.message)}</div>`;
         return;
@@ -6739,15 +6736,6 @@
         </div>`;
       }).join('');
 
-      const recentRows = recents.map(r => `
-        <tr class="border-b border-slate-100">
-          <td class="px-3 py-2 text-sm">${escapeHtml(r.mob_date || '—')}</td>
-          <td class="px-3 py-2 text-sm font-medium">${escapeHtml(r.unit_name || '—')}</td>
-          <td class="px-3 py-2 text-sm text-slate-600">${escapeHtml(r.origin || '?')} → ${escapeHtml(r.destination || '?')}</td>
-          <td class="px-3 py-2 text-sm font-bold">${r.total_score}</td>
-          <td class="px-3 py-2">${stressBadge(r.category)}</td>
-        </tr>`).join('');
-
       const topRows = topEq.map((e, i) => stressRowHtml(e, i, false)).join('');
 
       host.innerHTML = `
@@ -6766,10 +6754,23 @@
 
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
           <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
-            <div class="px-4 py-3 border-b border-slate-100 font-semibold text-slate-800 text-sm">Mobilisasi Terbaru</div>
-            <div class="overflow-x-auto"><table class="w-full">
-              <thead><tr class="bg-slate-50 text-left text-xs text-slate-500"><th class="px-3 py-2">Tanggal</th><th class="px-3 py-2">Rig</th><th class="px-3 py-2">Rute</th><th class="px-3 py-2">Skor</th><th class="px-3 py-2">Kategori</th></tr></thead>
-              <tbody>${recentRows || '<tr><td colspan="5" class="px-3 py-6 text-center text-slate-400 text-sm">Belum ada data.</td></tr>'}</tbody>
+            <div class="px-4 py-3 border-b border-slate-100 space-y-2">
+              <div class="font-semibold text-slate-800 text-sm">Daftar Mobilisasi <span id="mob-list-count" class="text-slate-400 font-normal"></span></div>
+              <div class="flex flex-wrap gap-2">
+                <select onchange="setMobFilter('unit_id', this.value)" class="px-2 py-1.5 border border-slate-300 rounded-lg text-xs bg-white outline-none focus:ring-2 focus:ring-navy">
+                  <option value="">Semua Rig</option>
+                  ${rigs.map(u => `<option value="${u.id}">${escapeHtml(u.name)}</option>`).join('')}
+                </select>
+                <select onchange="setMobFilter('category', this.value)" class="px-2 py-1.5 border border-slate-300 rounded-lg text-xs bg-white outline-none focus:ring-2 focus:ring-navy">
+                  <option value="">Semua Kategori</option>
+                  <option value="low">🟢 Low</option><option value="medium">🟡 Medium</option><option value="high">🟠 High</option><option value="critical">🔴 Critical</option>
+                </select>
+                <input oninput="setMobFilterQ(this.value)" placeholder="Cari rute / JMP…" class="flex-1 min-w-[120px] px-2 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-navy">
+              </div>
+            </div>
+            <div class="overflow-x-auto max-h-80 overflow-y-auto"><table class="w-full">
+              <thead class="sticky top-0 bg-slate-50"><tr class="text-left text-xs text-slate-500"><th class="px-3 py-2">Tanggal</th><th class="px-3 py-2">Rig</th><th class="px-3 py-2">Rute</th><th class="px-3 py-2">Skor</th><th class="px-3 py-2">Kategori</th></tr></thead>
+              <tbody id="mob-list-body"><tr><td colspan="5" class="px-3 py-6 text-center text-slate-400 text-sm">Memuat…</td></tr></tbody>
             </table></div>
           </div>
           <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
@@ -6783,6 +6784,7 @@
             </table></div>
           </div>
         </div>`;
+      reloadMobList();
     }
 
     function stressRowHtml(e, i, closeFirst) {
@@ -6823,6 +6825,41 @@
     }
     window.openAllStressed = openAllStressed;
     window.filterStressList = filterStressList;
+
+    // ---- Filter Daftar Mobilisasi (query langsung ke mobilization_records) ----
+    let mobFilter = { unit_id: '', category: '', q: '' };
+    let _mobDeb;
+    function mobRowHtml(r) {
+      return `<tr class="border-b border-slate-100">
+        <td class="px-3 py-2 text-sm">${escapeHtml(r.mob_date || '—')}</td>
+        <td class="px-3 py-2 text-sm font-medium">${escapeHtml(r.unit_name || '—')}</td>
+        <td class="px-3 py-2 text-sm text-slate-600">${escapeHtml(r.origin || '?')} → ${escapeHtml(r.destination || '?')}</td>
+        <td class="px-3 py-2 text-sm font-bold">${r.total_score}</td>
+        <td class="px-3 py-2">${stressBadge(r.category)}</td>
+      </tr>`;
+    }
+    async function reloadMobList() {
+      const body = document.getElementById('mob-list-body');
+      if (!body) return;
+      body.innerHTML = '<tr><td colspan="5" class="px-3 py-4 text-center text-slate-400 text-sm">Memuat…</td></tr>';
+      let qy = state.supabase.from('mobilization_records')
+        .select('mob_date, unit_name, origin, destination, total_score, category')
+        .order('mob_date', { ascending: false }).limit(200);
+      if (mobFilter.unit_id) qy = qy.eq('unit_id', Number(mobFilter.unit_id));
+      if (mobFilter.category) qy = qy.eq('category', mobFilter.category);
+      const s = (mobFilter.q || '').trim();
+      if (s) qy = qy.or(`origin.ilike.%${s}%,destination.ilike.%${s}%,jmp_number.ilike.%${s}%,unit_name.ilike.%${s}%`);
+      const { data, error } = await qy;
+      if (error) { body.innerHTML = `<tr><td colspan="5" class="px-3 py-4 text-center text-red-600 text-sm">${escapeHtml(error.message)}</td></tr>`; return; }
+      const rows = data || [];
+      body.innerHTML = rows.length ? rows.map(mobRowHtml).join('') : '<tr><td colspan="5" class="px-3 py-6 text-center text-slate-400 text-sm">Tidak ada mobilisasi sesuai filter.</td></tr>';
+      const cnt = document.getElementById('mob-list-count'); if (cnt) cnt.textContent = `(${rows.length})`;
+    }
+    function setMobFilter(key, val) { mobFilter[key] = val; reloadMobList(); }
+    function setMobFilterQ(val) { mobFilter.q = val; clearTimeout(_mobDeb); _mobDeb = setTimeout(reloadMobList, 350); }
+    window.setMobFilter = setMobFilter;
+    window.setMobFilterQ = setMobFilterQ;
+    window.reloadMobList = reloadMobList;
 
     // Tab "Riwayat Stress" di detail equipment (query difilter equipment_id, ringan)
     function renderStressHistoryTab(eq, c) {
