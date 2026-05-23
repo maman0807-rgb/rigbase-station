@@ -312,6 +312,7 @@
       { id: 'categories',  label: 'Kategori',     icon: '🏷️', group: 'Administrasi', adminOnly: true },
       { id: 'users',       label: 'User',         icon: '👥', group: 'Administrasi', adminOnly: true },
       { id: 'activity',    label: 'Activity Log', icon: '📜', group: 'Administrasi', adminOnly: true },
+      { id: 'panduan',     label: 'Panduan RAM',  icon: '📖', group: 'Administrasi', srOnly: true },
       { id: 'settings',    label: 'Pengaturan',   icon: '⚙️', bottomNav: true },
     ];
 
@@ -8138,6 +8139,55 @@
       openSignDialog({ title: 'Laporan Availability Equipment', type: 'AVAIL', summary, chart, intro, table, kesimpulan });
     }
     window.cetakAvailReport = cetakAvailReport;
+
+    // ============================================================
+    // 10t. PANDUAN RAM — penjelasan modul & cara hitung
+    // ============================================================
+    PAGES.panduan = function () {
+      const div = document.createElement('div');
+      div.className = 'page space-y-4 max-w-4xl';
+      const sec = (color, icon, title, bodyHtml) => `
+        <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div class="px-5 py-3 border-b border-slate-100 flex items-center gap-2" style="border-left:4px solid ${color}">
+            <span class="text-xl">${icon}</span><span class="font-bold text-slate-800">${title}</span>
+          </div>
+          <div class="p-5 text-sm text-slate-700 space-y-2 leading-relaxed">${bodyHtml}</div>
+        </div>`;
+      const tbl = (head, rows) => `<table class="w-full text-xs border border-slate-200 my-2"><thead><tr class="bg-slate-50 text-left font-bold text-slate-600">${head.map(h => `<th class="px-2 py-1 border border-slate-200">${h}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr>${r.map(c => `<td class="px-2 py-1 border border-slate-200">${c}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+
+      div.innerHTML = `
+        <div>
+          <h3 class="text-2xl font-bold text-slate-900">📖 Panduan RAM</h3>
+          <p class="text-sm text-slate-500">Penjelasan singkat tiap modul Asset Reliability — untuk memudahkan menjelaskan ke tim/atasan.</p>
+        </div>
+
+        <div class="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-900">
+          <b>Alur RAM:</b> 🚛 <b>Stress Score</b> (beban mobilisasi) → menaikkan <b>Occurrence</b> di ⚠️ <b>FMEA</b> (risiko/RPN) → komponen RPN tinggi → spare-nya prioritas di 📦 <b>CSPP</b>. 🟢 <b>Availability</b> mengukur kesiapan; 🛠️ <b>Maintenance</b> (dari Logbook) = riwayat perbaikan.
+        </div>
+
+        ${sec('#dc2626', '🚛', 'Stress Score — beban mobilisasi', `
+          <p>Mengukur tingkat stress equipment akibat <b>mobilisasi rig</b> (pindah lokasi). Skor <b>0–100</b>, dihitung dari data JMP + kondisi aktual. Skor diterapkan ke <b>semua equipment yang ikut bergerak</b>.</p>
+          ${tbl(['Faktor', 'Maks Poin'], [['Jarak tempuh', '10'], ['Kondisi jalan (% rusak)', '22'], ['Route (blind spot, rel KA, jembatan)', '13'], ['Transport (lot, FOCO, crane)', '25'], ['Durasi aktual', '5'], ['Cuaca', '10'], ['Insiden', '10']])}
+          <p><b>Kategori:</b> 🟢 0–30 LOW · 🟡 31–50 MEDIUM · 🟠 51–75 HIGH · 🔴 76–100 CRITICAL</p>`)}
+
+        ${sec('#d97706', '⚠️', 'FMEA — analisa mode kegagalan', `
+          <p>Menilai risiko tiap mode kegagalan komponen. <b>RPN = Severity × Occurrence × Detection</b> (masing-masing skala 1–10).</p>
+          ${tbl(['Faktor', 'Arti', 'Makin tinggi…'], [['Severity (S)', 'Keparahan akibat kalau gagal', 'makin parah/berbahaya'], ['Occurrence (O)', 'Seberapa sering terjadi', 'makin sering'], ['Detection (D)', 'Sulit-tidaknya dideteksi dini', 'makin susah ketahuan']])}
+          <p><b>RPN (1–1000):</b> 🔴 ≥200 Kritis · 🟠 ≥100 Tinggi · 🟡 ≥40 Sedang · 🟢 &lt;40 Rendah. Kerjakan RPN tinggi duluan; turunkan O (PM/kurangi stress) & D (pasang monitoring/inspeksi).</p>`)}
+
+        ${sec('#11335d', '📦', 'CSPP — Critical Spare Parts Planning', `
+          <p>Memastikan suku cadang <b>kritis</b> tersedia agar equipment tidak menganggur menunggu part.</p>
+          ${tbl(['Status', 'Arti'], [['🔴 Habis', 'Stok = 0'], ['🟠 Rendah', 'Stok di bawah safety stock'], ['🟢 Aman', 'Stok cukup']])}
+          <p><b>Fokus utama:</b> part berkategori <b>Critical</b> yang <b>habis stok</b> = prioritas pengadaan (lampiran justifikasi ke atasan).</p>`)}
+
+        ${sec('#16a34a', '🟢', 'Availability — kesiapan equipment', `
+          <p>Persentase waktu equipment <b>siap pakai</b> (tidak down), dihitung dari catatan downtime.</p>
+          <p class="bg-slate-50 border border-slate-200 rounded p-2 font-mono text-xs">Availability % = (Jam periode − Jam down) ÷ Jam periode × 100</p>
+          ${tbl(['Istilah', 'Arti'], [['MTTR', 'Mean Time To Repair — rata-rata lama perbaikan (makin cepat makin baik)'], ['MTBF', 'Mean Time Between Failures — rata-rata waktu antar kerusakan (makin lama makin andal)'], ['Rumus RAM', 'A = MTBF ÷ (MTBF + MTTR)']])}
+          <p><b>Kategori:</b> 🟢 ≥95% · 🟡 ≥85% · 🔴 &lt;85%. Equipment yang belum pernah down = 100%.</p>`)}
+        `;
+      return div;
+    };
 
     // ============================================================
     // 11. BOOT
