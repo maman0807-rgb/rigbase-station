@@ -4896,6 +4896,7 @@
                 ['dokumen','📎 Dokumen'],
                 ['inspeksi','🔍 Riwayat Inspeksi'],
                 ['history','🔄 History'],
+                ['stress','🚛 Riwayat Stress'],
               ].map(([id, lbl]) => `
                 <button onclick="state.equipmentDetailTab='${id}'; renderDetailTab(window.__currentEq)"
                   class="px-4 py-3 text-sm font-medium whitespace-nowrap ${state.equipmentDetailTab===id ? 'border-b-2 border-safety text-safety bg-safety/5' : 'text-slate-600 hover:text-navy'}">
@@ -4923,7 +4924,7 @@
       const parent = c.parentElement.querySelector('.flex.border-b');
       if (parent) {
         parent.querySelectorAll('button').forEach((btn, i) => {
-          const ids = ['info','maintenance','sertifikasi','dokumen','inspeksi','history'];
+          const ids = ['info','maintenance','sertifikasi','dokumen','inspeksi','history','stress'];
           btn.className = `px-4 py-3 text-sm font-medium whitespace-nowrap ${state.equipmentDetailTab===ids[i] ? 'border-b-2 border-safety text-safety bg-safety/5' : 'text-slate-600 hover:text-navy'}`;
         });
       }
@@ -4934,6 +4935,7 @@
         case 'dokumen':     c.innerHTML = '<div class="text-slate-400">Memuat…</div>'; renderDokumenTab(eq, c); break;
         case 'inspeksi':    c.innerHTML = '<div class="text-slate-400">Memuat…</div>'; renderInspeksiHistoryTab(eq, c); break;
         case 'history':     c.innerHTML = '<div class="text-slate-400">Memuat…</div>'; renderHistoryTab(eq, c); break;
+        case 'stress':      c.innerHTML = '<div class="text-slate-400">Memuat…</div>'; renderStressHistoryTab(eq, c); break;
       }
     }
     window.renderDetailTab = renderDetailTab;
@@ -6698,31 +6700,31 @@
     };
 
     async function renderStressPage(host) {
-      let recs = [], links = [];
+      // Agregasi dihitung di DATABASE (view) → hasil ringkas, kebal batas 1000 baris.
+      let recents = [], unitAgg = [], eqAgg = [];
       try {
-        const [a, b] = await Promise.all([
-          state.supabase.from('mobilization_records').select('*').order('mob_date', { ascending: false }),
-          state.supabase.from('mobilization_equipment').select('mobilization_id, equipment_id, equipment_tag, equipment_name, applied_score'),
+        const [a, b, c] = await Promise.all([
+          state.supabase.from('mobilization_records')
+            .select('mob_date, unit_name, origin, destination, total_score, category')
+            .order('mob_date', { ascending: false }).limit(15),
+          state.supabase.from('v_stress_per_unit').select('*'),
+          state.supabase.from('v_stress_per_equipment').select('*').order('total_stress', { ascending: false }),
         ]);
-        if (a.error) throw a.error; if (b.error) throw b.error;
-        recs = a.data || []; links = b.data || [];
+        if (a.error) throw a.error; if (b.error) throw b.error; if (c.error) throw c.error;
+        recents = a.data || []; unitAgg = b.data || []; eqAgg = c.data || [];
       } catch (e) {
         host.innerHTML = `<div class="bg-red-50 text-red-700 p-4 rounded-xl text-sm">Gagal memuat: ${escapeHtml(e.message)}</div>`;
         return;
       }
 
-      // akumulasi per rig (unit) & per equipment
       const rigs = state.parentUnits.filter(u => u.type === 'Rig');
-      const perUnit = {}; recs.forEach(r => {
-        const k = r.unit_id; if (!perUnit[k]) perUnit[k] = { count: 0, total: 0, cat: { low: 0, medium: 0, high: 0, critical: 0 } };
-        perUnit[k].count++; perUnit[k].total += r.total_score || 0; perUnit[k].cat[r.category] = (perUnit[k].cat[r.category] || 0) + 1;
+      const perUnit = {}; unitAgg.forEach(u => {
+        perUnit[u.unit_id] = {
+          count: Number(u.mob_count) || 0, total: Number(u.total_stress) || 0,
+          cat: { low: Number(u.low_count) || 0, medium: Number(u.medium_count) || 0, high: Number(u.high_count) || 0, critical: Number(u.critical_count) || 0 },
+        };
       });
-      const perEq = {}; links.forEach(l => {
-        if (!l.equipment_id) return;
-        if (!perEq[l.equipment_id]) perEq[l.equipment_id] = { id: l.equipment_id, tag: l.equipment_tag, name: l.equipment_name, count: 0, total: 0 };
-        perEq[l.equipment_id].count++; perEq[l.equipment_id].total += l.applied_score || 0;
-      });
-      const allStressed = Object.values(perEq).sort((a, b) => b.total - a.total);
+      const allStressed = eqAgg.map(r => ({ id: r.equipment_id, tag: r.equipment_tag, name: r.equipment_name, count: Number(r.mob_count) || 0, total: Number(r.total_stress) || 0 }));
       window.__stressAll = allStressed;
       const topEq = allStressed.slice(0, 10);
 
@@ -6737,7 +6739,7 @@
         </div>`;
       }).join('');
 
-      const recentRows = recs.slice(0, 15).map(r => `
+      const recentRows = recents.map(r => `
         <tr class="border-b border-slate-100">
           <td class="px-3 py-2 text-sm">${escapeHtml(r.mob_date || '—')}</td>
           <td class="px-3 py-2 text-sm font-medium">${escapeHtml(r.unit_name || '—')}</td>
@@ -6821,6 +6823,37 @@
     }
     window.openAllStressed = openAllStressed;
     window.filterStressList = filterStressList;
+
+    // Tab "Riwayat Stress" di detail equipment (query difilter equipment_id, ringan)
+    function renderStressHistoryTab(eq, c) {
+      state.supabase.from('mobilization_equipment')
+        .select('applied_score, mobilization_records(mob_date, unit_name, origin, destination, category, jmp_number)')
+        .eq('equipment_id', eq.id)
+        .then(({ data, error }) => {
+          if (error) { c.innerHTML = `<div class="bg-red-50 text-red-700 p-3 rounded-lg text-sm">${escapeHtml(error.message)}</div>`; return; }
+          const list = (data || []).map(r => ({ applied: Number(r.applied_score) || 0, ...(r.mobilization_records || {}) }));
+          list.sort((a, b) => String(b.mob_date || '').localeCompare(String(a.mob_date || '')));
+          if (!list.length) { c.innerHTML = '<div class="text-slate-400 text-sm py-6 text-center">Belum ada riwayat mobilisasi untuk equipment ini.</div>'; return; }
+          const total = list.reduce((s, r) => s + r.applied, 0);
+          const rows = list.map(r => `
+            <tr class="border-b border-slate-100">
+              <td class="px-3 py-2 text-sm">${escapeHtml(r.mob_date || '—')}</td>
+              <td class="px-3 py-2 text-sm">${escapeHtml(r.unit_name || '—')}</td>
+              <td class="px-3 py-2 text-sm text-slate-600">${escapeHtml(r.origin || '?')} → ${escapeHtml(r.destination || '?')}</td>
+              <td class="px-3 py-2 text-sm font-bold">${r.applied}</td>
+              <td class="px-3 py-2">${stressBadge(r.category)}</td>
+            </tr>`).join('');
+          c.innerHTML = `
+            <div class="flex flex-wrap gap-3 mb-4">
+              <div class="bg-slate-50 rounded-lg px-4 py-3"><div class="text-xs text-slate-500">Total Akumulasi Stress</div><div class="text-2xl font-extrabold text-navy">${total}</div></div>
+              <div class="bg-slate-50 rounded-lg px-4 py-3"><div class="text-xs text-slate-500">Jumlah Mobilisasi</div><div class="text-2xl font-extrabold text-navy">${list.length}</div></div>
+            </div>
+            <div class="overflow-x-auto border border-slate-200 rounded-lg"><table class="w-full">
+              <thead><tr class="bg-slate-50 text-left text-xs text-slate-500"><th class="px-3 py-2">Tanggal</th><th class="px-3 py-2">Rig</th><th class="px-3 py-2">Rute</th><th class="px-3 py-2">Skor</th><th class="px-3 py-2">Kategori</th></tr></thead>
+              <tbody>${rows}</tbody></table></div>`;
+        });
+    }
+    window.renderStressHistoryTab = renderStressHistoryTab;
 
     // ---- FORM ----
     function renderStressPreview() {
