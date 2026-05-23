@@ -7917,13 +7917,18 @@
       const ongoing = data.filter(d => !d.end_at);
       const allDur = data.filter(d => d.end_at).map(d => Number(d.duration_hours) || 0);
       const mttr = allDur.length ? allDur.reduce((a, b) => a + b, 0) / allDur.length : null;
-      const totalDownH = eqList.reduce((a, b) => a + b.downH, 0);
       const totalFail = data.length;
-      const mtbf = totalFail ? (eqList.length * periodH - totalDownH) / totalFail : null;
+      // MTBF baku: PER alat = jam operasi (uptime) ÷ jumlah kerusakan alat itu,
+      // lalu dirata-rata HANYA dari alat yang pernah rusak (≥1 event).
+      // Tidak dibagi seluruh armada → KPI tidak membengkak.
+      const failedEq = eqList.filter(o => o.events > 0);
+      const mtbf = failedEq.length
+        ? failedEq.reduce((sum, o) => sum + (periodH - o.downH) / o.events, 0) / failedEq.length
+        : null;
       const fleetAvail = eqList.length ? eqList.reduce((a, b) => a + b.avail, 0) / eqList.length : 100;
       const cat = {}; data.forEach(d => { const c = DT_CAT[d.category] || 'Lainnya'; if (!cat[c]) cat[c] = { n: 0, h: 0 }; cat[c].n++; cat[c].h += Number(d.duration_hours) || 0; });
 
-      const kpi = (label, val) => `<div class="bg-white rounded-xl border border-slate-200 p-4"><div class="text-xs text-slate-500 mb-1">${label}</div><div class="text-2xl font-extrabold text-slate-900">${val}</div></div>`;
+      const kpi = (label, val, sub) => `<div class="bg-white rounded-xl border border-slate-200 p-4"><div class="text-xs text-slate-500 mb-1">${label}</div><div class="text-2xl font-extrabold text-slate-900">${val}</div>${sub ? `<div class="text-[11px] text-slate-400 mt-0.5">${sub}</div>` : ''}</div>`;
       const ongoingRows = ongoing.map(d => `<tr class="border-b border-slate-100">
         <td class="px-3 py-2 text-sm font-mono text-navy">${escapeHtml(d.equipment_tag || '—')}</td>
         <td class="px-3 py-2 text-sm">${escapeHtml(DT_CAT[d.category] || '-')}</td>
@@ -7968,8 +7973,8 @@
         <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
           ${kpi('Availability rata-rata', eqList.length ? fleetAvail.toFixed(1) + '%' : '—')}
           ${kpi('Sedang Down', ongoing.length)}
-          ${kpi('MTTR (rata² perbaikan)', mttr != null ? fmtH(mttr) : '—')}
-          ${kpi('MTBF (rata² antar rusak)', mtbf != null ? fmtH(mtbf) : '—')}
+          ${kpi('MTTR (rata² perbaikan)', mttr != null ? fmtH(mttr) : '—', allDur.length ? `dari ${allDur.length} perbaikan` : 'belum ada perbaikan selesai')}
+          ${kpi('MTBF (rata² antar rusak)', mtbf != null ? fmtH(mtbf) : '—', mtbf != null ? `dari ${totalFail} kerusakan · ${failedEq.length} alat` : 'belum ada kerusakan')}
         </div>
         ${ongoing.length ? `<div class="bg-white rounded-xl border border-red-200 overflow-hidden">
           <div class="px-4 py-3 border-b border-slate-100 font-semibold text-red-700 text-sm">🔴 Sedang Down (${ongoing.length})</div>
