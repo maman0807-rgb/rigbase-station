@@ -7297,9 +7297,15 @@
     // Gabungkan kategori sejenis jadi satu grup besar di tampilan FMEA.
     // Kategori yang tidak terdaftar di sini pakai namanya sendiri.
     const FMEA_SUPERGROUP = {
-      'BOP Annular': 'BOP', 'BOP Single Ram': 'BOP', 'BOP Double Ram': 'BOP',
+      // BOP / pencegah semburan (Accumulator penggerak BOP → masuk sini)
+      'BOP Annular': 'BOP', 'BOP Single Ram': 'BOP', 'BOP Double Ram': 'BOP', 'Accumulator': 'BOP',
+      // Hoisting / sistem angkat
+      'Drawwork': 'Hoisting', 'Travelling Block': 'Hoisting',
+      // Pompa / sirkulasi
       'Mudpump': 'Pompa / Mudpump', 'MUDPUMP Acid': 'Pompa / Mudpump', 'Pompa': 'Pompa / Mudpump',
+      // Engine penggerak
       'Engine Mudpump': 'Engine', 'Mobile Engine': 'Engine',
+      // Mast
       'Mast': 'Mast', 'Mast Component': 'Mast',
     };
     function rpnBand(rpn) {
