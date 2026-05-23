@@ -6779,7 +6779,7 @@
               </div>
             </div>
             <div class="overflow-x-auto max-h-80 overflow-y-auto"><table class="w-full">
-              <thead class="sticky top-0 bg-slate-50"><tr class="text-left text-xs text-slate-500"><th class="px-3 py-2">Tanggal</th><th class="px-3 py-2">Rig</th><th class="px-3 py-2">Rute</th><th class="px-3 py-2">Skor</th><th class="px-3 py-2">Kategori</th></tr></thead>
+              <thead class="sticky top-0 bg-slate-50"><tr class="text-left text-xs font-bold text-slate-600"><th class="px-3 py-2">Tanggal</th><th class="px-3 py-2">Rig</th><th class="px-3 py-2">Rute</th><th class="px-3 py-2">Skor</th><th class="px-3 py-2">Kategori</th></tr></thead>
               <tbody id="mob-list-body"><tr><td colspan="5" class="px-3 py-6 text-center text-slate-400 text-sm">Memuat…</td></tr></tbody>
             </table></div>
           </div>
@@ -6789,7 +6789,7 @@
               <button onclick="openAllStressed()" class="text-xs text-navy hover:underline font-medium whitespace-nowrap">Lihat semua (${allStressed.length}) →</button>
             </div>
             <div class="overflow-x-auto"><table class="w-full">
-              <thead><tr class="bg-slate-50 text-left text-xs text-slate-500"><th class="px-3 py-2">#</th><th class="px-3 py-2">Tag</th><th class="px-3 py-2">Nama</th><th class="px-3 py-2">Σ Stress</th><th class="px-3 py-2">Mob</th></tr></thead>
+              <thead><tr class="bg-slate-50 text-left text-xs font-bold text-slate-600"><th class="px-3 py-2">#</th><th class="px-3 py-2">Tag</th><th class="px-3 py-2">Nama</th><th class="px-3 py-2">Σ Stress</th><th class="px-3 py-2">Mob</th></tr></thead>
               <tbody>${topRows || '<tr><td colspan="5" class="px-3 py-6 text-center text-slate-400 text-sm">Belum ada data.</td></tr>'}</tbody>
             </table></div>
           </div>
@@ -6802,10 +6802,10 @@
       return `
         <tr class="border-b border-slate-100 ${e.id ? 'hover:bg-slate-50 cursor-pointer' : ''}" ${onclick ? `onclick="${onclick}"` : ''}>
           <td class="px-3 py-2 text-sm text-slate-400">${i + 1}</td>
-          <td class="px-3 py-2 text-sm font-mono text-navy">${escapeHtml(e.tag || '—')}</td>
-          <td class="px-3 py-2 text-sm">${escapeHtml(e.name || '')}</td>
-          <td class="px-3 py-2 text-sm font-bold text-navy">${e.total}</td>
-          <td class="px-3 py-2 text-sm text-slate-500">${e.count}x</td>
+          <td class="px-3 py-2 text-sm font-mono font-bold text-navy">${escapeHtml(e.tag || '—')}</td>
+          <td class="px-3 py-2 text-sm font-semibold text-slate-700">${escapeHtml(e.name || '')}</td>
+          <td class="px-3 py-2 text-base font-extrabold text-navy">${e.total}</td>
+          <td class="px-3 py-2 text-sm font-semibold text-slate-700">${e.count}x</td>
         </tr>`;
     }
 
@@ -6815,7 +6815,7 @@
         <input id="stress-search" placeholder="Cari tag / nama…" oninput="filterStressList(this.value)" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm mb-3 outline-none focus:ring-2 focus:ring-navy">
         <div class="text-xs text-slate-500 mb-2">${all.length} equipment pernah kena stress mobilisasi. Klik baris untuk buka detail equipment.</div>
         <div class="border border-slate-200 rounded-lg max-h-[55vh] overflow-y-auto overflow-x-auto">
-          <table class="w-full"><thead class="sticky top-0 bg-slate-50"><tr class="text-left text-xs text-slate-500"><th class="px-3 py-2">#</th><th class="px-3 py-2">Tag</th><th class="px-3 py-2">Nama</th><th class="px-3 py-2">Σ Stress</th><th class="px-3 py-2">Mob</th></tr></thead>
+          <table class="w-full"><thead class="sticky top-0 bg-slate-50"><tr class="text-left text-xs font-bold text-slate-600"><th class="px-3 py-2">#</th><th class="px-3 py-2">Tag</th><th class="px-3 py-2">Nama</th><th class="px-3 py-2">Σ Stress</th><th class="px-3 py-2">Mob</th></tr></thead>
           <tbody id="stress-all-body"></tbody></table>
         </div>`;
       openModal({ title: 'Semua Komponen Tertekan', body, maxWidth: 'max-w-3xl' });
@@ -6842,10 +6842,10 @@
     function mobRowHtml(r) {
       const pdf = r.pdf_storage_path ? ` <button onclick="openJmpPdf('${r.pdf_storage_path}')" class="text-navy hover:underline" title="Buka PDF JMP">📎</button>` : '';
       return `<tr class="border-b border-slate-100">
-        <td class="px-3 py-2 text-sm">${escapeHtml(r.mob_date || '—')}</td>
-        <td class="px-3 py-2 text-sm font-medium">${escapeHtml(r.unit_name || '—')}</td>
-        <td class="px-3 py-2 text-sm text-slate-600">${escapeHtml(r.origin || '?')} → ${escapeHtml(r.destination || '?')}${pdf}</td>
-        <td class="px-3 py-2 text-sm font-bold">${r.total_score}</td>
+        <td class="px-3 py-2 text-sm font-semibold text-slate-700">${escapeHtml(r.mob_date || '—')}</td>
+        <td class="px-3 py-2 text-sm font-bold text-slate-800">${escapeHtml(r.unit_name || '—')}</td>
+        <td class="px-3 py-2 text-sm font-medium text-slate-700">${escapeHtml(r.origin || '?')} → ${escapeHtml(r.destination || '?')}${pdf}</td>
+        <td class="px-3 py-2 text-base font-extrabold text-slate-900">${r.total_score}</td>
         <td class="px-3 py-2 whitespace-nowrap">${stressBadge(r.category)} <button onclick="openMobEdit('${r.id}')" class="ml-1 px-1.5 py-0.5 rounded bg-navy hover:bg-navy-700 text-white text-xs" title="Edit">✏</button></td>
       </tr>`;
     }
@@ -6993,7 +6993,7 @@
               <div class="bg-slate-50 rounded-lg px-4 py-3"><div class="text-xs text-slate-500">Jumlah Mobilisasi</div><div class="text-2xl font-extrabold text-navy">${list.length}</div></div>
             </div>
             <div class="overflow-x-auto border border-slate-200 rounded-lg"><table class="w-full">
-              <thead><tr class="bg-slate-50 text-left text-xs text-slate-500"><th class="px-3 py-2">Tanggal</th><th class="px-3 py-2">Rig</th><th class="px-3 py-2">Rute</th><th class="px-3 py-2">Skor</th><th class="px-3 py-2">Kategori</th></tr></thead>
+              <thead><tr class="bg-slate-50 text-left text-xs font-bold text-slate-600"><th class="px-3 py-2">Tanggal</th><th class="px-3 py-2">Rig</th><th class="px-3 py-2">Rute</th><th class="px-3 py-2">Skor</th><th class="px-3 py-2">Kategori</th></tr></thead>
               <tbody>${rows}</tbody></table></div>`;
         });
     }
@@ -7272,7 +7272,7 @@
             </div>
           </div>
           <div class="overflow-x-auto max-h-[28rem] overflow-y-auto"><table class="w-full">
-            <thead class="sticky top-0 bg-slate-50"><tr class="text-left text-xs text-slate-500">
+            <thead class="sticky top-0 bg-slate-50"><tr class="text-left text-xs font-bold text-slate-600">
               <th class="px-3 py-2">#</th><th class="px-3 py-2">Part Number</th><th class="px-3 py-2">Deskripsi</th><th class="px-3 py-2">Kategori</th><th class="px-3 py-2">Stok</th><th class="px-3 py-2">Safety</th><th class="px-3 py-2">Status</th>
             </tr></thead>
             <tbody id="cspp-body"></tbody>
@@ -7304,11 +7304,11 @@
       body.innerHTML = list.length ? list.slice(0, 500).map((m, i) => `
         <tr class="border-b border-slate-100">
           <td class="px-3 py-2 text-sm text-slate-400">${i + 1}</td>
-          <td class="px-3 py-2 text-sm font-mono">${escapeHtml(m.part_number || '—')}</td>
-          <td class="px-3 py-2 text-sm">${escapeHtml(m.description || '')}</td>
-          <td class="px-3 py-2 text-sm text-slate-500">${escapeHtml(m.category || '')}</td>
-          <td class="px-3 py-2 text-sm font-bold">${n(m.stok)}</td>
-          <td class="px-3 py-2 text-sm text-slate-500">${n(m.safety_stock) || '—'}</td>
+          <td class="px-3 py-2 text-sm font-mono font-bold text-navy">${escapeHtml(m.part_number || '—')}</td>
+          <td class="px-3 py-2 text-sm font-semibold text-slate-700">${escapeHtml(m.description || '')}</td>
+          <td class="px-3 py-2 text-sm font-medium text-slate-600">${escapeHtml(m.category || '')}</td>
+          <td class="px-3 py-2 text-base font-extrabold text-slate-900">${n(m.stok)}</td>
+          <td class="px-3 py-2 text-sm font-semibold text-slate-700">${n(m.safety_stock) || '—'}</td>
           <td class="px-3 py-2">${csppStatus(m)}</td>
         </tr>`).join('') : '<tr><td colspan="7" class="px-3 py-6 text-center text-slate-400 text-sm">Tidak ada part sesuai filter.</td></tr>';
       const cnt = document.getElementById('cspp-count'); if (cnt) cnt.textContent = `(${list.length}${list.length > 500 ? ', tampil 500' : ''})`;
@@ -7442,11 +7442,11 @@
     }
     function fmeaRowHtml(e) {
       return `<tr class="border-b border-slate-100">
-        <td class="px-3 py-2 text-sm"><div class="font-mono text-xs text-navy">${escapeHtml(e.equipment_tag || '—')}</div><div class="text-slate-500 text-xs">${escapeHtml(e.equipment_name || '')}</div></td>
-        <td class="px-3 py-2 text-sm">${escapeHtml(e.failure_mode || '')}</td>
-        <td class="px-3 py-2 text-sm">${e.severity}</td>
-        <td class="px-3 py-2 text-sm">${e.occurrence}</td>
-        <td class="px-3 py-2 text-sm">${e.detection}</td>
+        <td class="px-3 py-2 text-sm"><div class="font-mono text-xs font-bold text-navy">${escapeHtml(e.equipment_tag || '—')}</div><div class="text-slate-700 text-xs font-semibold">${escapeHtml(e.equipment_name || '')}</div></td>
+        <td class="px-3 py-2 text-sm font-semibold text-slate-700">${escapeHtml(e.failure_mode || '')}</td>
+        <td class="px-3 py-2 text-sm font-semibold text-slate-700">${e.severity}</td>
+        <td class="px-3 py-2 text-sm font-semibold text-slate-700">${e.occurrence}</td>
+        <td class="px-3 py-2 text-sm font-semibold text-slate-700">${e.detection}</td>
         <td class="px-3 py-2">${rpnBadge(e.rpn)}</td>
         <td class="px-3 py-2">${fmeaStatusBadge(e.status)}</td>
         <td class="px-3 py-2 text-right whitespace-nowrap">
@@ -7475,7 +7475,7 @@
             <span class="text-xs text-slate-500 whitespace-nowrap">${crit ? crit + ' 🔴 · ' : ''}tertinggi ${rpnBadge(maxRpn)}</span>
           </summary>
           <div class="overflow-x-auto border-t border-slate-100"><table class="w-full">
-            <thead><tr class="bg-slate-50 text-left text-xs text-slate-500"><th class="px-3 py-2">Equipment</th><th class="px-3 py-2">Mode Kegagalan</th><th class="px-3 py-2">S</th><th class="px-3 py-2">O</th><th class="px-3 py-2">D</th><th class="px-3 py-2">RPN</th><th class="px-3 py-2">Status</th><th class="px-3 py-2"></th></tr></thead>
+            <thead><tr class="bg-slate-50 text-left text-xs font-bold text-slate-600"><th class="px-3 py-2">Equipment</th><th class="px-3 py-2">Mode Kegagalan</th><th class="px-3 py-2">S</th><th class="px-3 py-2">O</th><th class="px-3 py-2">D</th><th class="px-3 py-2">RPN</th><th class="px-3 py-2">Status</th><th class="px-3 py-2"></th></tr></thead>
             <tbody>${rows.map(fmeaRowHtml).join('')}</tbody>
           </table></div>
         </details>`;
@@ -7603,7 +7603,7 @@
             : '';
           const table = rows.length ? `
             <div class="overflow-x-auto border border-slate-200 rounded-lg"><table class="w-full">
-              <thead><tr class="bg-slate-50 text-left text-xs text-slate-500"><th class="px-3 py-2">Mode Kegagalan</th><th class="px-3 py-2">S</th><th class="px-3 py-2">O</th><th class="px-3 py-2">D</th><th class="px-3 py-2">RPN</th><th class="px-3 py-2">Status</th><th class="px-3 py-2"></th></tr></thead>
+              <thead><tr class="bg-slate-50 text-left text-xs font-bold text-slate-600"><th class="px-3 py-2">Mode Kegagalan</th><th class="px-3 py-2">S</th><th class="px-3 py-2">O</th><th class="px-3 py-2">D</th><th class="px-3 py-2">RPN</th><th class="px-3 py-2">Status</th><th class="px-3 py-2"></th></tr></thead>
               <tbody>${rows.map(e => `<tr class="border-b border-slate-100">
                 <td class="px-3 py-2 text-sm">${escapeHtml(e.failure_mode || '')}</td>
                 <td class="px-3 py-2 text-sm">${e.severity}</td><td class="px-3 py-2 text-sm">${e.occurrence}</td><td class="px-3 py-2 text-sm">${e.detection}</td>
@@ -7934,10 +7934,10 @@
       const totalBiaya = logs.reduce((a, b) => a + (Number(b.total) || 0), 0);
       const typeBadge = (t) => { const m = { PM: 'bg-blue-100 text-blue-700', CM: 'bg-orange-100 text-orange-700', PdM: 'bg-purple-100 text-purple-700', BD: 'bg-red-100 text-red-700' }; return `<span class="px-2 py-0.5 rounded-full text-xs font-semibold ${m[t] || 'bg-slate-100 text-slate-600'}">${escapeHtml(t || '-')}</span>`; };
       const rows = logs.map(l => `<tr class="border-b border-slate-100">
-        <td class="px-3 py-2 text-sm whitespace-nowrap">${escapeHtml(l.log_date || '—')}</td>
-        <td class="px-3 py-2 text-sm">${escapeHtml(l.equipment_name || '—')}</td>
+        <td class="px-3 py-2 text-sm font-semibold text-slate-700 whitespace-nowrap">${escapeHtml(l.log_date || '—')}</td>
+        <td class="px-3 py-2 text-sm font-bold text-slate-800">${escapeHtml(l.equipment_name || '—')}</td>
         <td class="px-3 py-2">${typeBadge(l.maintenance_type)}</td>
-        <td class="px-3 py-2 text-sm">${fmtRp(l.total)}</td>
+        <td class="px-3 py-2 text-sm font-semibold text-slate-700">${fmtRp(l.total)}</td>
         <td class="px-3 py-2 text-sm text-slate-500">${escapeHtml(l.created_by_name || l.user_name || '—')}</td>
         <td class="px-3 py-2 text-sm text-slate-600">${escapeHtml((l.notes || '').slice(0, 80))}</td>
       </tr>`).join('');
@@ -7950,7 +7950,7 @@
         <div class="bg-white rounded-xl border border-slate-200 overflow-hidden mt-3">
           <div class="px-4 py-3 border-b border-slate-100 font-semibold text-slate-800 text-sm">Riwayat Maintenance (dari Logbook)</div>
           <div class="overflow-x-auto max-h-[28rem] overflow-y-auto"><table class="w-full">
-            <thead class="sticky top-0 bg-slate-50"><tr class="text-left text-xs text-slate-500"><th class="px-3 py-2">Tanggal</th><th class="px-3 py-2">Equipment</th><th class="px-3 py-2">Tipe</th><th class="px-3 py-2">Biaya</th><th class="px-3 py-2">Oleh</th><th class="px-3 py-2">Catatan</th></tr></thead>
+            <thead class="sticky top-0 bg-slate-50"><tr class="text-left text-xs font-bold text-slate-600"><th class="px-3 py-2">Tanggal</th><th class="px-3 py-2">Equipment</th><th class="px-3 py-2">Tipe</th><th class="px-3 py-2">Biaya</th><th class="px-3 py-2">Oleh</th><th class="px-3 py-2">Catatan</th></tr></thead>
             <tbody>${rows || '<tr><td colspan="6" class="px-3 py-6 text-center text-slate-400 text-sm">Belum ada data maintenance di Logbook.</td></tr>'}</tbody>
           </table></div>
         </div>`;
