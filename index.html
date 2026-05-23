@@ -7317,8 +7317,14 @@
     async function renderFmeaPage(host) {
       let rows = [];
       try {
-        const { data, error } = await state.supabase.from('fmea_entries').select('*').order('rpn', { ascending: false });
-        if (error) throw error; rows = data || [];
+        const [fr, er] = await Promise.all([
+          state.supabase.from('fmea_entries').select('*').order('rpn', { ascending: false }),
+          state.supabase.from('equipment').select('id, kategori_id'),
+        ]);
+        if (fr.error) throw fr.error; if (er.error) throw er.error;
+        rows = fr.data || [];
+        const eqCat = {}; (er.data || []).forEach(e => { eqCat[e.id] = e.kategori_id; });
+        rows.forEach(r => { const gn = getCategoryName(eqCat[r.equipment_id]); r._group = (gn && gn !== '—') ? gn : 'Lainnya'; });
       } catch (e) {
         host.innerHTML = `<div class="bg-red-50 text-red-700 p-4 rounded-xl text-sm">Gagal memuat: ${escapeHtml(e.message)}</div>`;
         return;
@@ -7344,7 +7350,7 @@
         </div>
         <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
           <div class="px-4 py-3 border-b border-slate-100 space-y-2">
-            <div class="font-semibold text-slate-800 text-sm">Daftar FMEA <span id="fmea-count" class="text-slate-400 font-normal"></span></div>
+            <div class="font-semibold text-slate-800 text-sm">Daftar FMEA <span id="fmea-count" class="text-slate-400 font-normal"></span> <span class="text-xs text-slate-400 font-normal">— dikelompokkan per jenis, klik untuk buka</span></div>
             <div class="flex flex-wrap gap-2">
               <select onchange="setFmeaFilter('band', this.value)" class="px-2 py-1.5 border border-slate-300 rounded-lg text-xs bg-white outline-none focus:ring-2 focus:ring-navy">
                 <option value="">Semua RPN</option><option value="kritis">🔴 Kritis</option><option value="tinggi">🟠 Tinggi</option><option value="sedang">🟡 Sedang</option><option value="rendah">🟢 Rendah</option>
@@ -7355,12 +7361,8 @@
               <input oninput="setFmeaFilterQ(this.value)" placeholder="Cari equipment / mode kegagalan…" class="flex-1 min-w-[140px] px-2 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-navy">
             </div>
           </div>
-          <div class="overflow-x-auto max-h-[28rem] overflow-y-auto"><table class="w-full">
-            <thead class="sticky top-0 bg-slate-50"><tr class="text-left text-xs text-slate-500">
-              <th class="px-3 py-2">Equipment</th><th class="px-3 py-2">Mode Kegagalan</th><th class="px-3 py-2">S</th><th class="px-3 py-2">O</th><th class="px-3 py-2">D</th><th class="px-3 py-2">RPN</th><th class="px-3 py-2">Status</th><th class="px-3 py-2"></th>
-            </tr></thead><tbody id="fmea-body"></tbody>
-          </table></div>
-        </div>`;
+        </div>
+        <div id="fmea-groups" class="space-y-3"></div>`;
       renderFmeaList();
     }
 
@@ -7373,24 +7375,46 @@
         return true;
       });
     }
+    function fmeaRowHtml(e) {
+      return `<tr class="border-b border-slate-100">
+        <td class="px-3 py-2 text-sm"><div class="font-mono text-xs text-navy">${escapeHtml(e.equipment_tag || '—')}</div><div class="text-slate-500 text-xs">${escapeHtml(e.equipment_name || '')}</div></td>
+        <td class="px-3 py-2 text-sm">${escapeHtml(e.failure_mode || '')}</td>
+        <td class="px-3 py-2 text-sm">${e.severity}</td>
+        <td class="px-3 py-2 text-sm">${e.occurrence}</td>
+        <td class="px-3 py-2 text-sm">${e.detection}</td>
+        <td class="px-3 py-2">${rpnBadge(e.rpn)}</td>
+        <td class="px-3 py-2">${fmeaStatusBadge(e.status)}</td>
+        <td class="px-3 py-2 text-right whitespace-nowrap">
+          <button onclick="openFmeaEdit('${e.id}')" class="px-2 py-1 rounded bg-navy hover:bg-navy-700 text-white text-xs">✏</button>
+          <button onclick="deleteFmea('${e.id}')" class="px-2 py-1 rounded bg-red-100 hover:bg-red-200 text-red-700 text-xs">🗑</button>
+        </td>
+      </tr>`;
+    }
     function renderFmeaList() {
-      const body = document.getElementById('fmea-body'); if (!body) return;
+      const host = document.getElementById('fmea-groups'); if (!host) return;
       const list = fmeaFiltered();
-      body.innerHTML = list.length ? list.map(e => `
-        <tr class="border-b border-slate-100">
-          <td class="px-3 py-2 text-sm"><div class="font-mono text-xs text-navy">${escapeHtml(e.equipment_tag || '—')}</div><div class="text-slate-500 text-xs">${escapeHtml(e.equipment_name || '')}</div></td>
-          <td class="px-3 py-2 text-sm">${escapeHtml(e.failure_mode || '')}</td>
-          <td class="px-3 py-2 text-sm">${e.severity}</td>
-          <td class="px-3 py-2 text-sm">${e.occurrence}</td>
-          <td class="px-3 py-2 text-sm">${e.detection}</td>
-          <td class="px-3 py-2">${rpnBadge(e.rpn)}</td>
-          <td class="px-3 py-2">${fmeaStatusBadge(e.status)}</td>
-          <td class="px-3 py-2 text-right whitespace-nowrap">
-            <button onclick="openFmeaEdit('${e.id}')" class="px-2 py-1 rounded bg-navy hover:bg-navy-700 text-white text-xs">✏</button>
-            <button onclick="deleteFmea('${e.id}')" class="px-2 py-1 rounded bg-red-100 hover:bg-red-200 text-red-700 text-xs">🗑</button>
-          </td>
-        </tr>`).join('') : '<tr><td colspan="8" class="px-3 py-6 text-center text-slate-400 text-sm">Belum ada FMEA. Klik "+ Tambah FMEA".</td></tr>';
       const cnt = document.getElementById('fmea-count'); if (cnt) cnt.textContent = `(${list.length})`;
+      if (!list.length) { host.innerHTML = '<div class="bg-white rounded-xl border border-slate-200 p-6 text-center text-slate-400 text-sm">Tidak ada FMEA sesuai filter.</div>'; return; }
+      const filterActive = !!(fmeaFilter.status || fmeaFilter.band || (fmeaFilter.q || '').trim());
+      const groups = {};
+      list.forEach(e => { const g = e._group || 'Lainnya'; (groups[g] = groups[g] || []).push(e); });
+      const maxOf = (arr) => Math.max(...arr.map(x => Number(x.rpn) || 0));
+      const names = Object.keys(groups).sort((a, b) => maxOf(groups[b]) - maxOf(groups[a]));
+      host.innerHTML = names.map(g => {
+        const rows = groups[g].sort((a, b) => (Number(b.rpn) || 0) - (Number(a.rpn) || 0));
+        const maxRpn = maxOf(rows);
+        const crit = rows.filter(x => (Number(x.rpn) || 0) >= 200).length;
+        return `<details class="bg-white rounded-xl border border-slate-200 overflow-hidden" ${filterActive ? 'open' : ''}>
+          <summary class="px-4 py-3 cursor-pointer flex items-center justify-between gap-2 hover:bg-slate-50 select-none">
+            <span class="font-semibold text-slate-800 text-sm">${escapeHtml(g)} <span class="text-slate-400 font-normal">(${rows.length})</span></span>
+            <span class="text-xs text-slate-500 whitespace-nowrap">${crit ? crit + ' 🔴 · ' : ''}tertinggi ${rpnBadge(maxRpn)}</span>
+          </summary>
+          <div class="overflow-x-auto border-t border-slate-100"><table class="w-full">
+            <thead><tr class="bg-slate-50 text-left text-xs text-slate-500"><th class="px-3 py-2">Equipment</th><th class="px-3 py-2">Mode Kegagalan</th><th class="px-3 py-2">S</th><th class="px-3 py-2">O</th><th class="px-3 py-2">D</th><th class="px-3 py-2">RPN</th><th class="px-3 py-2">Status</th><th class="px-3 py-2"></th></tr></thead>
+            <tbody>${rows.map(fmeaRowHtml).join('')}</tbody>
+          </table></div>
+        </details>`;
+      }).join('');
     }
     let _fmeaDeb;
     function setFmeaFilter(k, v) { fmeaFilter[k] = v; renderFmeaList(); }
