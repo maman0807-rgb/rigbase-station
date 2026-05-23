@@ -7589,7 +7589,7 @@
       if (!host) return;
       const t = state.ramTab;
       if (t === 'availability') { host.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat…</div>'; renderAvailabilityPage(host); return; }
-      if (t === 'maintenance') { host.innerHTML = ''; host.appendChild(PAGES.maintenance()); return; }
+      if (t === 'maintenance') { host.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat…</div>'; renderRamMaintenance(host); return; }
       // Pilar Reliability → sub-tab Overview / Stress / FMEA / CSPP
       const sub = [['overview', '📊 Overview'], ['stress', '🚛 Stress'], ['fmea', '⚠️ FMEA'], ['cspp', '📦 CSPP']];
       host.innerHTML = `
@@ -7831,6 +7831,45 @@
       renderAvailabilityPage(document.getElementById('ram-content'));
     }
     window.markDowntimeDone = markDowntimeDone;
+
+    // Pilar Maintenance di RAM = baca data Logbook (daily_logs), READ-ONLY.
+    async function renderRamMaintenance(host) {
+      let logs = [];
+      try {
+        const { data, error } = await state.supabase.from('daily_logs')
+          .select('log_date, equipment_name, maintenance_type, total, notes, user_name, created_by_name')
+          .order('log_date', { ascending: false }).limit(300);
+        if (error) throw error; logs = data || [];
+      } catch (e) {
+        host.innerHTML = `<div class="bg-red-50 text-red-700 p-4 rounded-xl text-sm">Gagal memuat data Logbook: ${escapeHtml(e.message)}</div>`;
+        return;
+      }
+      const fmtRp = (n) => 'Rp ' + (Number(n) || 0).toLocaleString('id-ID');
+      const totalBiaya = logs.reduce((a, b) => a + (Number(b.total) || 0), 0);
+      const typeBadge = (t) => { const m = { PM: 'bg-blue-100 text-blue-700', CM: 'bg-orange-100 text-orange-700', PdM: 'bg-purple-100 text-purple-700', BD: 'bg-red-100 text-red-700' }; return `<span class="px-2 py-0.5 rounded-full text-xs font-semibold ${m[t] || 'bg-slate-100 text-slate-600'}">${escapeHtml(t || '-')}</span>`; };
+      const rows = logs.map(l => `<tr class="border-b border-slate-100">
+        <td class="px-3 py-2 text-sm whitespace-nowrap">${escapeHtml(l.log_date || '—')}</td>
+        <td class="px-3 py-2 text-sm">${escapeHtml(l.equipment_name || '—')}</td>
+        <td class="px-3 py-2">${typeBadge(l.maintenance_type)}</td>
+        <td class="px-3 py-2 text-sm">${fmtRp(l.total)}</td>
+        <td class="px-3 py-2 text-sm text-slate-500">${escapeHtml(l.created_by_name || l.user_name || '—')}</td>
+        <td class="px-3 py-2 text-sm text-slate-600">${escapeHtml((l.notes || '').slice(0, 80))}</td>
+      </tr>`).join('');
+      host.innerHTML = `
+        <div class="bg-blue-50 border border-blue-200 rounded-xl p-3 text-xs text-blue-800">📋 Data maintenance diambil dari <b>Logbook</b> (read-only). Input maintenance dilakukan di app Logbook; di RAM hanya untuk analisa.</div>
+        <div class="grid grid-cols-2 md:grid-cols-3 gap-3 mt-3">
+          <div class="bg-white rounded-xl border border-slate-200 p-4"><div class="text-xs text-slate-500 mb-1">Jumlah Maintenance Log</div><div class="text-2xl font-extrabold text-slate-900">${logs.length}</div></div>
+          <div class="bg-white rounded-xl border border-slate-200 p-4"><div class="text-xs text-slate-500 mb-1">Total Biaya</div><div class="text-2xl font-extrabold text-slate-900">${fmtRp(totalBiaya)}</div></div>
+        </div>
+        <div class="bg-white rounded-xl border border-slate-200 overflow-hidden mt-3">
+          <div class="px-4 py-3 border-b border-slate-100 font-semibold text-slate-800 text-sm">Riwayat Maintenance (dari Logbook)</div>
+          <div class="overflow-x-auto max-h-[28rem] overflow-y-auto"><table class="w-full">
+            <thead class="sticky top-0 bg-slate-50"><tr class="text-left text-xs text-slate-500"><th class="px-3 py-2">Tanggal</th><th class="px-3 py-2">Equipment</th><th class="px-3 py-2">Tipe</th><th class="px-3 py-2">Biaya</th><th class="px-3 py-2">Oleh</th><th class="px-3 py-2">Catatan</th></tr></thead>
+            <tbody>${rows || '<tr><td colspan="6" class="px-3 py-6 text-center text-slate-400 text-sm">Belum ada data maintenance di Logbook.</td></tr>'}</tbody>
+          </table></div>
+        </div>`;
+    }
+    window.renderRamMaintenance = renderRamMaintenance;
 
     // ============================================================
     // 11. BOOT
