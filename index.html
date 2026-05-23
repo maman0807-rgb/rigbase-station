@@ -3000,6 +3000,7 @@
             <input type="date" id="finding-filter-date-to"   value="${f.dateTo}"   onchange="state.findingFilters.dateTo=this.value; refreshTemuanTab();"   title="Sampai tanggal" class="px-2 py-1.5 border border-slate-300 rounded text-sm bg-white" />
             ${hasActive ? `<button onclick="resetFindingFilters()" class="px-3 py-1.5 border border-safety text-safety hover:bg-safety hover:text-white rounded text-xs font-semibold transition">↻ Reset</button>` : ''}
             <div class="flex-1"></div>
+            <button onclick="openImportTemuanModal()" class="bg-navy hover:bg-navy-700 text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 shadow-sm">📤 Import PDF</button>
             <button onclick="openFindingFormModal()" class="bg-safety hover:bg-safety-700 text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 shadow-sm">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
               Tambah Temuan
@@ -3063,6 +3064,131 @@
       `;
     }
     window.renderTemuanList = renderTemuanList;
+
+    // ---- Import Temuan dari PDF inspeksi (format PT PJ-Tek Mandiri) ----
+    function parseInspeksiFindings(text) {
+      const startM = text.search(/DAILY INSPECTION[\s\S]*?REPORT/i);
+      const endM = text.search(/Result Finding/i);
+      let region = text.slice(startM >= 0 ? startM : 0, endM >= 0 ? endM : text.length).replace(/--\s*\d+\s*of\s*\d+\s*--/gi, ' ');
+      region = region.replace(/No\.\s*Equipment\s*Deficiencies\s*Categories\s*Remarks[\s\S]*?Recommendation/i, ' ');
+      const idx = []; const re = /(?:^|\s)(\d+)\.\s/g; let m;
+      while ((m = re.exec(region))) idx.push({ n: m[1], pos: m.index + (m[0].startsWith(' ') ? 1 : 0) });
+      const out = [];
+      for (let i = 0; i < idx.length; i++) {
+        const chunk = region.slice(idx[i].pos, i + 1 < idx.length ? idx[i + 1].pos : region.length).trim();
+        const mm = chunk.match(/^\d+\.\s+([\s\S]*?)\s+(N\/A|Critical|Major|Minor)\s+Finding\s*:?/i);
+        if (!mm) continue;
+        let equip = mm[1].trim(); const cat = mm[2];
+        let qty = ''; const qm = equip.match(/(\d+\s*ea)\s*$/i); if (qm) { qty = qm[1]; equip = equip.slice(0, qm.index).trim(); }
+        const g = (r) => { const x = chunk.match(r); return x ? x[1].replace(/\s+/g, ' ').trim() : ''; };
+        out.push({
+          no_urut: Number(idx[i].n), equipment: equip, qty, category: cat,
+          finding: g(/Finding\s*:?\s*([\s\S]*?)\s*MPI Result/i),
+          mpi: g(/MPI Result\s*:?\s*([\s\S]*?)\s*Acceptance Criteria/i),
+          acceptance: g(/Acceptance Criteria\s*:?\s*([\s\S]*?)\s*Total Progress/i),
+          recommendation: g(/Recommendation\s*:?\s*([\s\S]*)/i),
+        });
+      }
+      return out;
+    }
+
+    function openImportTemuanModal() {
+      const insp = window.__currentInspection;
+      if (!insp) { toast('Buka detail siklus dulu.', 'warn'); return; }
+      window.__importTemuan = null;
+      const body = `
+        <div class="space-y-3">
+          <div class="bg-slate-50 rounded p-2 text-xs text-slate-600">Siklus: <b class="text-navy">${escapeHtml(insp.inspection_code)}</b> · Rig: <b>${escapeHtml(getParentUnitName(insp.parent_unit_id))}</b></div>
+          <div class="border border-dashed border-slate-300 rounded-lg p-3">
+            <label class="block text-xs font-semibold text-slate-500 uppercase mb-1">📤 Upload PDF Laporan Inspeksi</label>
+            <input type="file" id="imp-pdf" accept="application/pdf" onchange="handleImportTemuanPdf(this)" class="text-xs w-full">
+            <div class="flex items-center gap-2 mt-2">
+              <label class="text-xs text-slate-500">Tgl ditemukan:</label>
+              <input type="date" id="imp-date" value="${new Date().toISOString().slice(0, 10)}" class="px-2 py-1 border border-slate-300 rounded text-xs">
+            </div>
+            <div id="imp-status" class="text-xs text-slate-500 mt-2">Pilih PDF → temuan otomatis dibaca (format PT PJ-Tek Mandiri).</div>
+          </div>
+          <div id="imp-preview"></div>
+        </div>`;
+      const footer = `
+        <button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
+        <button id="imp-save-btn" onclick="importTemuanSave()" disabled class="px-4 py-2 rounded-lg bg-navy hover:bg-navy-700 text-white text-sm font-semibold disabled:opacity-50">Import Temuan</button>`;
+      openModal({ title: 'Import Temuan dari PDF', body, footer, maxWidth: 'max-w-3xl' });
+    }
+    window.openImportTemuanModal = openImportTemuanModal;
+
+    async function handleImportTemuanPdf(input) {
+      const file = input.files && input.files[0];
+      const status = document.getElementById('imp-status');
+      if (!file) return;
+      status.textContent = 'Membaca PDF…';
+      const dm = file.name.match(/(\d{4}-\d{2}-\d{2})/);
+      if (dm) { const de = document.getElementById('imp-date'); if (de) de.value = dm[1]; }
+      try {
+        const text = await extractPdfText(file);
+        const list = parseInspeksiFindings(text);
+        window.__importTemuan = list;
+        renderImportPreview(list);
+        const real = list.filter(x => x.category !== 'N/A').length;
+        status.innerHTML = `✅ Terbaca <b>${list.length}</b> baris (<b>${real}</b> Critical/Major). Centang yang mau diimport.`;
+        const btn = document.getElementById('imp-save-btn'); if (btn) btn.disabled = list.length === 0;
+      } catch (e) {
+        status.innerHTML = `<span class="text-red-600">Gagal baca PDF: ${escapeHtml(e.message)}. Pastikan format PT PJ-Tek Mandiri.</span>`;
+      }
+    }
+    window.handleImportTemuanPdf = handleImportTemuanPdf;
+
+    function renderImportPreview(list) {
+      const host = document.getElementById('imp-preview'); if (!host) return;
+      const catCls = (c) => c === 'Critical' ? 'bg-red-100 text-red-700' : c === 'Major' ? 'bg-orange-100 text-orange-700' : c === 'Minor' ? 'bg-yellow-100 text-yellow-700' : 'bg-slate-100 text-slate-500';
+      const rows = list.map((f, i) => `<tr class="border-b border-slate-100">
+        <td class="px-2 py-1 text-center"><input type="checkbox" class="imp-row" data-i="${i}" ${f.category !== 'N/A' ? 'checked' : ''}></td>
+        <td class="px-2 py-1 text-sm">${f.no_urut}</td>
+        <td class="px-2 py-1 text-sm font-semibold text-slate-700">${escapeHtml(f.equipment)}${f.qty ? ' <span class="text-slate-400">(' + escapeHtml(f.qty) + ')</span>' : ''}</td>
+        <td class="px-2 py-1"><span class="px-2 py-0.5 rounded-full text-xs font-semibold ${catCls(f.category)}">${escapeHtml(f.category)}</span></td>
+        <td class="px-2 py-1 text-xs text-slate-600">${escapeHtml((f.finding || '').slice(0, 90))}</td>
+      </tr>`).join('');
+      host.innerHTML = list.length
+        ? `<div class="border border-slate-200 rounded-lg max-h-72 overflow-y-auto"><table class="w-full"><thead class="sticky top-0 bg-slate-50"><tr class="text-left text-xs font-bold text-slate-600"><th class="px-2 py-1">✓</th><th class="px-2 py-1">No</th><th class="px-2 py-1">Equipment</th><th class="px-2 py-1">Kategori</th><th class="px-2 py-1">Finding</th></tr></thead><tbody>${rows}</tbody></table></div>`
+        : '<div class="text-slate-400 text-sm text-center py-3">Tidak ada temuan terbaca.</div>';
+    }
+
+    async function importTemuanSave() {
+      const insp = window.__currentInspection;
+      const all = window.__importTemuan || [];
+      const sel = [...document.querySelectorAll('.imp-row:checked')].map(c => all[Number(c.dataset.i)]).filter(Boolean);
+      if (!sel.length) { toast('Pilih minimal 1 temuan.', 'warn'); return; }
+      const tgl = document.getElementById('imp-date')?.value || new Date().toISOString().slice(0, 10);
+      const existing = window.__currentFindings || [];
+      let base = existing.length ? Math.max(...existing.map(f => Number(f.no_urut) || 0)) : 0;
+      const mpiMap = (v) => { v = (v || '').toLowerCase(); if (v.includes('no discontinu')) return 'No Discontinuity'; if (v.includes('discontinu')) return 'Discontinuity'; return 'N/A'; };
+      const rows = sel.map((f, k) => ({
+        inspection_id: insp.id,
+        no_urut: base + k + 1,
+        equipment_name_snapshot: f.equipment || '(tanpa nama)',
+        qty: f.qty || null,
+        category: ['Critical', 'Major', 'Minor', 'N/A'].includes(f.category) ? f.category : 'N/A',
+        mpi_result: mpiMap(f.mpi),
+        finding: f.finding || null,
+        acceptance_criteria: f.acceptance || null,
+        recommendation: f.recommendation || null,
+        status: f.category === 'N/A' ? 'Closed' : 'Open',
+        tgl_ditemukan: tgl,
+        tgl_closed: f.category === 'N/A' ? tgl : null,
+      }));
+      const btn = document.getElementById('imp-save-btn'); if (btn) { btn.disabled = true; btn.textContent = 'Mengimport…'; }
+      try {
+        const { error } = await state.supabase.from('inspection_findings').insert(rows);
+        if (error) throw error;
+        toast(`✅ ${rows.length} temuan diimport.`, 'success');
+        closeModal();
+        setInspectionView('detail', insp.id, 'temuan');
+      } catch (e) {
+        toast('Gagal import: ' + e.message, 'error');
+        if (btn) { btn.disabled = false; btn.textContent = 'Import Temuan'; }
+      }
+    }
+    window.importTemuanSave = importTemuanSave;
 
     // Render photo grid + upload slot per finding
     // labelType: 'before' | 'after' | 'kondisi' (untuk N/A — pakai field photos_before di DB)
