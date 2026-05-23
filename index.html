@@ -7841,7 +7841,10 @@
         </tr>`).join('');
       host.innerHTML = `
         <div class="bg-white rounded-xl border border-slate-200 p-5">
-          <h3 class="text-lg font-bold text-slate-900 mb-1">📈 Asset Performance</h3>
+          <div class="flex items-start justify-between flex-wrap gap-3 mb-1">
+            <h3 class="text-lg font-bold text-slate-900">📈 Asset Performance</h3>
+            <button onclick="cetakLaporanGabungan()" class="bg-navy hover:bg-navy-700 text-white px-4 py-2 rounded-lg text-sm font-semibold whitespace-nowrap">🖨 Cetak Laporan Gabungan</button>
+          </div>
           <p class="text-sm text-slate-600 mb-3">Modul analisa keandalan & ketersediaan aset — saling terhubung jadi satu alur keputusan perawatan:</p>
           <div class="text-xs bg-slate-50 border border-slate-200 rounded-lg p-3 leading-relaxed">
             <b>🚛 Stress Score</b> (berat mobilisasi) → menaikkan <b>Occurrence</b> di <b>⚠️ FMEA</b> → komponen <b>RPN</b> tinggi → spare-nya jadi prioritas di <b>📦 CSPP</b>.
@@ -8101,7 +8104,7 @@
     }
 
     function printReportDoc(data, ttd, docNo) {
-      const { title, summary: summaryHtml, chart: chartHtml, intro: introHtml, table: tableHtml, kesimpulan: kesimpulanHtml } = data || {};
+      const { title, summary: summaryHtml, chart: chartHtml, intro: introHtml, table: tableHtml, kesimpulan: kesimpulanHtml, bodyHtml } = data || {};
       const tgl = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
       const who = escapeHtml(state.profile?.full_name || state.profile?.email || '');
       const yr = new Date().getFullYear();
@@ -8116,6 +8119,7 @@
           .kop{display:flex;align-items:center;gap:12px;border-bottom:3px solid #11335d;padding-bottom:10px;margin-bottom:8px}
           .kop .t{font-size:16px;font-weight:bold;color:#11335d} .kop .s{font-size:11px;color:#6b7280}
           h1{font-size:15px;text-align:center;margin:14px 0 2px;text-transform:uppercase}
+          h2{font-size:13px;color:#11335d;border-bottom:2px solid #cbd5e1;padding-bottom:3px;margin:18px 0 6px}
           .meta{text-align:center;font-size:11px;color:#374151;margin-bottom:14px}
           .cards{display:flex;gap:8px;margin:0 0 14px} .card{flex:1;border:1px solid #d1d5db;border-radius:6px;padding:8px 10px;text-align:center} .card .num{font-size:22px;font-weight:800;line-height:1.1} .card .lbl{font-size:9px;color:#6b7280;text-transform:uppercase;margin-top:2px}
           .card.red{background:#fef2f2;border-color:#fecaca} .card.red .num{color:#dc2626} .card.amber{background:#fffbeb;border-color:#fde68a} .card.amber .num{color:#d97706} .card.green{background:#f0fdf4;border-color:#bbf7d0} .card.green .num{color:#16a34a} .card.navy{background:#eff6ff;border-color:#bfdbfe} .card.navy .num{color:#11335d}
@@ -8129,10 +8133,7 @@
         <div class="kop"><div style="font-size:28px">🛢️</div><div><div class="t">PT PERTAMINA HULU ROKAN — Hoist &amp; Heavy Equipment</div><div class="s">Rigbase Station · Asset Reliability (RAM)</div></div></div>
         <h1>${escapeHtml(title)}</h1>
         <div class="meta">Nomor: ${noDok} &nbsp;·&nbsp; Tanggal: ${tgl}</div>
-        ${summaryHtml || ''}
-        ${chartHtml || ''}
-        ${introHtml}
-        ${tableHtml}
+        ${bodyHtml ? bodyHtml : `${summaryHtml || ''}${chartHtml || ''}${introHtml || ''}${tableHtml || ''}`}
         <div class="kesimpulan"><b>Kesimpulan &amp; Rekomendasi</b><br>${kesimpulanHtml}</div>
         <div class="ttd">
           <div class="c">Dibuat oleh,<div class="line">${sDibuat}<br><span style="color:#6b7280">Sr Mekanik</span></div></div>
@@ -8272,6 +8273,65 @@
       openSignDialog({ title: 'Laporan Availability Equipment', type: 'AVAIL', summary, chart, intro, table, kesimpulan });
     }
     window.cetakAvailReport = cetakAvailReport;
+
+    // ===== Laporan GABUNGAN: Stress + FMEA + CSPP + Availability dlm 1 dokumen =====
+    async function cetakLaporanGabungan() {
+      let su = [], se = [], fm = [], mats = [], dt = [], eqAll = [];
+      try {
+        const r = await Promise.all([
+          state.supabase.from('v_stress_per_unit').select('*'),
+          state.supabase.from('v_stress_per_equipment').select('*').order('total_stress', { ascending: false }).limit(10),
+          state.supabase.from('fmea_entries').select('equipment_tag,equipment_name,severity,occurrence,detection,rpn,recommended_action').order('rpn', { ascending: false }),
+          state.supabase.from('materials').select('part_number,description,category,stok'),
+          state.supabase.from('downtime_events').select('*'),
+          state.supabase.from('equipment').select('id,tag_number,nama_equipment,assigned_unit_id'),
+        ]);
+        for (const x of r) if (x.error) throw x.error;
+        su = r[0].data || []; se = r[1].data || []; fm = r[2].data || []; mats = r[3].data || []; dt = r[4].data || []; eqAll = r[5].data || [];
+      } catch (e) { toast('Gagal memuat data laporan: ' + e.message, 'error'); return; }
+
+      const n = v => Number(v) || 0;
+      const sec = (t) => `<h2>${t}</h2>`;
+      const tbl = (head, rows) => `<table><thead><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows || `<tr><td colspan="${head.length}" style="text-align:center;color:#9ca3af">—</td></tr>`}</tbody></table>`;
+      const rpnStyle = r => { r = n(r); return r >= 200 ? 'background:#fef2f2;color:#dc2626' : r >= 100 ? 'background:#fffbeb;color:#d97706' : 'color:#16a34a'; };
+      const fmtH = h => h == null ? '—' : (h < 24 ? h.toFixed(1) + ' jam' : (h / 24).toFixed(1) + ' hari');
+
+      // STRESS
+      const rigs = state.parentUnits.filter(u => u.type === 'Rig');
+      const puMap = {}; su.forEach(u => puMap[u.unit_id] = u);
+      const stressRows = rigs.map(u => { const p = puMap[u.id] || {}; return `<tr><td>${escapeHtml(u.name)}</td><td style="text-align:center">${n(p.total_stress)}</td><td style="text-align:center">${n(p.mob_count)}</td></tr>`; }).join('');
+      const topEqRows = se.map((e, i) => `<tr><td style="text-align:center">${i + 1}</td><td>${escapeHtml(e.equipment_tag || '-')} — ${escapeHtml(e.equipment_name || '')}</td><td style="text-align:center;font-weight:bold">${n(e.total_stress)}</td><td style="text-align:center">${n(e.mob_count)}</td></tr>`).join('');
+      const sStress = sec('🚛 1. Stress Score Mobilisasi') + '<p>Akumulasi stress perpindahan rig & komponen paling tertekan.</p>'
+        + tbl(['Rig', 'Σ Stress', 'Mob'], stressRows)
+        + '<p style="margin:6px 0 2px;font-weight:bold">Komponen Paling Tertekan</p>' + tbl(['#', 'Equipment', 'Σ Stress', 'Mob'], topEqRows);
+
+      // FMEA
+      const kritis = fm.filter(e => n(e.rpn) >= 200).length, tinggi = fm.filter(e => n(e.rpn) >= 100 && n(e.rpn) < 200).length;
+      const fmRows = fm.slice(0, 12).map((e, i) => `<tr><td style="text-align:center">${i + 1}</td><td>${escapeHtml(e.equipment_tag || '-')}<br><span style="color:#6b7280">${escapeHtml(e.equipment_name || '')}</span></td><td style="text-align:center">${e.severity}</td><td style="text-align:center">${e.occurrence}</td><td style="text-align:center">${e.detection}</td><td style="text-align:center;font-weight:bold;${rpnStyle(e.rpn)}">${n(e.rpn)}</td><td>${escapeHtml(e.recommended_action || '-')}</td></tr>`).join('');
+      const sFmea = sec('⚠️ 2. FMEA — Analisa Mode Kegagalan') + `<p>Total ${fm.length} mode kegagalan · <b style="color:#dc2626">${kritis} Kritis (≥200)</b> · ${tinggi} Tinggi. RPN tertinggi:</p>`
+        + tbl(['#', 'Equipment', 'S', 'O', 'D', 'RPN', 'Rekomendasi'], fmRows);
+
+      // CSPP
+      const critHabis = mats.filter(m => String(m.category || '').toLowerCase() === 'critical' && n(m.stok) === 0);
+      const cRows = critHabis.slice(0, 25).map((m, i) => `<tr><td style="text-align:center">${i + 1}</td><td>${escapeHtml(m.part_number || '-')}</td><td>${escapeHtml(m.description || '')}</td><td style="text-align:center;background:#fef2f2;color:#dc2626;font-weight:bold">HABIS</td></tr>`).join('');
+      const sCspp = sec('📦 3. CSPP — Suku Cadang Kritis') + `<p><b style="color:#dc2626">${critHabis.length} suku cadang Critical habis stok</b> — prioritas pengadaan.</p>`
+        + tbl(['#', 'Part Number', 'Deskripsi', 'Status'], cRows);
+
+      // AVAILABILITY
+      const now = Date.now(), periodH = 365 * 24, start = now - 365 * 86400000;
+      const agg = {}; dt.forEach(d => { const k = d.equipment_id; if (!agg[k]) agg[k] = { events: 0, downH: 0 }; agg[k].events++; const s = new Date(d.start_at).getTime(), e = d.end_at ? new Date(d.end_at).getTime() : now; agg[k].downH += Math.max(0, Math.min(e, now) - Math.max(s, start)) / 3600000; });
+      const avAll = eqAll.map(x => { const a = agg[x.id] || { events: 0, downH: 0 }; return { tag: x.tag_number, name: x.nama_equipment, events: a.events, avail: Math.max(0, Math.min(100, (periodH - a.downH) / periodH * 100)) }; });
+      const fleetAvail = avAll.length ? avAll.reduce((s, v) => s + v.avail, 0) / avAll.length : 100;
+      const sedangDown = dt.filter(d => !d.end_at).length;
+      const avRows = avAll.filter(x => x.events > 0).sort((a, b) => a.avail - b.avail).slice(0, 15).map((o, i) => { const st = o.avail >= 95 ? 'color:#16a34a' : o.avail >= 85 ? 'background:#fffbeb;color:#d97706' : 'background:#fef2f2;color:#dc2626'; return `<tr><td style="text-align:center">${i + 1}</td><td>${escapeHtml(o.tag || '-')} — ${escapeHtml(o.name || '')}</td><td style="text-align:center;font-weight:bold;${st}">${o.avail.toFixed(1)}%</td><td style="text-align:center">${o.events}</td></tr>`; }).join('');
+      const sAvail = sec('🟢 4. Availability — Kesiapan Equipment') + `<p>Availability rata-rata fleet (365 hari): <b>${fleetAvail.toFixed(1)}%</b> · Sedang down: <b>${sedangDown}</b>.</p>`
+        + (avRows ? tbl(['#', 'Equipment', 'Availability', 'Down'], avRows) : '<p style="color:#6b7280">Belum ada catatan downtime.</p>');
+
+      const bodyHtml = sStress + sFmea + sCspp + sAvail;
+      const kesimpulan = `Laporan ini merangkum keandalan & ketersediaan aset (RAM). <b style="color:#dc2626">Prioritas tindak lanjut:</b> ${kritis} mode kegagalan kritis (FMEA), ${critHabis.length} suku cadang kritis habis (CSPP), ${sedangDown} equipment sedang down. Mohon dukungan persetujuan untuk perbaikan & pengadaan terkait.`;
+      openSignDialog({ title: 'Laporan Asset Performance (RAM)', type: 'RAM', bodyHtml, kesimpulan });
+    }
+    window.cetakLaporanGabungan = cetakLaporanGabungan;
 
     // ============================================================
     // 10t. PANDUAN RAM — penjelasan modul & cara hitung
