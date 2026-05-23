@@ -7913,10 +7913,14 @@
     // ============================================================
     // 10u. REPORT JUSTIFIKASI (cetak/PDF + blok tanda tangan)
     // ============================================================
-    function printReportDoc(title, summaryHtml, introHtml, tableHtml, kesimpulanHtml) {
+    function printReportDoc(title, summaryHtml, introHtml, tableHtml, kesimpulanHtml, ttd) {
       const tgl = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
       const who = escapeHtml(state.profile?.full_name || state.profile?.email || '');
       const yr = new Date().getFullYear();
+      const tt = ttd || {};
+      const sDibuat = tt.dibuat ? escapeHtml(tt.dibuat) : who;
+      const sPeriksa = tt.diperiksa ? escapeHtml(tt.diperiksa) : '( ............... )';
+      const sSetuju = tt.disetujui ? escapeHtml(tt.disetujui) : '( ............... )';
       const html = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
         <style>
           *{box-sizing:border-box} body{font-family:Arial,Helvetica,sans-serif;color:#1f2937;padding:32px;font-size:12px;line-height:1.5}
@@ -7941,9 +7945,9 @@
         ${tableHtml}
         <div class="kesimpulan"><b>Kesimpulan &amp; Rekomendasi</b><br>${kesimpulanHtml}</div>
         <div class="ttd">
-          <div class="c">Dibuat oleh,<div class="line">${who}<br><span style="color:#6b7280">Sr Mekanik</span></div></div>
-          <div class="c">Diperiksa,<div class="line">( ............... )<br><span style="color:#6b7280">SPV / Sr SPV</span></div></div>
-          <div class="c">Disetujui,<div class="line">( ............... )<br><span style="color:#6b7280">Astmen</span></div></div>
+          <div class="c">Dibuat oleh,<div class="line">${sDibuat}<br><span style="color:#6b7280">Sr Mekanik</span></div></div>
+          <div class="c">Diperiksa,<div class="line">${sPeriksa}<br><span style="color:#6b7280">SPV / Sr SPV</span></div></div>
+          <div class="c">Disetujui,<div class="line">${sSetuju}<br><span style="color:#6b7280">Astmen</span></div></div>
         </div>
         <script>window.onload=function(){window.print()}<\/script>
         </body></html>`;
@@ -7951,6 +7955,38 @@
       if (!w) { toast('Pop-up diblokir browser. Izinkan pop-up untuk cetak.', 'warn'); return; }
       w.document.write(html); w.document.close();
     }
+
+    // Dialog isi nama penandatangan sebelum cetak → langsung tampil di PDF
+    function openSignDialog(data) {
+      window.__reportData = data;
+      const who = escapeHtml(state.profile?.full_name || state.profile?.email || '');
+      const body = `
+        <div class="space-y-3">
+          <p class="text-xs text-slate-500">Isi nama penandatangan agar langsung tercetak di dokumen. Kosongkan kalau mau diisi manual setelah dicetak.</p>
+          <div><label class="text-xs text-slate-500">Dibuat oleh (Sr Mekanik)</label>
+            <input id="ttd-dibuat" value="${who}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy"></div>
+          <div><label class="text-xs text-slate-500">Diperiksa (SPV / Sr SPV)</label>
+            <input id="ttd-periksa" placeholder="nama pemeriksa" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy"></div>
+          <div><label class="text-xs text-slate-500">Disetujui (Astmen)</label>
+            <input id="ttd-setuju" placeholder="nama penyetuju" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy"></div>
+        </div>`;
+      const footer = `
+        <button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
+        <button onclick="doPrintReport()" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy-700 text-white text-sm font-semibold">🖨 Cetak / PDF</button>`;
+      openModal({ title: 'Penandatangan Dokumen', body, footer, maxWidth: 'max-w-md' });
+    }
+    function doPrintReport() {
+      const d = window.__reportData; if (!d) return;
+      const ttd = {
+        dibuat: (document.getElementById('ttd-dibuat')?.value || '').trim(),
+        diperiksa: (document.getElementById('ttd-periksa')?.value || '').trim(),
+        disetujui: (document.getElementById('ttd-setuju')?.value || '').trim(),
+      };
+      closeModal();
+      printReportDoc(d.title, d.summary, d.intro, d.table, d.kesimpulan, ttd);
+    }
+    window.openSignDialog = openSignDialog;
+    window.doPrintReport = doPrintReport;
 
     function cetakCsppReport() {
       const list = csppFiltered(); const n = v => Number(v) || 0;
@@ -7969,7 +8005,7 @@
       }).join('');
       const table = `<table><thead><tr><th>No</th><th>Part Number</th><th>Deskripsi</th><th>Kategori</th><th>Stok</th><th>Safety</th><th>Status</th></tr></thead><tbody>${rows || '<tr><td colspan="7" style="text-align:center">Tidak ada data</td></tr>'}</tbody></table>`;
       const kesimpulan = `<b style="color:#dc2626">⚠️ Dampak bila tidak ditindaklanjuti:</b> ${habis} suku cadang kritis kosong → equipment berisiko gagal tanpa pengganti → potensi <b>rig down</b> &amp; kehilangan jam operasi.<br><br><b style="color:#16a34a">✅ Permohonan:</b> mohon persetujuan pengadaan <b>${habis} item kritis</b> di atas untuk menjaga ketersediaan (Availability) &amp; keandalan equipment.`;
-      printReportDoc('Justifikasi Pengadaan Suku Cadang', summary, intro, table, kesimpulan);
+      openSignDialog({ title: 'Justifikasi Pengadaan Suku Cadang', summary, intro, table, kesimpulan });
     }
     window.cetakCsppReport = cetakCsppReport;
 
@@ -7989,7 +8025,7 @@
       const rows = list.slice(0, 300).map((e, i) => `<tr><td style="text-align:center">${i + 1}</td><td>${escapeHtml(e.equipment_tag || '-')}<br><span style="color:#6b7280">${escapeHtml(e.equipment_name || '')}</span></td><td>${escapeHtml(e.failure_mode || '')}</td><td style="text-align:center">${e.severity}</td><td style="text-align:center">${e.occurrence}</td><td style="text-align:center">${e.detection}</td>${rpnCell(e.rpn)}<td>${escapeHtml(e.recommended_action || '-')}</td></tr>`).join('');
       const table = `<table><thead><tr><th>No</th><th>Equipment</th><th>Mode Kegagalan</th><th>S</th><th>O</th><th>D</th><th>RPN</th><th>Rekomendasi Tindakan</th></tr></thead><tbody>${rows || '<tr><td colspan="8" style="text-align:center">Tidak ada data</td></tr>'}</tbody></table>`;
       const kesimpulan = `<b style="color:#dc2626">⚠️ Dampak bila tidak ditindaklanjuti:</b> ${kritis} mode kegagalan kritis berpotensi menyebabkan kerusakan besar, berhentinya operasi, atau risiko keselamatan.<br><br><b style="color:#16a34a">✅ Permohonan:</b> mohon persetujuan penerbitan <b>SPK (Surat Perintah Kerja)</b> untuk melaksanakan rekomendasi tindakan di atas.`;
-      printReportDoc('Justifikasi Tindakan Perbaikan (SPK)', summary, intro, table, kesimpulan);
+      openSignDialog({ title: 'Justifikasi Tindakan Perbaikan (SPK)', summary, intro, table, kesimpulan });
     }
     window.cetakFmeaReport = cetakFmeaReport;
 
@@ -8021,7 +8057,7 @@
       const rows = eqList.slice(0, 300).map((o, i) => `<tr><td style="text-align:center">${i + 1}</td><td>${escapeHtml(o.tag || '-')}<br><span style="color:#6b7280">${escapeHtml(o.name || '')}</span></td>${availCell(o.avail)}<td style="text-align:center">${o.events}</td><td style="text-align:center">${fmtH(o.downH)}</td><td style="text-align:center">${fmtH(o.mttr)}</td></tr>`).join('');
       const table = `<table><thead><tr><th>No</th><th>Equipment</th><th>Availability</th><th>Jml Down</th><th>Total Down</th><th>MTTR</th></tr></thead><tbody>${rows || '<tr><td colspan="6" style="text-align:center">Belum ada catatan downtime</td></tr>'}</tbody></table>`;
       const kesimpulan = `<b style="color:#dc2626">⚠️ Dampak:</b> equipment dengan availability rendah / sedang down menurunkan kesiapan rig &amp; berpotensi menghambat operasi.<br><br><b style="color:#16a34a">✅ Permohonan:</b> mohon dukungan mempercepat perbaikan (suku cadang/SPK) pada equipment availability terendah di atas guna memulihkan kesiapan operasi.`;
-      printReportDoc('Laporan Availability Equipment', summary, intro, table, kesimpulan);
+      openSignDialog({ title: 'Laporan Availability Equipment', summary, intro, table, kesimpulan });
     }
     window.cetakAvailReport = cetakAvailReport;
 
