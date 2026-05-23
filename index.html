@@ -6719,10 +6719,12 @@
       });
       const perEq = {}; links.forEach(l => {
         if (!l.equipment_id) return;
-        if (!perEq[l.equipment_id]) perEq[l.equipment_id] = { tag: l.equipment_tag, name: l.equipment_name, count: 0, total: 0 };
+        if (!perEq[l.equipment_id]) perEq[l.equipment_id] = { id: l.equipment_id, tag: l.equipment_tag, name: l.equipment_name, count: 0, total: 0 };
         perEq[l.equipment_id].count++; perEq[l.equipment_id].total += l.applied_score || 0;
       });
-      const topEq = Object.values(perEq).sort((a, b) => b.total - a.total).slice(0, 10);
+      const allStressed = Object.values(perEq).sort((a, b) => b.total - a.total);
+      window.__stressAll = allStressed;
+      const topEq = allStressed.slice(0, 10);
 
       const fleetCards = rigs.map(u => {
         const p = perUnit[u.id] || { count: 0, total: 0, cat: {} };
@@ -6744,14 +6746,7 @@
           <td class="px-3 py-2">${stressBadge(r.category)}</td>
         </tr>`).join('');
 
-      const topRows = topEq.map((e, i) => `
-        <tr class="border-b border-slate-100">
-          <td class="px-3 py-2 text-sm text-slate-400">${i + 1}</td>
-          <td class="px-3 py-2 text-sm font-mono">${escapeHtml(e.tag || '—')}</td>
-          <td class="px-3 py-2 text-sm">${escapeHtml(e.name || '')}</td>
-          <td class="px-3 py-2 text-sm font-bold text-navy">${e.total}</td>
-          <td class="px-3 py-2 text-sm text-slate-500">${e.count}x</td>
-        </tr>`).join('');
+      const topRows = topEq.map((e, i) => stressRowHtml(e, i, false)).join('');
 
       host.innerHTML = `
         <div class="flex items-center justify-between flex-wrap gap-3">
@@ -6776,7 +6771,10 @@
             </table></div>
           </div>
           <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
-            <div class="px-4 py-3 border-b border-slate-100 font-semibold text-slate-800 text-sm">Komponen Paling Tertekan (Top 10)</div>
+            <div class="px-4 py-3 border-b border-slate-100 flex items-center justify-between gap-2">
+              <span class="font-semibold text-slate-800 text-sm">Komponen Paling Tertekan</span>
+              <button onclick="openAllStressed()" class="text-xs text-navy hover:underline font-medium whitespace-nowrap">Lihat semua (${allStressed.length}) →</button>
+            </div>
             <div class="overflow-x-auto"><table class="w-full">
               <thead><tr class="bg-slate-50 text-left text-xs text-slate-500"><th class="px-3 py-2">#</th><th class="px-3 py-2">Tag</th><th class="px-3 py-2">Nama</th><th class="px-3 py-2">Σ Stress</th><th class="px-3 py-2">Mob</th></tr></thead>
               <tbody>${topRows || '<tr><td colspan="5" class="px-3 py-6 text-center text-slate-400 text-sm">Belum ada data.</td></tr>'}</tbody>
@@ -6784,6 +6782,45 @@
           </div>
         </div>`;
     }
+
+    function stressRowHtml(e, i, closeFirst) {
+      const onclick = e.id ? `${closeFirst ? 'closeModal(); ' : ''}setEquipmentView('detail','${e.id}'); navigate('equipment')` : '';
+      return `
+        <tr class="border-b border-slate-100 ${e.id ? 'hover:bg-slate-50 cursor-pointer' : ''}" ${onclick ? `onclick="${onclick}"` : ''}>
+          <td class="px-3 py-2 text-sm text-slate-400">${i + 1}</td>
+          <td class="px-3 py-2 text-sm font-mono text-navy">${escapeHtml(e.tag || '—')}</td>
+          <td class="px-3 py-2 text-sm">${escapeHtml(e.name || '')}</td>
+          <td class="px-3 py-2 text-sm font-bold text-navy">${e.total}</td>
+          <td class="px-3 py-2 text-sm text-slate-500">${e.count}x</td>
+        </tr>`;
+    }
+
+    function openAllStressed() {
+      const all = window.__stressAll || [];
+      const body = `
+        <input id="stress-search" placeholder="Cari tag / nama…" oninput="filterStressList(this.value)" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm mb-3 outline-none focus:ring-2 focus:ring-navy">
+        <div class="text-xs text-slate-500 mb-2">${all.length} equipment pernah kena stress mobilisasi. Klik baris untuk buka detail equipment.</div>
+        <div class="border border-slate-200 rounded-lg max-h-[55vh] overflow-y-auto overflow-x-auto">
+          <table class="w-full"><thead class="sticky top-0 bg-slate-50"><tr class="text-left text-xs text-slate-500"><th class="px-3 py-2">#</th><th class="px-3 py-2">Tag</th><th class="px-3 py-2">Nama</th><th class="px-3 py-2">Σ Stress</th><th class="px-3 py-2">Mob</th></tr></thead>
+          <tbody id="stress-all-body"></tbody></table>
+        </div>`;
+      openModal({ title: 'Semua Komponen Tertekan', body, maxWidth: 'max-w-3xl' });
+      renderStressList(all);
+    }
+    function renderStressList(list) {
+      const body = document.getElementById('stress-all-body');
+      if (!body) return;
+      body.innerHTML = list.length
+        ? list.map((e, i) => stressRowHtml(e, i, true)).join('')
+        : '<tr><td colspan="5" class="px-3 py-6 text-center text-slate-400 text-sm">Tidak ada hasil.</td></tr>';
+    }
+    function filterStressList(q) {
+      const s = (q || '').toLowerCase().trim();
+      const all = window.__stressAll || [];
+      renderStressList(s ? all.filter(e => (e.tag || '').toLowerCase().includes(s) || (e.name || '').toLowerCase().includes(s)) : all);
+    }
+    window.openAllStressed = openAllStressed;
+    window.filterStressList = filterStressList;
 
     // ---- FORM ----
     function renderStressPreview() {
