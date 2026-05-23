@@ -309,7 +309,7 @@
       { id: 'inspections', label: 'Inspeksi',    icon: '🔍',  bottomNav: true  },
       { id: 'maintenance', label: 'Maintenance', icon: '🛠️',  bottomNav: true  },
       { id: 'alerts',      label: 'Alert',       icon: '🔔',  bottomNav: true  },
-      { id: 'reliability', label: 'Asset Performance', icon: '📈', srOnly: true },
+      { id: 'reliability', label: 'RAM', icon: '📊', srOnly: true },
       { id: 'categories',  label: 'Kategori',    icon: '🏷️',  adminOnly: true  },
       { id: 'users',       label: 'User',        icon: '👥',  adminOnly: true  },
       { id: 'activity',    label: 'Activity Log', icon: '📜',  adminOnly: true  },
@@ -7155,7 +7155,7 @@
         window.__jmpFile = null; window.__jmpFileName = null;
         toast(`Tersimpan. Skor ${sc.total} (${STRESS_CAT_META[sc.category].label}) → ${eqRows.length} equipment.`, 'success');
         closeModal();
-        state.reliabilityTab = 'stress'; navigate('reliability');
+        state.ramTab = 'reliability'; state.reliabilityTab = 'stress'; navigate('reliability');
       } catch (e) {
         toast('Gagal simpan: ' + e.message, 'error');
       }
@@ -7521,7 +7521,7 @@
         }
         toast('FMEA tersimpan.', 'success');
         closeModal();
-        if (state.currentPage === 'reliability') { state.reliabilityTab = 'fmea'; navigate('reliability'); }
+        if (state.currentPage === 'reliability') { state.ramTab = 'reliability'; state.reliabilityTab = 'fmea'; navigate('reliability'); }
         else if (window.__currentEq) renderDetailTab(window.__currentEq);
       } catch (e) { toast('Gagal simpan: ' + e.message, 'error'); }
     }
@@ -7533,7 +7533,7 @@
       const { error } = await state.supabase.from('fmea_entries').delete().eq('id', id);
       if (error) { toast('Gagal hapus: ' + error.message, 'error'); return; }
       toast('FMEA dihapus.', 'success');
-      if (state.currentPage === 'reliability') { state.reliabilityTab = 'fmea'; navigate('reliability'); }
+      if (state.currentPage === 'reliability') { state.ramTab = 'reliability'; state.reliabilityTab = 'fmea'; navigate('reliability'); }
       else if (window.__currentEq) renderDetailTab(window.__currentEq);
     }
     window.deleteFmea = deleteFmea;
@@ -7566,21 +7566,47 @@
     // ============================================================
     // 10w. RELIABILITY CENTER — satu menu: Overview + Stress + FMEA + CSPP
     // ============================================================
+    // RAM = payung 3 pilar: Reliability · Availability · Maintenance
     PAGES.reliability = function () {
+      if (!state.ramTab) state.ramTab = 'reliability';
       if (!state.reliabilityTab) state.reliabilityTab = 'overview';
       const div = document.createElement('div');
       div.className = 'page space-y-4';
-      const tabs = [['overview', '📊 Overview'], ['stress', '🚛 Stress Score'], ['fmea', '⚠️ FMEA'], ['cspp', '📦 CSPP'], ['avail', '🟢 Availability']];
+      const pillars = [['reliability', '🛡️ Reliability'], ['availability', '🟢 Availability'], ['maintenance', '🛠️ Maintenance']];
       div.innerHTML = `
         <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div class="flex border-b border-slate-200 overflow-x-auto" id="ram-tabs">
+            ${pillars.map(([id, lbl]) => `<button onclick="setRamTab('${id}')" data-tab="${id}" class="px-5 py-3 text-sm font-semibold whitespace-nowrap ${state.ramTab === id ? 'border-b-2 border-safety text-safety bg-safety/5' : 'text-slate-600 hover:text-navy'}">${lbl}</button>`).join('')}
+          </div>
+        </div>
+        <div id="ram-content"></div>`;
+      renderRamTab(div.querySelector('#ram-content'));
+      return div;
+    };
+
+    function renderRamTab(host) {
+      host = host || document.getElementById('ram-content');
+      if (!host) return;
+      const t = state.ramTab;
+      if (t === 'availability') { host.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat…</div>'; renderAvailabilityPage(host); return; }
+      if (t === 'maintenance') { host.innerHTML = ''; host.appendChild(PAGES.maintenance()); return; }
+      // Pilar Reliability → sub-tab Overview / Stress / FMEA / CSPP
+      const sub = [['overview', '📊 Overview'], ['stress', '🚛 Stress'], ['fmea', '⚠️ FMEA'], ['cspp', '📦 CSPP']];
+      host.innerHTML = `
+        <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           <div class="flex border-b border-slate-200 overflow-x-auto" id="rel-tabs">
-            ${tabs.map(([id, lbl]) => `<button onclick="setReliabilityTab('${id}')" data-tab="${id}" class="px-4 py-3 text-sm font-medium whitespace-nowrap ${state.reliabilityTab === id ? 'border-b-2 border-safety text-safety bg-safety/5' : 'text-slate-600 hover:text-navy'}">${lbl}</button>`).join('')}
+            ${sub.map(([id, lbl]) => `<button onclick="setReliabilityTab('${id}')" data-tab="${id}" class="px-4 py-3 text-sm font-medium whitespace-nowrap ${state.reliabilityTab === id ? 'border-b-2 border-navy text-navy bg-navy/5' : 'text-slate-500 hover:text-navy'}">${lbl}</button>`).join('')}
           </div>
         </div>
         <div id="rel-content"></div>`;
-      renderReliabilityTab(div.querySelector('#rel-content'));
-      return div;
-    };
+      renderReliabilityTab(host.querySelector('#rel-content'));
+    }
+    function setRamTab(t) {
+      state.ramTab = t;
+      document.querySelectorAll('#ram-tabs button').forEach(b => { b.className = `px-5 py-3 text-sm font-semibold whitespace-nowrap ${b.dataset.tab === t ? 'border-b-2 border-safety text-safety bg-safety/5' : 'text-slate-600 hover:text-navy'}`; });
+      renderRamTab();
+    }
+    window.setRamTab = setRamTab;
 
     function renderReliabilityTab(host) {
       host = host || document.getElementById('rel-content');
@@ -7590,13 +7616,12 @@
       if (t === 'stress') renderStressPage(host);
       else if (t === 'fmea') renderFmeaPage(host);
       else if (t === 'cspp') renderCsppPage(host);
-      else if (t === 'avail') renderAvailabilityPage(host);
       else renderReliabilityOverview(host);
     }
     function setReliabilityTab(t) {
       state.reliabilityTab = t;
       document.querySelectorAll('#rel-tabs button').forEach(b => {
-        b.className = `px-4 py-3 text-sm font-medium whitespace-nowrap ${b.dataset.tab === t ? 'border-b-2 border-safety text-safety bg-safety/5' : 'text-slate-600 hover:text-navy'}`;
+        b.className = `px-4 py-3 text-sm font-medium whitespace-nowrap ${b.dataset.tab === t ? 'border-b-2 border-navy text-navy bg-navy/5' : 'text-slate-500 hover:text-navy'}`;
       });
       renderReliabilityTab();
     }
@@ -7741,7 +7766,7 @@
           </div>
         </div>`;
     }
-    function setAvailPeriod(d) { availPeriodDays = Number(d) || 365; renderAvailabilityPage(document.getElementById('rel-content')); }
+    function setAvailPeriod(d) { availPeriodDays = Number(d) || 365; renderAvailabilityPage(document.getElementById('ram-content')); }
     window.setAvailPeriod = setAvailPeriod;
     window.renderAvailabilityPage = renderAvailabilityPage;
 
@@ -7794,7 +7819,7 @@
         if (id) { const { error } = await state.supabase.from('downtime_events').update(payload).eq('id', id); if (error) throw error; }
         else { payload.created_by = state.user.id; payload.created_by_name = state.profile?.full_name || state.profile?.email || ''; const { error } = await state.supabase.from('downtime_events').insert(payload); if (error) throw error; }
         toast('Downtime tersimpan.', 'success'); closeModal();
-        renderAvailabilityPage(document.getElementById('rel-content'));
+        renderAvailabilityPage(document.getElementById('ram-content'));
       } catch (e) { toast('Gagal simpan: ' + e.message, 'error'); }
     }
     window.saveDowntime = saveDowntime;
@@ -7803,7 +7828,7 @@
       const { error } = await state.supabase.from('downtime_events').update({ end_at: new Date().toISOString() }).eq('id', id);
       if (error) { toast('Gagal: ' + error.message, 'error'); return; }
       toast('Ditandai selesai.', 'success');
-      renderAvailabilityPage(document.getElementById('rel-content'));
+      renderAvailabilityPage(document.getElementById('ram-content'));
     }
     window.markDowntimeDone = markDowntimeDone;
 
