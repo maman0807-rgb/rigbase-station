@@ -7699,11 +7699,11 @@
       const list = Object.values(map).sort((a, b) => (b.maxRpn - a.maxRpn) || (b.stress - a.stress));
       const rows = list.slice(0, 100).map(r => `
         <tr class="border-b border-slate-100 hover:bg-slate-50 cursor-pointer" onclick="setEquipmentView('detail','${r.id}'); navigate('equipment')">
-          <td class="px-3 py-2 text-sm"><div class="font-mono text-xs text-navy">${escapeHtml(r.tag || '—')}</div><div class="text-slate-500 text-xs">${escapeHtml(r.name || '')}</div></td>
-          <td class="px-3 py-2 text-sm font-bold">${r.stress || '—'}</td>
-          <td class="px-3 py-2 text-sm text-slate-500">${r.mob || '—'}</td>
+          <td class="px-3 py-2 text-sm"><div class="font-mono text-xs font-bold text-navy">${escapeHtml(r.tag || '—')}</div><div class="text-slate-700 text-sm font-semibold">${escapeHtml(r.name || '')}</div></td>
+          <td class="px-3 py-2 text-base font-extrabold text-slate-900">${r.stress || '—'}</td>
+          <td class="px-3 py-2 text-sm font-semibold text-slate-700">${r.mob || '—'}</td>
           <td class="px-3 py-2">${r.maxRpn ? rpnBadge(r.maxRpn) : '<span class="text-slate-400 text-sm">—</span>'}</td>
-          <td class="px-3 py-2 text-sm text-slate-500">${r.fmeaCount || '—'}</td>
+          <td class="px-3 py-2 text-sm font-semibold text-slate-700">${r.fmeaCount || '—'}</td>
         </tr>`).join('');
       host.innerHTML = `
         <div class="bg-white rounded-xl border border-slate-200 p-5">
@@ -7717,7 +7717,7 @@
         <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
           <div class="px-4 py-3 border-b border-slate-100 font-semibold text-slate-800 text-sm">Equipment Paling Berisiko (Stress + FMEA) <span class="text-slate-400 font-normal">— klik buka detail</span></div>
           <div class="overflow-x-auto max-h-[28rem] overflow-y-auto"><table class="w-full">
-            <thead class="sticky top-0 bg-slate-50"><tr class="text-left text-xs text-slate-500"><th class="px-3 py-2">Equipment</th><th class="px-3 py-2">Σ Stress</th><th class="px-3 py-2">Mob</th><th class="px-3 py-2">FMEA Max RPN</th><th class="px-3 py-2"># FMEA</th></tr></thead>
+            <thead class="sticky top-0 bg-slate-50"><tr class="text-left text-xs font-bold text-slate-600"><th class="px-3 py-2">Equipment</th><th class="px-3 py-2">Σ Stress</th><th class="px-3 py-2">Mob</th><th class="px-3 py-2">FMEA Max RPN</th><th class="px-3 py-2"># FMEA</th></tr></thead>
             <tbody>${rows || '<tr><td colspan="5" class="px-3 py-6 text-center text-slate-400 text-sm">Belum ada data stress/FMEA.</td></tr>'}</tbody>
           </table></div>
         </div>`;
