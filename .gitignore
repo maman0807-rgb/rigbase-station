@@ -34,3 +34,6 @@ npm-debug.log*
 # Temp
 *.tmp
 *.bak
+serviceAccountKey.json
+supabase_service_key.txt
+operator_credentials.csv

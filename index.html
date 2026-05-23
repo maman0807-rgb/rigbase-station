@@ -117,17 +117,17 @@
 
       <form id="login-form" class="space-y-4">
         <div>
-          <label class="block text-sm font-medium text-slate-700 mb-1">Email</label>
-          <input id="login-email" type="email" required autocomplete="email"
+          <label class="block text-sm font-medium text-slate-700 mb-1">ID Karyawan / Email</label>
+          <input id="login-email" type="text" required autocomplete="username"
                  class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-navy focus:border-transparent outline-none"
-                 placeholder="email@perusahaan.com" />
+                 placeholder="mis. GUDANG02 atau email@perusahaan.com" />
         </div>
 
         <div>
-          <label class="block text-sm font-medium text-slate-700 mb-1">Password</label>
+          <label class="block text-sm font-medium text-slate-700 mb-1">PIN / Password</label>
           <input id="login-password" type="password" required autocomplete="current-password"
                  class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-navy focus:border-transparent outline-none"
-                 placeholder="••••••••" />
+                 placeholder="PIN 4 digit atau password" />
         </div>
 
         <div id="login-error" class="hide text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2"></div>
@@ -309,6 +309,7 @@
       { id: 'inspections', label: 'Inspeksi',    icon: '🔍',  bottomNav: true  },
       { id: 'maintenance', label: 'Maintenance', icon: '🛠️',  bottomNav: true  },
       { id: 'alerts',      label: 'Alert',       icon: '🔔',  bottomNav: true  },
+      { id: 'stress',      label: 'Stress Score', icon: '🚛', srOnly: true     },
       { id: 'categories',  label: 'Kategori',    icon: '🏷️',  adminOnly: true  },
       { id: 'users',       label: 'User',        icon: '👥',  adminOnly: true  },
       { id: 'activity',    label: 'Activity Log', icon: '📜',  adminOnly: true  },
@@ -1188,7 +1189,14 @@
       show(spinner);
 
       try {
-        const { data, error } = await state.supabase.auth.signInWithPassword({ email, password });
+        // Dual-mode: kalau input tidak ada '@', perlakukan sebagai ID Karyawan + PIN
+        // (samakan dengan skema Logbook: ID@logbook.app + PIN@HHE).
+        let loginEmail = email, loginPass = password;
+        if (!email.includes('@')) {
+          loginEmail = (email + '@logbook.app').toLowerCase();
+          if (/^\d{4}$/.test(password)) loginPass = password + '@HHE';
+        }
+        const { data, error } = await state.supabase.auth.signInWithPassword({ email: loginEmail, password: loginPass });
         if (error) throw error;
         await loadProfile(data.user);
         await loadReferenceData().catch(err => console.warn('Ref data load failed:', err.message));
@@ -1196,7 +1204,7 @@
         toast(`Selamat datang, ${state.profile.full_name || state.profile.email}`, 'success');
       } catch (err) {
         errorBox.textContent = err.message === 'Invalid login credentials'
-          ? 'Email atau password salah.'
+          ? 'ID/Email atau PIN/password salah.'
           : `Gagal login: ${err.message}`;
         show(errorBox);
       } finally {
@@ -1301,8 +1309,15 @@
       $('#sidebar-user-role').textContent = p.role;
     }
 
+    function isSrMekanikOrAbove() {
+      return ['sr_mekanik','spv','sr_spv','astmen','admin'].includes(state.profile?.role);
+    }
+
     function visibleNavItems() {
-      return NAV_ITEMS.filter(item => !item.adminOnly || state.profile?.role === 'admin');
+      return NAV_ITEMS.filter(item =>
+        (!item.adminOnly || state.profile?.role === 'admin') &&
+        (!item.srOnly || isSrMekanikOrAbove())
+      );
     }
 
     function renderSidebar() {
@@ -1337,6 +1352,10 @@
       if (!item) return;
       if (item.adminOnly && state.profile?.role !== 'admin') {
         toast('Halaman ini hanya untuk admin.', 'warn');
+        return;
+      }
+      if (item.srOnly && !isSrMekanikOrAbove()) {
+        toast('Halaman ini khusus Sr Mekanik ke atas.', 'warn');
         return;
       }
       state.currentPage = pageId;
@@ -6626,6 +6645,310 @@
     });
 
     $('#alert-bell').addEventListener('click', () => navigate('alerts'));
+
+    // ============================================================
+    // 10z. STRESS SCORE (Mobilisasi) — modul analisa Sr Mekanik+
+    // ============================================================
+    const STRESS_CAT_META = {
+      low:      { label: 'LOW',      emoji: '🟢', cls: 'bg-green-100 text-green-700'   },
+      medium:   { label: 'MEDIUM',   emoji: '🟡', cls: 'bg-yellow-100 text-yellow-700' },
+      high:     { label: 'HIGH',     emoji: '🟠', cls: 'bg-orange-100 text-orange-700' },
+      critical: { label: 'CRITICAL', emoji: '🔴', cls: 'bg-red-100 text-red-700'      },
+    };
+    const STRESS_FACTORS = [
+      ['s1_distance','Jarak',10], ['s2_road','Kondisi Jalan',22], ['s3_route','Route',13],
+      ['s4_transport','Transport',25], ['s5_duration','Durasi',5], ['s6_weather','Cuaca',10], ['s7_incident','Insiden',10],
+    ];
+
+    function calcStress(d) {
+      const dist = Number(d.distance) || 0;
+      let s1 = 2; if (dist > 100) s1 = 10; else if (dist >= 50) s1 = 8; else if (dist >= 25) s1 = 5;
+      const dmgPct = dist > 0 ? (Number(d.roadDamage || 0) / dist) * 100 : 0;
+      let s2 = 3; if (dmgPct >= 30) s2 = 22; else if (dmgPct >= 15) s2 = 16; else if (dmgPct >= 5) s2 = 10;
+      const s3 = Math.min(Number(d.blindSpots) || 0, 5)
+               + Math.min((Number(d.railwayCrossings) || 0) * 2, 5)
+               + Math.min(Number(d.bridges) || 0, 3);
+      let lot = 2; const L = Number(d.totalLots) || 0;
+      if (L >= 21) lot = 10; else if (L >= 11) lot = 7; else if (L >= 5) lot = 4;
+      let foco = 3; const F = Number(d.focoUnits) || 0;
+      if (F >= 7) foco = 13; else if (F >= 5) foco = 10; else if (F >= 3) foco = 6;
+      const craneMap = { none: 0, less_25: 1, '25_50': 2, more_50: 3 };
+      const s4 = Math.min(lot + foco + (craneMap[d.craneCapacity] || 0), 25);
+      let s5 = 0; const dur = Number(d.duration) || 0;
+      if (dur >= 48) s5 = 5; else if (dur >= 24) s5 = 3; else if (dur >= 8) s5 = 2; else if (dur > 0) s5 = 1;
+      const s6 = ({ cerah: 0, mendung: 3, hujan_delay: 6, hujan_sering: 10 })[d.weather] || 0;
+      const s7 = ({ none: 0, minor: 3, moderate: 6, major: 10 })[d.incident] || 0;
+      const total = s1 + s2 + s3 + s4 + s5 + s6 + s7;
+      let category = 'low'; if (total > 75) category = 'critical'; else if (total > 50) category = 'high'; else if (total > 30) category = 'medium';
+      return { s1_distance: s1, s2_road: s2, s3_route: s3, s4_transport: s4, s5_duration: s5, s6_weather: s6, s7_incident: s7, total, category, equivalentHours: Math.round(total * 2.5) };
+    }
+
+    function stressBadge(cat) {
+      const m = STRESS_CAT_META[cat] || STRESS_CAT_META.low;
+      return `<span class="px-2 py-0.5 rounded-full text-xs font-semibold ${m.cls}">${m.emoji} ${m.label}</span>`;
+    }
+
+    // ---- PAGE ----
+    PAGES.stress = function () {
+      const div = document.createElement('div');
+      div.className = 'page space-y-5';
+      div.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat data stress…</div>';
+      renderStressPage(div);
+      return div;
+    };
+
+    async function renderStressPage(host) {
+      let recs = [], links = [];
+      try {
+        const [a, b] = await Promise.all([
+          state.supabase.from('mobilization_records').select('*').order('mob_date', { ascending: false }),
+          state.supabase.from('mobilization_equipment').select('mobilization_id, equipment_id, equipment_tag, equipment_name, applied_score'),
+        ]);
+        if (a.error) throw a.error; if (b.error) throw b.error;
+        recs = a.data || []; links = b.data || [];
+      } catch (e) {
+        host.innerHTML = `<div class="bg-red-50 text-red-700 p-4 rounded-xl text-sm">Gagal memuat: ${escapeHtml(e.message)}</div>`;
+        return;
+      }
+
+      // akumulasi per rig (unit) & per equipment
+      const rigs = state.parentUnits.filter(u => u.type === 'Rig');
+      const perUnit = {}; recs.forEach(r => {
+        const k = r.unit_id; if (!perUnit[k]) perUnit[k] = { count: 0, total: 0, cat: { low: 0, medium: 0, high: 0, critical: 0 } };
+        perUnit[k].count++; perUnit[k].total += r.total_score || 0; perUnit[k].cat[r.category] = (perUnit[k].cat[r.category] || 0) + 1;
+      });
+      const perEq = {}; links.forEach(l => {
+        if (!l.equipment_id) return;
+        if (!perEq[l.equipment_id]) perEq[l.equipment_id] = { tag: l.equipment_tag, name: l.equipment_name, count: 0, total: 0 };
+        perEq[l.equipment_id].count++; perEq[l.equipment_id].total += l.applied_score || 0;
+      });
+      const topEq = Object.values(perEq).sort((a, b) => b.total - a.total).slice(0, 10);
+
+      const fleetCards = rigs.map(u => {
+        const p = perUnit[u.id] || { count: 0, total: 0, cat: {} };
+        const dist = `${p.cat.critical || 0}🔴 ${p.cat.high || 0}🟠 ${p.cat.medium || 0}🟡 ${p.cat.low || 0}🟢`;
+        return `<div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+          <div class="font-bold text-slate-800 text-sm mb-1">${escapeHtml(u.name)}</div>
+          <div class="text-2xl font-extrabold text-navy leading-none">${p.total}</div>
+          <div class="text-xs text-slate-500 mt-1">${p.count} mobilisasi</div>
+          <div class="text-xs mt-1">${dist}</div>
+        </div>`;
+      }).join('');
+
+      const recentRows = recs.slice(0, 15).map(r => `
+        <tr class="border-b border-slate-100">
+          <td class="px-3 py-2 text-sm">${escapeHtml(r.mob_date || '—')}</td>
+          <td class="px-3 py-2 text-sm font-medium">${escapeHtml(r.unit_name || '—')}</td>
+          <td class="px-3 py-2 text-sm text-slate-600">${escapeHtml(r.origin || '?')} → ${escapeHtml(r.destination || '?')}</td>
+          <td class="px-3 py-2 text-sm font-bold">${r.total_score}</td>
+          <td class="px-3 py-2">${stressBadge(r.category)}</td>
+        </tr>`).join('');
+
+      const topRows = topEq.map((e, i) => `
+        <tr class="border-b border-slate-100">
+          <td class="px-3 py-2 text-sm text-slate-400">${i + 1}</td>
+          <td class="px-3 py-2 text-sm font-mono">${escapeHtml(e.tag || '—')}</td>
+          <td class="px-3 py-2 text-sm">${escapeHtml(e.name || '')}</td>
+          <td class="px-3 py-2 text-sm font-bold text-navy">${e.total}</td>
+          <td class="px-3 py-2 text-sm text-slate-500">${e.count}x</td>
+        </tr>`).join('');
+
+      host.innerHTML = `
+        <div class="flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <h3 class="text-xl font-bold text-slate-900">🚛 Stress Score Mobilisasi</h3>
+            <p class="text-sm text-slate-500">Akumulasi stress perpindahan rig — diterapkan ke semua equipment yang ikut bergerak.</p>
+          </div>
+          <button onclick="openMobEntryForm()" class="bg-safety hover:bg-safety/90 text-white px-4 py-2.5 rounded-lg text-sm font-semibold">+ Catat Mobilisasi</button>
+        </div>
+
+        <div>
+          <div class="text-xs font-semibold text-slate-500 uppercase mb-2">Fleet Overview</div>
+          <div class="grid grid-cols-2 md:grid-cols-5 gap-3">${fleetCards || '<div class="text-slate-400 text-sm">Belum ada rig.</div>'}</div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+            <div class="px-4 py-3 border-b border-slate-100 font-semibold text-slate-800 text-sm">Mobilisasi Terbaru</div>
+            <div class="overflow-x-auto"><table class="w-full">
+              <thead><tr class="bg-slate-50 text-left text-xs text-slate-500"><th class="px-3 py-2">Tanggal</th><th class="px-3 py-2">Rig</th><th class="px-3 py-2">Rute</th><th class="px-3 py-2">Skor</th><th class="px-3 py-2">Kategori</th></tr></thead>
+              <tbody>${recentRows || '<tr><td colspan="5" class="px-3 py-6 text-center text-slate-400 text-sm">Belum ada data.</td></tr>'}</tbody>
+            </table></div>
+          </div>
+          <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+            <div class="px-4 py-3 border-b border-slate-100 font-semibold text-slate-800 text-sm">Komponen Paling Tertekan (Top 10)</div>
+            <div class="overflow-x-auto"><table class="w-full">
+              <thead><tr class="bg-slate-50 text-left text-xs text-slate-500"><th class="px-3 py-2">#</th><th class="px-3 py-2">Tag</th><th class="px-3 py-2">Nama</th><th class="px-3 py-2">Σ Stress</th><th class="px-3 py-2">Mob</th></tr></thead>
+              <tbody>${topRows || '<tr><td colspan="5" class="px-3 py-6 text-center text-slate-400 text-sm">Belum ada data.</td></tr>'}</tbody>
+            </table></div>
+          </div>
+        </div>`;
+    }
+
+    // ---- FORM ----
+    function renderStressPreview() {
+      const r = calcStress(readMobForm());
+      const bars = STRESS_FACTORS.map(([k, label, max]) => {
+        const v = r[k]; const pct = Math.round((v / max) * 100);
+        return `<div class="flex items-center gap-2 text-xs"><span class="w-20 text-slate-500">${label}</span>
+          <span class="flex-1 h-2 bg-slate-100 rounded"><span class="block h-2 bg-navy rounded" style="width:${pct}%"></span></span>
+          <span class="w-10 text-right font-mono">${v}/${max}</span></div>`;
+      }).join('');
+      const m = STRESS_CAT_META[r.category];
+      const el = document.getElementById('mob-preview');
+      if (el) el.innerHTML = `
+        <div class="flex items-center justify-between mb-2">
+          <div class="text-sm font-semibold text-slate-700">Total Stress Score</div>
+          <div class="text-2xl font-extrabold">${r.total} <span class="text-sm font-normal text-slate-400">/100</span></div>
+        </div>
+        <div class="mb-3">${stressBadge(r.category)} <span class="text-xs text-slate-500">≈ ${r.equivalentHours} wear-hours</span></div>
+        <div class="space-y-1.5">${bars}</div>`;
+    }
+
+    function readMobForm() {
+      const v = (id) => (document.getElementById(id)?.value || '').trim();
+      const crane = document.querySelector('input[name="mob-crane"]:checked')?.value || 'none';
+      return {
+        distance: v('mob-distance'), roadDamage: v('mob-roaddamage'),
+        blindSpots: v('mob-blind'), railwayCrossings: v('mob-rail'), bridges: v('mob-bridge'),
+        totalLots: v('mob-lots'), focoUnits: v('mob-foco'), craneCapacity: crane,
+        duration: v('mob-duration'), weather: v('mob-weather'), incident: v('mob-incident'),
+      };
+    }
+
+    function openMobEntryForm() {
+      if (!isSrMekanikOrAbove()) { toast('Khusus Sr Mekanik ke atas.', 'warn'); return; }
+      const rigs = state.parentUnits.filter(u => u.type === 'Rig');
+      const opts = `<option value="">— pilih rig —</option>` + rigs.map(u => `<option value="${u.id}">${escapeHtml(u.name)}</option>`).join('');
+      const num = (id, ph, val = '') => `<input id="${id}" type="number" step="any" min="0" value="${val}" placeholder="${ph}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-navy outline-none" oninput="renderStressPreview()">`;
+      const body = `
+        <div class="space-y-4">
+          <div>
+            <label class="block text-xs font-semibold text-slate-500 uppercase mb-1">Rig yang Pindah *</label>
+            <select id="mob-unit" onchange="loadRigEquipment(this.value)" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-navy outline-none">${opts}</select>
+          </div>
+          <div id="mob-eqwrap" class="hidden">
+            <label class="block text-xs font-semibold text-slate-500 uppercase mb-1">Equipment yang Ikut Bergerak <span id="mob-eqcount" class="text-slate-400 normal-case font-normal"></span></label>
+            <div id="mob-eqlist" class="max-h-44 overflow-y-auto border border-slate-200 rounded-lg p-2 space-y-1 text-sm"></div>
+          </div>
+
+          <div class="text-xs font-bold text-slate-600 uppercase border-t pt-3">A. Data JMP</div>
+          <div class="grid grid-cols-2 gap-3">
+            <div><label class="text-xs text-slate-500">No. JMP/BA</label><input id="mob-jmp" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy"></div>
+            <div><label class="text-xs text-slate-500">Tanggal Mob</label><input id="mob-date" type="date" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy"></div>
+            <div><label class="text-xs text-slate-500">Origin</label><input id="mob-origin" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy"></div>
+            <div><label class="text-xs text-slate-500">Destination</label><input id="mob-dest" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy"></div>
+            <div><label class="text-xs text-slate-500">Total Jarak (km)</label>${num('mob-distance', '52.4')}</div>
+            <div><label class="text-xs text-slate-500">Jalan Rusak (km)</label>${num('mob-roaddamage', '5.2')}</div>
+            <div><label class="text-xs text-slate-500">Blind Spot (titik)</label>${num('mob-blind', '0', '0')}</div>
+            <div><label class="text-xs text-slate-500">Rel KA (titik)</label>${num('mob-rail', '0', '0')}</div>
+            <div><label class="text-xs text-slate-500">Jembatan (titik)</label>${num('mob-bridge', '0', '0')}</div>
+            <div><label class="text-xs text-slate-500">Total Lot</label>${num('mob-lots', '16', '16')}</div>
+            <div><label class="text-xs text-slate-500">FOCO Truck (unit)</label>${num('mob-foco', '6', '6')}</div>
+            <div><label class="text-xs text-slate-500">Crane</label>
+              <div class="flex flex-wrap gap-2 text-xs pt-1" onchange="renderStressPreview()">
+                <label><input type="radio" name="mob-crane" value="none"> Tidak</label>
+                <label><input type="radio" name="mob-crane" value="less_25"> &lt;25T</label>
+                <label><input type="radio" name="mob-crane" value="25_50" checked> 25-50T</label>
+                <label><input type="radio" name="mob-crane" value="more_50"> &gt;50T</label>
+              </div>
+            </div>
+          </div>
+
+          <div class="text-xs font-bold text-slate-600 uppercase border-t pt-3">B. Aktual Pasca-Mob</div>
+          <div class="grid grid-cols-2 gap-3">
+            <div><label class="text-xs text-slate-500">Durasi (jam)</label>${num('mob-duration', '8')}</div>
+            <div><label class="text-xs text-slate-500">Cuaca</label>
+              <select id="mob-weather" onchange="renderStressPreview()" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-navy">
+                <option value="cerah">Cerah</option><option value="mendung">Mendung</option><option value="hujan_delay">Hujan & Delay</option><option value="hujan_sering">Hujan Sering</option>
+              </select></div>
+            <div><label class="text-xs text-slate-500">Insiden</label>
+              <select id="mob-incident" onchange="renderStressPreview()" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-navy">
+                <option value="none">Tidak Ada</option><option value="minor">Minor</option><option value="moderate">Moderate</option><option value="major">Major</option>
+              </select></div>
+            <div class="col-span-2"><label class="text-xs text-slate-500">Catatan Insiden</label><input id="mob-incnote" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy"></div>
+          </div>
+
+          <div id="mob-preview" class="bg-slate-50 border border-slate-200 rounded-xl p-4"></div>
+        </div>`;
+      const footer = `
+        <button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
+        <button onclick="saveMobilization()" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy-700 text-white text-sm font-semibold">💾 Simpan</button>`;
+      openModal({ title: 'Catat Mobilisasi Rig', body, footer, maxWidth: 'max-w-2xl' });
+      renderStressPreview();
+    }
+    window.openMobEntryForm = openMobEntryForm;
+    window.renderStressPreview = renderStressPreview;
+
+    async function loadRigEquipment(unitId) {
+      const wrap = document.getElementById('mob-eqwrap');
+      const list = document.getElementById('mob-eqlist');
+      if (!unitId) { wrap.classList.add('hidden'); return; }
+      wrap.classList.remove('hidden');
+      list.innerHTML = '<div class="text-slate-400 text-xs p-2">Memuat…</div>';
+      const { data, error } = await state.supabase.from('equipment')
+        .select('id, tag_number, nama_equipment').eq('assigned_unit_id', Number(unitId)).order('tag_number');
+      if (error) { list.innerHTML = `<div class="text-red-600 text-xs p-2">${escapeHtml(error.message)}</div>`; return; }
+      const rows = (data || []).map(e => `
+        <label class="flex items-center gap-2 px-1 py-0.5 hover:bg-slate-50 rounded">
+          <input type="checkbox" class="mob-eq" checked data-id="${e.id}" data-tag="${escapeHtml(e.tag_number)}" data-name="${escapeHtml(e.nama_equipment || '')}" onchange="updateMobEqCount()">
+          <span class="font-mono text-xs">${escapeHtml(e.tag_number)}</span>
+          <span class="text-slate-500 text-xs truncate">${escapeHtml(e.nama_equipment || '')}</span>
+        </label>`).join('');
+      list.innerHTML = rows || '<div class="text-slate-400 text-xs p-2">Tidak ada equipment terdaftar di rig ini.</div>';
+      updateMobEqCount();
+    }
+    window.loadRigEquipment = loadRigEquipment;
+
+    function updateMobEqCount() {
+      const all = document.querySelectorAll('.mob-eq');
+      const checked = document.querySelectorAll('.mob-eq:checked');
+      const el = document.getElementById('mob-eqcount');
+      if (el) el.textContent = `(${checked.length}/${all.length} ikut)`;
+    }
+    window.updateMobEqCount = updateMobEqCount;
+
+    async function saveMobilization() {
+      const unitSel = document.getElementById('mob-unit');
+      const unitId = unitSel?.value;
+      if (!unitId) { toast('Pilih rig dulu.', 'warn'); return; }
+      const checked = [...document.querySelectorAll('.mob-eq:checked')];
+      if (checked.length === 0) { toast('Pilih minimal 1 equipment yang ikut bergerak.', 'warn'); return; }
+      const f = readMobForm();
+      if (!(Number(f.distance) > 0)) { toast('Isi total jarak (km).', 'warn'); return; }
+      const sc = calcStress(f);
+      const v = (id) => (document.getElementById(id)?.value || '').trim() || null;
+      const payload = {
+        unit_id: Number(unitId), unit_name: getParentUnitName(Number(unitId)),
+        jmp_number: v('mob-jmp'), origin: v('mob-origin'), destination: v('mob-dest'),
+        total_distance: Number(f.distance) || null, total_road_damage: Number(f.roadDamage) || 0,
+        blind_spots: Number(f.blindSpots) || 0, railway_crossings: Number(f.railwayCrossings) || 0, bridges: Number(f.bridges) || 0,
+        total_lots: Number(f.totalLots) || null, foco_units: Number(f.focoUnits) || null, crane_capacity: f.craneCapacity,
+        mob_date: v('mob-date'), actual_duration: Number(f.duration) || null,
+        weather: f.weather, incident: f.incident, incident_notes: v('mob-incnote'),
+        s1_distance: sc.s1_distance, s2_road: sc.s2_road, s3_route: sc.s3_route, s4_transport: sc.s4_transport,
+        s5_duration: sc.s5_duration, s6_weather: sc.s6_weather, s7_incident: sc.s7_incident,
+        total_score: sc.total, category: sc.category, equivalent_hours: sc.equivalentHours,
+        source: 'MANUAL_ENTRY', status: 'submitted',
+        entered_by: state.user.id, entered_by_name: state.profile?.full_name || state.profile?.email || '',
+      };
+      try {
+        const { data: rec, error } = await state.supabase.from('mobilization_records').insert(payload).select('id').single();
+        if (error) throw error;
+        const eqRows = checked.map(c => ({
+          mobilization_id: rec.id, equipment_id: c.dataset.id,
+          equipment_tag: c.dataset.tag, equipment_name: c.dataset.name, applied_score: sc.total,
+        }));
+        const { error: e2 } = await state.supabase.from('mobilization_equipment').insert(eqRows);
+        if (e2) throw e2;
+        toast(`Tersimpan. Skor ${sc.total} (${STRESS_CAT_META[sc.category].label}) → ${eqRows.length} equipment.`, 'success');
+        closeModal();
+        navigate('stress');
+      } catch (e) {
+        toast('Gagal simpan: ' + e.message, 'error');
+      }
+    }
+    window.saveMobilization = saveMobilization;
 
     // ============================================================
     // 11. BOOT
