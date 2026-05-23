@@ -7748,32 +7748,45 @@
     function toLocalInput(iso) { if (!iso) return ''; const d = new Date(iso); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); }
 
     async function renderAvailabilityPage(host) {
+      let eqAll = [];
       try {
-        const { data, error } = await state.supabase.from('downtime_events').select('*').order('start_at', { ascending: false });
-        if (error) throw error; availData = data || [];
+        const [dt, eq] = await Promise.all([
+          state.supabase.from('downtime_events').select('*').order('start_at', { ascending: false }),
+          state.supabase.from('equipment').select('id, tag_number, nama_equipment, assigned_unit_id'),
+        ]);
+        if (dt.error) throw dt.error; if (eq.error) throw eq.error;
+        availData = dt.data || []; eqAll = eq.data || [];
       } catch (e) {
         host.innerHTML = `<div class="bg-red-50 text-red-700 p-4 rounded-xl text-sm">Gagal memuat: ${escapeHtml(e.message)}</div>`;
         return;
       }
       const data = availFilteredData();
       const now = Date.now(), start = now - availPeriodDays * 86400000, periodH = availPeriodDays * 24;
-      const byEq = {};
+      // agregasi downtime per equipment
+      const agg = {};
       data.forEach(d => {
-        const k = d.equipment_id; if (!byEq[k]) byEq[k] = { id: k, tag: d.equipment_tag, name: d.equipment_name, events: 0, downH: 0, dur: [] };
-        byEq[k].events++;
+        const k = d.equipment_id; if (!agg[k]) agg[k] = { events: 0, downH: 0, dur: [] };
+        agg[k].events++;
         const s = new Date(d.start_at).getTime(), e = d.end_at ? new Date(d.end_at).getTime() : now;
-        byEq[k].downH += Math.max(0, Math.min(e, now) - Math.max(s, start)) / 3600000;
-        if (d.end_at) byEq[k].dur.push((e - s) / 3600000);
+        agg[k].downH += Math.max(0, Math.min(e, now) - Math.max(s, start)) / 3600000;
+        if (d.end_at) agg[k].dur.push((e - s) / 3600000);
       });
-      const eqList = Object.values(byEq).map(o => ({ ...o, avail: Math.max(0, Math.min(100, (periodH - o.downH) / periodH * 100)), mttr: o.dur.length ? o.dur.reduce((a, b) => a + b, 0) / o.dur.length : null })).sort((a, b) => a.avail - b.avail);
+      // SEMUA equipment (filter rig) digabung dgn downtime → yang tak pernah down = 100%
+      const eqList = eqAll
+        .filter(x => !availFilter.unit_id || String(x.assigned_unit_id) === String(availFilter.unit_id))
+        .map(x => {
+          const a = agg[x.id] || { events: 0, downH: 0, dur: [] };
+          return { id: x.id, tag: x.tag_number, name: x.nama_equipment, events: a.events, downH: a.downH,
+            avail: Math.max(0, Math.min(100, (periodH - a.downH) / periodH * 100)),
+            mttr: a.dur.length ? a.dur.reduce((p, q) => p + q, 0) / a.dur.length : null };
+        }).sort((a, b) => a.avail - b.avail);
       const ongoing = data.filter(d => !d.end_at);
       const allDur = data.filter(d => d.end_at).map(d => Number(d.duration_hours) || 0);
       const mttr = allDur.length ? allDur.reduce((a, b) => a + b, 0) / allDur.length : null;
       const totalDownH = eqList.reduce((a, b) => a + b.downH, 0);
-      const totalFail = availData.length;
+      const totalFail = data.length;
       const mtbf = totalFail ? (eqList.length * periodH - totalDownH) / totalFail : null;
       const fleetAvail = eqList.length ? eqList.reduce((a, b) => a + b.avail, 0) / eqList.length : 100;
-      // breakdown kategori
       const cat = {}; data.forEach(d => { const c = DT_CAT[d.category] || 'Lainnya'; if (!cat[c]) cat[c] = { n: 0, h: 0 }; cat[c].n++; cat[c].h += Number(d.duration_hours) || 0; });
 
       const kpi = (label, val) => `<div class="bg-white rounded-xl border border-slate-200 p-4"><div class="text-xs text-slate-500 mb-1">${label}</div><div class="text-2xl font-extrabold text-slate-900">${val}</div></div>`;
@@ -7785,12 +7798,12 @@
         <td class="px-3 py-2 text-right whitespace-nowrap"><button onclick="markDowntimeDone('${d.id}')" class="px-2 py-1 rounded bg-green-100 hover:bg-green-200 text-green-700 text-xs font-semibold">✓ Selesai</button> <button onclick="openDowntimeEdit('${d.id}')" class="px-2 py-1 rounded bg-navy hover:bg-navy-700 text-white text-xs">✏</button></td>
       </tr>`).join('');
       const eqRows = eqList.map(o => `<tr class="border-b border-slate-100 hover:bg-slate-50 cursor-pointer" onclick="setEquipmentView('detail','${o.id}'); navigate('equipment')">
-        <td class="px-3 py-2 text-sm font-mono text-navy">${escapeHtml(o.tag || '—')}</td>
-        <td class="px-3 py-2 text-sm">${escapeHtml(o.name || '')}</td>
+        <td class="px-3 py-2 text-sm font-mono font-bold text-navy">${escapeHtml(o.tag || '—')}</td>
+        <td class="px-3 py-2 text-sm font-semibold text-slate-700">${escapeHtml(o.name || '')}</td>
         <td class="px-3 py-2">${availPct(o.avail)}</td>
-        <td class="px-3 py-2 text-sm">${o.events}x</td>
-        <td class="px-3 py-2 text-sm">${fmtH(o.downH)}</td>
-        <td class="px-3 py-2 text-sm">${o.mttr != null ? fmtH(o.mttr) : '—'}</td>
+        <td class="px-3 py-2 text-sm font-semibold text-slate-700">${o.events}x</td>
+        <td class="px-3 py-2 text-sm font-semibold text-slate-700">${fmtH(o.downH)}</td>
+        <td class="px-3 py-2 text-sm font-semibold text-slate-700">${o.mttr != null ? fmtH(o.mttr) : '—'}</td>
       </tr>`).join('');
       const catRows = Object.entries(cat).sort((a, b) => b[1].h - a[1].h).map(([c, v]) => `<div class="flex items-center justify-between text-sm py-1.5 border-b border-slate-100"><span>${escapeHtml(c)}</span><span class="text-slate-500">${v.n}x · ${fmtH(v.h)}</span></div>`).join('');
 
@@ -7826,12 +7839,12 @@
         </div>
         ${ongoing.length ? `<div class="bg-white rounded-xl border border-red-200 overflow-hidden">
           <div class="px-4 py-3 border-b border-slate-100 font-semibold text-red-700 text-sm">🔴 Sedang Down (${ongoing.length})</div>
-          <div class="overflow-x-auto"><table class="w-full"><thead><tr class="bg-slate-50 text-left text-xs text-slate-500"><th class="px-3 py-2">Equipment</th><th class="px-3 py-2">Penyebab</th><th class="px-3 py-2">Mulai</th><th class="px-3 py-2">Lama</th><th class="px-3 py-2"></th></tr></thead><tbody>${ongoingRows}</tbody></table></div>
+          <div class="overflow-x-auto"><table class="w-full"><thead><tr class="bg-slate-50 text-left text-xs font-bold text-slate-600"><th class="px-3 py-2">Equipment</th><th class="px-3 py-2">Penyebab</th><th class="px-3 py-2">Mulai</th><th class="px-3 py-2">Lama</th><th class="px-3 py-2"></th></tr></thead><tbody>${ongoingRows}</tbody></table></div>
         </div>` : ''}
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div class="lg:col-span-2 bg-white rounded-xl border border-slate-200 overflow-hidden">
             <div class="px-4 py-3 border-b border-slate-100 font-semibold text-slate-800 text-sm">Availability per Equipment (${availPeriodDays} hari) <span class="text-slate-400 font-normal">— klik buka detail</span></div>
-            <div class="overflow-x-auto max-h-96 overflow-y-auto"><table class="w-full"><thead class="sticky top-0 bg-slate-50"><tr class="text-left text-xs text-slate-500"><th class="px-3 py-2">Tag</th><th class="px-3 py-2">Nama</th><th class="px-3 py-2">Availability</th><th class="px-3 py-2">Down</th><th class="px-3 py-2">Total</th><th class="px-3 py-2">MTTR</th></tr></thead><tbody>${eqRows || '<tr><td colspan="6" class="px-3 py-6 text-center text-slate-400 text-sm">Belum ada catatan downtime.</td></tr>'}</tbody></table></div>
+            <div class="overflow-x-auto max-h-96 overflow-y-auto"><table class="w-full"><thead class="sticky top-0 bg-slate-50"><tr class="text-left text-xs font-bold text-slate-600"><th class="px-3 py-2">Tag</th><th class="px-3 py-2">Nama</th><th class="px-3 py-2">Availability</th><th class="px-3 py-2">Down</th><th class="px-3 py-2">Total</th><th class="px-3 py-2">MTTR</th></tr></thead><tbody>${eqRows || '<tr><td colspan="6" class="px-3 py-6 text-center text-slate-400 text-sm">Tidak ada equipment.</td></tr>'}</tbody></table></div>
           </div>
           <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
             <div class="px-4 py-3 border-b border-slate-100 font-semibold text-slate-800 text-sm">Penyebab Down</div>
