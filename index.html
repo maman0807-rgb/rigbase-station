@@ -7327,7 +7327,7 @@
     function rpnBadge(rpn) { const b = rpnBand(rpn); return `<span class="px-2 py-0.5 rounded-full text-xs font-semibold ${b.cls}">${b.emoji} ${Number(rpn) || 0}</span>`; }
     function fmeaStatusBadge(s) { const m = FMEA_STATUS[s] || FMEA_STATUS.open; return `<span class="px-2 py-0.5 rounded-full text-xs font-semibold ${m.cls}">${m.l}</span>`; }
 
-    let fmeaFilter = { status: '', band: '', q: '' };
+    let fmeaFilter = { status: '', band: '', q: '', rig: '' };
 
     PAGES.fmea = function () {
       const div = document.createElement('div');
@@ -7342,12 +7342,12 @@
       try {
         const [fr, er] = await Promise.all([
           state.supabase.from('fmea_entries').select('*').order('rpn', { ascending: false }),
-          state.supabase.from('equipment').select('id, kategori_id'),
+          state.supabase.from('equipment').select('id, kategori_id, assigned_unit_id'),
         ]);
         if (fr.error) throw fr.error; if (er.error) throw er.error;
         rows = fr.data || [];
-        const eqCat = {}; (er.data || []).forEach(e => { eqCat[e.id] = e.kategori_id; });
-        rows.forEach(r => { const gn = getCategoryName(eqCat[r.equipment_id]); const c = (gn && gn !== '—') ? gn : 'Lainnya'; r._group = FMEA_SUPERGROUP[c] || c; });
+        const eqCat = {}, eqUnit = {}; (er.data || []).forEach(e => { eqCat[e.id] = e.kategori_id; eqUnit[e.id] = e.assigned_unit_id; });
+        rows.forEach(r => { const gn = getCategoryName(eqCat[r.equipment_id]); const c = (gn && gn !== '—') ? gn : 'Lainnya'; r._group = FMEA_SUPERGROUP[c] || c; r._unitId = eqUnit[r.equipment_id] || null; });
       } catch (e) {
         host.innerHTML = `<div class="bg-red-50 text-red-700 p-4 rounded-xl text-sm">Gagal memuat: ${escapeHtml(e.message)}</div>`;
         return;
@@ -7378,6 +7378,10 @@
           <div class="px-4 py-3 border-b border-slate-100 space-y-2">
             <div class="font-semibold text-slate-800 text-sm">Daftar FMEA <span id="fmea-count" class="text-slate-400 font-normal"></span> <span class="text-xs text-slate-400 font-normal">— dikelompokkan per jenis, klik untuk buka</span></div>
             <div class="flex flex-wrap gap-2">
+              <select onchange="setFmeaFilter('rig', this.value)" class="px-2 py-1.5 border border-slate-300 rounded-lg text-xs bg-white outline-none focus:ring-2 focus:ring-navy">
+                <option value="">Semua Rig</option>
+                ${state.parentUnits.filter(u => u.type === 'Rig').map(u => `<option value="${u.id}">${escapeHtml(u.name)}</option>`).join('')}
+              </select>
               <select onchange="setFmeaFilter('band', this.value)" class="px-2 py-1.5 border border-slate-300 rounded-lg text-xs bg-white outline-none focus:ring-2 focus:ring-navy">
                 <option value="">Semua RPN</option><option value="kritis">🔴 Kritis</option><option value="tinggi">🟠 Tinggi</option><option value="sedang">🟡 Sedang</option><option value="rendah">🟢 Rendah</option>
               </select>
@@ -7395,6 +7399,7 @@
     function fmeaFiltered() {
       const f = fmeaFilter; const q = (f.q || '').toLowerCase().trim();
       return (window.__fmeaEntries || []).filter(e => {
+        if (f.rig && String(e._unitId) !== String(f.rig)) return false;
         if (f.status && e.status !== f.status) return false;
         if (f.band && rpnBand(e.rpn).key !== f.band) return false;
         if (q && !((e.equipment_tag || '').toLowerCase().includes(q) || (e.equipment_name || '').toLowerCase().includes(q) || (e.failure_mode || '').toLowerCase().includes(q))) return false;
@@ -7693,6 +7698,16 @@
     };
     let availPeriodDays = 365;
     let availData = [];
+    let availFilter = { unit_id: '', category: '' };
+    function availFilteredData() {
+      return (availData || []).filter(d => {
+        if (availFilter.unit_id && String(d.unit_id) !== String(availFilter.unit_id)) return false;
+        if (availFilter.category && d.category !== availFilter.category) return false;
+        return true;
+      });
+    }
+    function setAvailFilter(k, v) { availFilter[k] = v; renderAvailabilityPage(document.getElementById('ram-content')); }
+    window.setAvailFilter = setAvailFilter;
 
     function availPct(p) { p = Number(p) || 0; const cls = p >= 95 ? 'bg-green-100 text-green-700' : p >= 85 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'; return `<span class="px-2 py-0.5 rounded-full text-xs font-semibold ${cls}">${p.toFixed(1)}%</span>`; }
     function fmtH(h) { h = Number(h) || 0; if (h < 24) return h.toFixed(1) + ' jam'; return (h / 24).toFixed(1) + ' hari'; }
@@ -7706,9 +7721,10 @@
         host.innerHTML = `<div class="bg-red-50 text-red-700 p-4 rounded-xl text-sm">Gagal memuat: ${escapeHtml(e.message)}</div>`;
         return;
       }
+      const data = availFilteredData();
       const now = Date.now(), start = now - availPeriodDays * 86400000, periodH = availPeriodDays * 24;
       const byEq = {};
-      availData.forEach(d => {
+      data.forEach(d => {
         const k = d.equipment_id; if (!byEq[k]) byEq[k] = { id: k, tag: d.equipment_tag, name: d.equipment_name, events: 0, downH: 0, dur: [] };
         byEq[k].events++;
         const s = new Date(d.start_at).getTime(), e = d.end_at ? new Date(d.end_at).getTime() : now;
@@ -7716,15 +7732,15 @@
         if (d.end_at) byEq[k].dur.push((e - s) / 3600000);
       });
       const eqList = Object.values(byEq).map(o => ({ ...o, avail: Math.max(0, Math.min(100, (periodH - o.downH) / periodH * 100)), mttr: o.dur.length ? o.dur.reduce((a, b) => a + b, 0) / o.dur.length : null })).sort((a, b) => a.avail - b.avail);
-      const ongoing = availData.filter(d => !d.end_at);
-      const allDur = availData.filter(d => d.end_at).map(d => Number(d.duration_hours) || 0);
+      const ongoing = data.filter(d => !d.end_at);
+      const allDur = data.filter(d => d.end_at).map(d => Number(d.duration_hours) || 0);
       const mttr = allDur.length ? allDur.reduce((a, b) => a + b, 0) / allDur.length : null;
       const totalDownH = eqList.reduce((a, b) => a + b.downH, 0);
       const totalFail = availData.length;
       const mtbf = totalFail ? (eqList.length * periodH - totalDownH) / totalFail : null;
       const fleetAvail = eqList.length ? eqList.reduce((a, b) => a + b.avail, 0) / eqList.length : 100;
       // breakdown kategori
-      const cat = {}; availData.forEach(d => { const c = DT_CAT[d.category] || 'Lainnya'; if (!cat[c]) cat[c] = { n: 0, h: 0 }; cat[c].n++; cat[c].h += Number(d.duration_hours) || 0; });
+      const cat = {}; data.forEach(d => { const c = DT_CAT[d.category] || 'Lainnya'; if (!cat[c]) cat[c] = { n: 0, h: 0 }; cat[c].n++; cat[c].h += Number(d.duration_hours) || 0; });
 
       const kpi = (label, val) => `<div class="bg-white rounded-xl border border-slate-200 p-4"><div class="text-xs text-slate-500 mb-1">${label}</div><div class="text-2xl font-extrabold text-slate-900">${val}</div></div>`;
       const ongoingRows = ongoing.map(d => `<tr class="border-b border-slate-100">
@@ -7750,7 +7766,15 @@
             <h3 class="text-xl font-bold text-slate-900">🟢 Availability — Kesiapan Equipment</h3>
             <p class="text-sm text-slate-500">% waktu equipment siap pakai (tidak down). Dihitung dari catatan downtime.</p>
           </div>
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2 flex-wrap">
+            <select onchange="setAvailFilter('unit_id', this.value)" class="px-2 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-navy">
+              <option value="">Semua Rig</option>
+              ${state.parentUnits.filter(u => u.type === 'Rig').map(u => `<option value="${u.id}" ${availFilter.unit_id == u.id ? 'selected' : ''}>${escapeHtml(u.name)}</option>`).join('')}
+            </select>
+            <select onchange="setAvailFilter('category', this.value)" class="px-2 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-navy">
+              <option value="">Semua Penyebab</option>
+              ${Object.entries(DT_CAT).map(([k, l]) => `<option value="${k}" ${availFilter.category === k ? 'selected' : ''}>${l}</option>`).join('')}
+            </select>
             <select onchange="setAvailPeriod(this.value)" class="px-2 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-navy">
               <option value="30" ${availPeriodDays==30?'selected':''}>30 hari</option>
               <option value="90" ${availPeriodDays==90?'selected':''}>90 hari</option>
@@ -7970,9 +7994,10 @@
     window.cetakFmeaReport = cetakFmeaReport;
 
     function cetakAvailReport() {
+      const data = availFilteredData();
       const now = Date.now(), start = now - availPeriodDays * 86400000, periodH = availPeriodDays * 24;
       const byEq = {};
-      (availData || []).forEach(d => {
+      data.forEach(d => {
         const k = d.equipment_id; if (!byEq[k]) byEq[k] = { tag: d.equipment_tag, name: d.equipment_name, events: 0, downH: 0, dur: [] };
         byEq[k].events++;
         const s = new Date(d.start_at).getTime(), e = d.end_at ? new Date(d.end_at).getTime() : now;
@@ -7980,8 +8005,8 @@
         if (d.end_at) byEq[k].dur.push((e - s) / 3600000);
       });
       const eqList = Object.values(byEq).map(o => ({ ...o, avail: Math.max(0, Math.min(100, (periodH - o.downH) / periodH * 100)), mttr: o.dur.length ? o.dur.reduce((a, b) => a + b, 0) / o.dur.length : null })).sort((a, b) => a.avail - b.avail);
-      const ongoing = (availData || []).filter(d => !d.end_at).length;
-      const allDur = (availData || []).filter(d => d.end_at).map(d => Number(d.duration_hours) || 0);
+      const ongoing = data.filter(d => !d.end_at).length;
+      const allDur = data.filter(d => d.end_at).map(d => Number(d.duration_hours) || 0);
       const mttr = allDur.length ? allDur.reduce((a, b) => a + b, 0) / allDur.length : null;
       const fleetAvail = eqList.length ? eqList.reduce((a, b) => a + b.avail, 0) / eqList.length : 100;
       const fmtH = (h) => h == null ? '—' : (h < 24 ? h.toFixed(1) + ' jam' : (h / 24).toFixed(1) + ' hari');
