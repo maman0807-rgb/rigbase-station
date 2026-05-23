@@ -7757,6 +7757,7 @@
               <option value="365" ${availPeriodDays==365?'selected':''}>1 tahun</option>
             </select>
             <button onclick="openDowntimeForm()" class="bg-safety hover:bg-safety/90 text-white px-4 py-2.5 rounded-lg text-sm font-semibold whitespace-nowrap">+ Catat Downtime</button>
+            <button onclick="cetakAvailReport()" class="px-4 py-2.5 rounded-lg border border-slate-300 hover:bg-slate-50 text-sm font-semibold text-slate-700 whitespace-nowrap">🖨 Cetak</button>
           </div>
         </div>
         <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -7888,7 +7889,7 @@
     // ============================================================
     // 10u. REPORT JUSTIFIKASI (cetak/PDF + blok tanda tangan)
     // ============================================================
-    function printReportDoc(title, introHtml, tableHtml, kesimpulanHtml) {
+    function printReportDoc(title, summaryHtml, introHtml, tableHtml, kesimpulanHtml) {
       const tgl = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
       const who = escapeHtml(state.profile?.full_name || state.profile?.email || '');
       const yr = new Date().getFullYear();
@@ -7899,6 +7900,8 @@
           .kop .t{font-size:16px;font-weight:bold;color:#11335d} .kop .s{font-size:11px;color:#6b7280}
           h1{font-size:15px;text-align:center;margin:14px 0 2px;text-transform:uppercase}
           .meta{text-align:center;font-size:11px;color:#374151;margin-bottom:14px}
+          .cards{display:flex;gap:8px;margin:0 0 14px} .card{flex:1;border:1px solid #d1d5db;border-radius:6px;padding:8px 10px;text-align:center} .card .num{font-size:22px;font-weight:800;line-height:1.1} .card .lbl{font-size:9px;color:#6b7280;text-transform:uppercase;margin-top:2px}
+          .card.red{background:#fef2f2;border-color:#fecaca} .card.red .num{color:#dc2626} .card.amber{background:#fffbeb;border-color:#fde68a} .card.amber .num{color:#d97706} .card.green{background:#f0fdf4;border-color:#bbf7d0} .card.green .num{color:#16a34a} .card.navy{background:#eff6ff;border-color:#bfdbfe} .card.navy .num{color:#11335d}
           table{width:100%;border-collapse:collapse;font-size:11px;margin:8px 0}
           th,td{border:1px solid #9ca3af;padding:5px 7px;text-align:left;vertical-align:top} th{background:#e5edf5}
           .kesimpulan{margin-top:14px;padding:10px;border:1px solid #d1d5db;background:#f8fafc;border-radius:4px}
@@ -7909,6 +7912,7 @@
         <div class="kop"><div style="font-size:28px">🛢️</div><div><div class="t">PERTAMINA EP — Drilling Operations</div><div class="s">Rigbase Station · Asset Reliability (RAM)</div></div></div>
         <h1>${escapeHtml(title)}</h1>
         <div class="meta">Nomor: ........./........./${yr} &nbsp;·&nbsp; Tanggal: ${tgl}</div>
+        ${summaryHtml || ''}
         ${introHtml}
         ${tableHtml}
         <div class="kesimpulan"><b>Kesimpulan &amp; Rekomendasi</b><br>${kesimpulanHtml}</div>
@@ -7927,24 +7931,74 @@
     function cetakCsppReport() {
       const list = csppFiltered(); const n = v => Number(v) || 0;
       const habis = list.filter(x => n(x.stok) === 0).length;
-      const intro = `<p>Berikut daftar suku cadang yang memerlukan tindak lanjut pengadaan berdasarkan status stok &amp; kekritisan di sistem RAM Rigbase Station. Total <b>${list.length}</b> item ditinjau, <b>${habis}</b> di antaranya habis stok.</p>`;
-      const rows = list.slice(0, 300).map((m, i) => { const st = n(m.stok) === 0 ? 'HABIS' : (n(m.safety_stock) > 0 && n(m.stok) < n(m.safety_stock) ? 'RENDAH' : 'AMAN'); return `<tr><td style="text-align:center">${i + 1}</td><td>${escapeHtml(m.part_number || '-')}</td><td>${escapeHtml(m.description || '')}</td><td>${escapeHtml(m.category || '')}</td><td style="text-align:center">${n(m.stok)}</td><td style="text-align:center">${n(m.safety_stock) || '-'}</td><td style="text-align:center"><b>${st}</b></td></tr>`; }).join('');
+      const rendah = list.filter(x => n(x.safety_stock) > 0 && n(x.stok) > 0 && n(x.stok) < n(x.safety_stock)).length;
+      const summary = `<div class="cards">
+        <div class="card navy"><div class="num">${list.length}</div><div class="lbl">Item Ditinjau</div></div>
+        <div class="card red"><div class="num">${habis}</div><div class="lbl">Habis Stok</div></div>
+        <div class="card amber"><div class="num">${rendah}</div><div class="lbl">Di Bawah Safety</div></div>
+      </div>`;
+      const intro = `<p>Daftar suku cadang yang memerlukan tindak lanjut pengadaan, berdasarkan status stok &amp; kekritisan (kategori Critical) di sistem RAM Rigbase Station.</p>`;
+      const rows = list.slice(0, 300).map((m, i) => {
+        const s = n(m.stok), sf = n(m.safety_stock);
+        const cell = s === 0 ? '<td style="text-align:center;background:#fef2f2;color:#dc2626;font-weight:bold">HABIS</td>' : (sf > 0 && s < sf ? '<td style="text-align:center;background:#fffbeb;color:#d97706;font-weight:bold">RENDAH</td>' : '<td style="text-align:center;color:#16a34a">AMAN</td>');
+        return `<tr><td style="text-align:center">${i + 1}</td><td>${escapeHtml(m.part_number || '-')}</td><td>${escapeHtml(m.description || '')}</td><td>${escapeHtml(m.category || '')}</td><td style="text-align:center">${s}</td><td style="text-align:center">${sf || '-'}</td>${cell}</tr>`;
+      }).join('');
       const table = `<table><thead><tr><th>No</th><th>Part Number</th><th>Deskripsi</th><th>Kategori</th><th>Stok</th><th>Safety</th><th>Status</th></tr></thead><tbody>${rows || '<tr><td colspan="7" style="text-align:center">Tidak ada data</td></tr>'}</tbody></table>`;
-      const kesimpulan = `Terdapat <b>${habis} suku cadang kritis dalam kondisi habis stok</b> yang berisiko menghambat kesiapan operasi rig. Mohon persetujuan pengadaan suku cadang di atas guna menjamin ketersediaan (Availability) dan menurunkan risiko kegagalan equipment.`;
-      printReportDoc('Justifikasi Pengadaan Suku Cadang', intro, table, kesimpulan);
+      const kesimpulan = `<b style="color:#dc2626">⚠️ Dampak bila tidak ditindaklanjuti:</b> ${habis} suku cadang kritis kosong → equipment berisiko gagal tanpa pengganti → potensi <b>rig down</b> &amp; kehilangan jam operasi.<br><br><b style="color:#16a34a">✅ Permohonan:</b> mohon persetujuan pengadaan <b>${habis} item kritis</b> di atas untuk menjaga ketersediaan (Availability) &amp; keandalan equipment.`;
+      printReportDoc('Justifikasi Pengadaan Suku Cadang', summary, intro, table, kesimpulan);
     }
     window.cetakCsppReport = cetakCsppReport;
 
     function cetakFmeaReport() {
       const list = fmeaFiltered();
       const kritis = list.filter(e => Number(e.rpn) >= 200).length;
-      const intro = `<p>Berikut hasil analisa FMEA (Failure Mode &amp; Effects Analysis) yang memerlukan tindakan perbaikan. Total <b>${list.length}</b> mode kegagalan ditinjau, <b>${kritis}</b> di antaranya berkategori RPN Kritis (&ge;200).</p>`;
-      const rows = list.slice(0, 300).map((e, i) => `<tr><td style="text-align:center">${i + 1}</td><td>${escapeHtml(e.equipment_tag || '-')}<br><span style="color:#6b7280">${escapeHtml(e.equipment_name || '')}</span></td><td>${escapeHtml(e.failure_mode || '')}</td><td style="text-align:center">${e.severity}</td><td style="text-align:center">${e.occurrence}</td><td style="text-align:center">${e.detection}</td><td style="text-align:center"><b>${e.rpn}</b></td><td>${escapeHtml(e.recommended_action || '-')}</td></tr>`).join('');
+      const tinggi = list.filter(e => Number(e.rpn) >= 100 && Number(e.rpn) < 200).length;
+      const maxRpn = list.length ? Math.max(...list.map(e => Number(e.rpn) || 0)) : 0;
+      const summary = `<div class="cards">
+        <div class="card navy"><div class="num">${list.length}</div><div class="lbl">Mode Kegagalan</div></div>
+        <div class="card red"><div class="num">${kritis}</div><div class="lbl">RPN Kritis ≥200</div></div>
+        <div class="card amber"><div class="num">${tinggi}</div><div class="lbl">RPN Tinggi ≥100</div></div>
+        <div class="card red"><div class="num">${maxRpn}</div><div class="lbl">RPN Tertinggi</div></div>
+      </div>`;
+      const intro = `<p>Hasil analisa FMEA (Failure Mode &amp; Effects Analysis). RPN = Severity × Occurrence × Detection; makin tinggi = makin prioritas.</p>`;
+      const rpnCell = (r) => { r = Number(r) || 0; const st = r >= 200 ? 'background:#fef2f2;color:#dc2626' : r >= 100 ? 'background:#fffbeb;color:#d97706' : 'color:#16a34a'; return `<td style="text-align:center;font-weight:bold;${st}">${r}</td>`; };
+      const rows = list.slice(0, 300).map((e, i) => `<tr><td style="text-align:center">${i + 1}</td><td>${escapeHtml(e.equipment_tag || '-')}<br><span style="color:#6b7280">${escapeHtml(e.equipment_name || '')}</span></td><td>${escapeHtml(e.failure_mode || '')}</td><td style="text-align:center">${e.severity}</td><td style="text-align:center">${e.occurrence}</td><td style="text-align:center">${e.detection}</td>${rpnCell(e.rpn)}<td>${escapeHtml(e.recommended_action || '-')}</td></tr>`).join('');
       const table = `<table><thead><tr><th>No</th><th>Equipment</th><th>Mode Kegagalan</th><th>S</th><th>O</th><th>D</th><th>RPN</th><th>Rekomendasi Tindakan</th></tr></thead><tbody>${rows || '<tr><td colspan="8" style="text-align:center">Tidak ada data</td></tr>'}</tbody></table>`;
-      const kesimpulan = `Terdapat <b>${kritis} mode kegagalan dengan RPN kritis</b> yang memerlukan tindakan segera. Mohon persetujuan penerbitan <b>SPK (Surat Perintah Kerja)</b> untuk melaksanakan rekomendasi tindakan di atas guna menurunkan risiko kegagalan &amp; menjaga keandalan equipment.`;
-      printReportDoc('Justifikasi Tindakan Perbaikan (SPK)', intro, table, kesimpulan);
+      const kesimpulan = `<b style="color:#dc2626">⚠️ Dampak bila tidak ditindaklanjuti:</b> ${kritis} mode kegagalan kritis berpotensi menyebabkan kerusakan besar, berhentinya operasi, atau risiko keselamatan.<br><br><b style="color:#16a34a">✅ Permohonan:</b> mohon persetujuan penerbitan <b>SPK (Surat Perintah Kerja)</b> untuk melaksanakan rekomendasi tindakan di atas.`;
+      printReportDoc('Justifikasi Tindakan Perbaikan (SPK)', summary, intro, table, kesimpulan);
     }
     window.cetakFmeaReport = cetakFmeaReport;
+
+    function cetakAvailReport() {
+      const now = Date.now(), start = now - availPeriodDays * 86400000, periodH = availPeriodDays * 24;
+      const byEq = {};
+      (availData || []).forEach(d => {
+        const k = d.equipment_id; if (!byEq[k]) byEq[k] = { tag: d.equipment_tag, name: d.equipment_name, events: 0, downH: 0, dur: [] };
+        byEq[k].events++;
+        const s = new Date(d.start_at).getTime(), e = d.end_at ? new Date(d.end_at).getTime() : now;
+        byEq[k].downH += Math.max(0, Math.min(e, now) - Math.max(s, start)) / 3600000;
+        if (d.end_at) byEq[k].dur.push((e - s) / 3600000);
+      });
+      const eqList = Object.values(byEq).map(o => ({ ...o, avail: Math.max(0, Math.min(100, (periodH - o.downH) / periodH * 100)), mttr: o.dur.length ? o.dur.reduce((a, b) => a + b, 0) / o.dur.length : null })).sort((a, b) => a.avail - b.avail);
+      const ongoing = (availData || []).filter(d => !d.end_at).length;
+      const allDur = (availData || []).filter(d => d.end_at).map(d => Number(d.duration_hours) || 0);
+      const mttr = allDur.length ? allDur.reduce((a, b) => a + b, 0) / allDur.length : null;
+      const fleetAvail = eqList.length ? eqList.reduce((a, b) => a + b.avail, 0) / eqList.length : 100;
+      const fmtH = (h) => h == null ? '—' : (h < 24 ? h.toFixed(1) + ' jam' : (h / 24).toFixed(1) + ' hari');
+      const summary = `<div class="cards">
+        <div class="card ${fleetAvail >= 95 ? 'green' : fleetAvail >= 85 ? 'amber' : 'red'}"><div class="num">${fleetAvail.toFixed(1)}%</div><div class="lbl">Availability rata²</div></div>
+        <div class="card ${ongoing ? 'red' : 'green'}"><div class="num">${ongoing}</div><div class="lbl">Sedang Down</div></div>
+        <div class="card navy"><div class="num">${fmtH(mttr)}</div><div class="lbl">MTTR</div></div>
+        <div class="card navy"><div class="num">${availPeriodDays} hari</div><div class="lbl">Periode</div></div>
+      </div>`;
+      const intro = `<p>Ringkasan ketersediaan (Availability) equipment dalam ${availPeriodDays} hari terakhir, berdasarkan catatan downtime di sistem RAM.</p>`;
+      const availCell = (p) => { const st = p >= 95 ? 'color:#16a34a' : p >= 85 ? 'background:#fffbeb;color:#d97706' : 'background:#fef2f2;color:#dc2626'; return `<td style="text-align:center;font-weight:bold;${st}">${p.toFixed(1)}%</td>`; };
+      const rows = eqList.slice(0, 300).map((o, i) => `<tr><td style="text-align:center">${i + 1}</td><td>${escapeHtml(o.tag || '-')}<br><span style="color:#6b7280">${escapeHtml(o.name || '')}</span></td>${availCell(o.avail)}<td style="text-align:center">${o.events}</td><td style="text-align:center">${fmtH(o.downH)}</td><td style="text-align:center">${fmtH(o.mttr)}</td></tr>`).join('');
+      const table = `<table><thead><tr><th>No</th><th>Equipment</th><th>Availability</th><th>Jml Down</th><th>Total Down</th><th>MTTR</th></tr></thead><tbody>${rows || '<tr><td colspan="6" style="text-align:center">Belum ada catatan downtime</td></tr>'}</tbody></table>`;
+      const kesimpulan = `<b style="color:#dc2626">⚠️ Dampak:</b> equipment dengan availability rendah / sedang down menurunkan kesiapan rig &amp; berpotensi menghambat operasi.<br><br><b style="color:#16a34a">✅ Permohonan:</b> mohon dukungan mempercepat perbaikan (suku cadang/SPK) pada equipment availability terendah di atas guna memulihkan kesiapan operasi.`;
+      printReportDoc('Laporan Availability Equipment', summary, intro, table, kesimpulan);
+    }
+    window.cetakAvailReport = cetakAvailReport;
 
     // ============================================================
     // 11. BOOT
