@@ -6830,10 +6830,11 @@
     let mobFilter = { unit_id: '', category: '', q: '' };
     let _mobDeb;
     function mobRowHtml(r) {
+      const pdf = r.pdf_storage_path ? ` <button onclick="openJmpPdf('${r.pdf_storage_path}')" class="text-navy hover:underline" title="Buka PDF JMP">📎</button>` : '';
       return `<tr class="border-b border-slate-100">
         <td class="px-3 py-2 text-sm">${escapeHtml(r.mob_date || '—')}</td>
         <td class="px-3 py-2 text-sm font-medium">${escapeHtml(r.unit_name || '—')}</td>
-        <td class="px-3 py-2 text-sm text-slate-600">${escapeHtml(r.origin || '?')} → ${escapeHtml(r.destination || '?')}</td>
+        <td class="px-3 py-2 text-sm text-slate-600">${escapeHtml(r.origin || '?')} → ${escapeHtml(r.destination || '?')}${pdf}</td>
         <td class="px-3 py-2 text-sm font-bold">${r.total_score}</td>
         <td class="px-3 py-2">${stressBadge(r.category)}</td>
       </tr>`;
@@ -6843,7 +6844,7 @@
       if (!body) return;
       body.innerHTML = '<tr><td colspan="5" class="px-3 py-4 text-center text-slate-400 text-sm">Memuat…</td></tr>';
       let qy = state.supabase.from('mobilization_records')
-        .select('mob_date, unit_name, origin, destination, total_score, category')
+        .select('mob_date, unit_name, origin, destination, total_score, category, pdf_storage_path')
         .order('mob_date', { ascending: false }).limit(200);
       if (mobFilter.unit_id) qy = qy.eq('unit_id', Number(mobFilter.unit_id));
       if (mobFilter.category) qy = qy.eq('category', mobFilter.category);
@@ -6860,6 +6861,92 @@
     window.setMobFilter = setMobFilter;
     window.setMobFilterQ = setMobFilterQ;
     window.reloadMobList = reloadMobList;
+
+    // ---- PDF JMP: load pdf.js (CDN), ekstraksi teks, parse, auto-isi ----
+    async function loadPdfJs() {
+      if (window.pdfjsLib) return window.pdfjsLib;
+      await new Promise((res, rej) => {
+        const s = document.createElement('script');
+        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+        s.onload = res; s.onerror = () => rej(new Error('Gagal load pdf.js (cek koneksi)'));
+        document.head.appendChild(s);
+      });
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      return window.pdfjsLib;
+    }
+    async function extractPdfText(file) {
+      const lib = await loadPdfJs();
+      const buf = await file.arrayBuffer();
+      const pdf = await lib.getDocument({ data: buf }).promise;
+      let text = '';
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        text += content.items.map(it => it.str).join(' ') + '\n';
+      }
+      return text;
+    }
+    function parseJmpText(text) {
+      const num = (s) => s ? parseFloat(String(s).replace(',', '.')) : null;
+      const ba = (text.match(/BA[-\s]?[A-Z0-9][A-Z0-9\-]+/i) || [])[0] || '';
+      let origin = (text.match(/DARI\s+LOKASI\s*:?\s*([A-Z0-9\-]+)/i) || [])[1]
+        || (ba.match(/BA-?([A-Z0-9]+)-/i) || [])[1] || '';
+      let dest = (text.match(/KE\s+LOKASI\s*:?\s*([A-Z0-9\-]+)/i) || [])[1]
+        || (ba.match(/-([A-Z0-9]+)\s*$/i) || [])[1] || '';
+      let dist = null;
+      const totalMatch = text.match(/total\s*(?:jarak)?\s*:?\s*([\d.,]+)\s*km/i);
+      if (totalMatch) dist = num(totalMatch[1]);
+      else {
+        const kms = [...text.matchAll(/([\d]+[.,]?[\d]*)\s*km/gi)].map(m => num(m[1])).filter(n => n);
+        if (kms.length) dist = Math.max(...kms);
+      }
+      const blindSpots = (text.match(/blind\s*spot/gi) || []).length;
+      const railwayCrossings = (text.match(/re?ll?\s*ka|kereta\s*api/gi) || []).length;
+      const bridges = (text.match(/jembatan/gi) || []).length;
+      let roadDamage = 0;
+      [...text.matchAll(/rusak[^.\n]{0,40}?([\d]+[.,]?[\d]*)\s*km/gi)].forEach(m => { const v = num(m[1]); if (v) roadDamage += v; });
+      return { ba, origin, dest, dist, blindSpots, railwayCrossings, bridges, roadDamage: Math.round(roadDamage * 100) / 100 };
+    }
+    function tryDetectRig(text) {
+      const t = text.toLowerCase().replace(/[\s.\-#]/g, '');
+      const rigs = state.parentUnits.filter(u => u.type === 'Rig');
+      for (const u of rigs) {
+        const key = u.name.toLowerCase().replace(/[\s.\-#]/g, '').replace(/^bw/, '');
+        if (key.length >= 4 && t.includes(key)) {
+          const sel = document.getElementById('mob-unit');
+          if (sel) { sel.value = u.id; loadRigEquipment(u.id); }
+          return ` <span class="text-green-600">Rig terdeteksi: ${escapeHtml(u.name)}.</span>`;
+        }
+      }
+      return ' <span class="text-amber-600">Rig tidak terdeteksi — pilih manual.</span>';
+    }
+    async function handleJmpUpload(input) {
+      const file = input.files && input.files[0];
+      const status = document.getElementById('mob-pdf-status');
+      if (!file) return;
+      window.__jmpFile = file; window.__jmpFileName = file.name;
+      status.textContent = 'Membaca PDF…';
+      try {
+        const text = await extractPdfText(file);
+        const d = parseJmpText(text);
+        const setv = (id, v) => { const el = document.getElementById(id); if (el && v != null && v !== '') el.value = v; };
+        setv('mob-jmp', d.ba); setv('mob-origin', d.origin); setv('mob-dest', d.dest);
+        if (d.dist != null) setv('mob-distance', d.dist);
+        if (d.roadDamage) setv('mob-roaddamage', d.roadDamage);
+        setv('mob-blind', d.blindSpots); setv('mob-rail', d.railwayCrossings); setv('mob-bridge', d.bridges);
+        const rigMsg = tryDetectRig(text);
+        renderStressPreview();
+        status.innerHTML = `✅ Terbaca: jarak ${d.dist ?? '?'}km · rusak ${d.roadDamage}km · blind ${d.blindSpots} · rel ${d.railwayCrossings} · jembatan ${d.bridges}.${rigMsg}<br><span class="text-amber-600">Periksa angkanya & lengkapi data aktual (durasi/cuaca/insiden) sebelum simpan.</span>`;
+      } catch (e) {
+        status.innerHTML = `<span class="text-red-600">Gagal baca PDF: ${escapeHtml(e.message)}. Isi manual saja.</span>`;
+      }
+    }
+    async function openJmpPdf(path) {
+      try { const url = await getSignedUrl('jmp-docs', path, 3600); window.open(url, '_blank'); }
+      catch (e) { toast('Gagal buka PDF: ' + e.message, 'error'); }
+    }
+    window.handleJmpUpload = handleJmpUpload;
+    window.openJmpPdf = openJmpPdf;
 
     // Tab "Riwayat Stress" di detail equipment (query difilter equipment_id, ringan)
     function renderStressHistoryTab(eq, c) {
@@ -6925,11 +7012,17 @@
 
     function openMobEntryForm() {
       if (!isSrMekanikOrAbove()) { toast('Khusus Sr Mekanik ke atas.', 'warn'); return; }
+      window.__jmpFile = null; window.__jmpFileName = null;
       const rigs = state.parentUnits.filter(u => u.type === 'Rig');
       const opts = `<option value="">— pilih rig —</option>` + rigs.map(u => `<option value="${u.id}">${escapeHtml(u.name)}</option>`).join('');
       const num = (id, ph, val = '') => `<input id="${id}" type="number" step="any" min="0" value="${val}" placeholder="${ph}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-navy outline-none" oninput="renderStressPreview()">`;
       const body = `
         <div class="space-y-4">
+          <div class="border border-dashed border-slate-300 rounded-lg p-3 bg-slate-50">
+            <label class="block text-xs font-semibold text-slate-500 uppercase mb-1">📤 Upload JMP PDF (opsional — auto-isi form)</label>
+            <input type="file" id="mob-pdf" accept="application/pdf" onchange="handleJmpUpload(this)" class="text-xs w-full">
+            <div id="mob-pdf-status" class="text-xs text-slate-500 mt-1"></div>
+          </div>
           <div>
             <label class="block text-xs font-semibold text-slate-500 uppercase mb-1">Rig yang Pindah *</label>
             <select id="mob-unit" onchange="loadRigEquipment(this.value)" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-navy outline-none">${opts}</select>
@@ -7025,21 +7118,30 @@
       if (!(Number(f.distance) > 0)) { toast('Isi total jarak (km).', 'warn'); return; }
       const sc = calcStress(f);
       const v = (id) => (document.getElementById(id)?.value || '').trim() || null;
-      const payload = {
-        unit_id: Number(unitId), unit_name: getParentUnitName(Number(unitId)),
-        jmp_number: v('mob-jmp'), origin: v('mob-origin'), destination: v('mob-dest'),
-        total_distance: Number(f.distance) || null, total_road_damage: Number(f.roadDamage) || 0,
-        blind_spots: Number(f.blindSpots) || 0, railway_crossings: Number(f.railwayCrossings) || 0, bridges: Number(f.bridges) || 0,
-        total_lots: Number(f.totalLots) || null, foco_units: Number(f.focoUnits) || null, crane_capacity: f.craneCapacity,
-        mob_date: v('mob-date'), actual_duration: Number(f.duration) || null,
-        weather: f.weather, incident: f.incident, incident_notes: v('mob-incnote'),
-        s1_distance: sc.s1_distance, s2_road: sc.s2_road, s3_route: sc.s3_route, s4_transport: sc.s4_transport,
-        s5_duration: sc.s5_duration, s6_weather: sc.s6_weather, s7_incident: sc.s7_incident,
-        total_score: sc.total, category: sc.category, equivalent_hours: sc.equivalentHours,
-        source: 'MANUAL_ENTRY', status: 'submitted',
-        entered_by: state.user.id, entered_by_name: state.profile?.full_name || state.profile?.email || '',
-      };
       try {
+        // Upload PDF JMP (kalau ada) — graceful: gagal upload tidak membatalkan simpan
+        let pdfPath = null, pdfName = null, source = 'MANUAL_ENTRY';
+        if (window.__jmpFile) {
+          source = 'PDF_UPLOAD'; pdfName = window.__jmpFileName || window.__jmpFile.name;
+          const path = `${unitId}/${Date.now()}_${(window.__jmpFile.name || 'jmp.pdf').replace(/[^\w.\-]/g, '_')}`;
+          const { error: upErr } = await state.supabase.storage.from('jmp-docs').upload(path, window.__jmpFile, { upsert: false });
+          if (upErr) toast('Catatan: PDF tidak tersimpan (cek bucket jmp-docs). Data tetap disimpan.', 'warn');
+          else pdfPath = path;
+        }
+        const payload = {
+          unit_id: Number(unitId), unit_name: getParentUnitName(Number(unitId)),
+          jmp_number: v('mob-jmp'), origin: v('mob-origin'), destination: v('mob-dest'),
+          total_distance: Number(f.distance) || null, total_road_damage: Number(f.roadDamage) || 0,
+          blind_spots: Number(f.blindSpots) || 0, railway_crossings: Number(f.railwayCrossings) || 0, bridges: Number(f.bridges) || 0,
+          total_lots: Number(f.totalLots) || null, foco_units: Number(f.focoUnits) || null, crane_capacity: f.craneCapacity,
+          mob_date: v('mob-date'), actual_duration: Number(f.duration) || null,
+          weather: f.weather, incident: f.incident, incident_notes: v('mob-incnote'),
+          s1_distance: sc.s1_distance, s2_road: sc.s2_road, s3_route: sc.s3_route, s4_transport: sc.s4_transport,
+          s5_duration: sc.s5_duration, s6_weather: sc.s6_weather, s7_incident: sc.s7_incident,
+          total_score: sc.total, category: sc.category, equivalent_hours: sc.equivalentHours,
+          source, pdf_file_name: pdfName, pdf_storage_path: pdfPath, status: 'submitted',
+          entered_by: state.user.id, entered_by_name: state.profile?.full_name || state.profile?.email || '',
+        };
         const { data: rec, error } = await state.supabase.from('mobilization_records').insert(payload).select('id').single();
         if (error) throw error;
         const eqRows = checked.map(c => ({
@@ -7048,6 +7150,7 @@
         }));
         const { error: e2 } = await state.supabase.from('mobilization_equipment').insert(eqRows);
         if (e2) throw e2;
+        window.__jmpFile = null; window.__jmpFileName = null;
         toast(`Tersimpan. Skor ${sc.total} (${STRESS_CAT_META[sc.category].label}) → ${eqRows.length} equipment.`, 'success');
         closeModal();
         navigate('stress');
