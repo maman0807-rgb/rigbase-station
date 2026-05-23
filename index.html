@@ -7843,7 +7843,7 @@
         <div class="bg-white rounded-xl border border-slate-200 p-5">
           <div class="flex items-start justify-between flex-wrap gap-3 mb-1">
             <h3 class="text-lg font-bold text-slate-900">📈 Asset Performance</h3>
-            <button onclick="cetakLaporanGabungan()" class="bg-navy hover:bg-navy-700 text-white px-4 py-2 rounded-lg text-sm font-semibold whitespace-nowrap">🖨 Cetak Laporan Gabungan</button>
+            <button onclick="openLaporanGabunganPicker()" class="bg-navy hover:bg-navy-700 text-white px-4 py-2 rounded-lg text-sm font-semibold whitespace-nowrap">🖨 Cetak Laporan Gabungan</button>
           </div>
           <p class="text-sm text-slate-600 mb-3">Modul analisa keandalan & ketersediaan aset — saling terhubung jadi satu alur keputusan perawatan:</p>
           <div class="text-xs bg-slate-50 border border-slate-200 rounded-lg p-3 leading-relaxed">
@@ -8275,7 +8275,36 @@
     window.cetakAvailReport = cetakAvailReport;
 
     // ===== Laporan GABUNGAN: Stress + FMEA + CSPP + Availability dlm 1 dokumen =====
-    async function cetakLaporanGabungan() {
+    function openLaporanGabunganPicker() {
+      const opt = (id, label) => `<label class="flex items-center gap-2 text-sm py-1.5 cursor-pointer"><input type="checkbox" id="lg-${id}" checked> ${label}</label>`;
+      const body = `<div class="space-y-1">
+        <p class="text-xs text-slate-500 mb-2">Pilih bagian yang ingin dimasukkan ke laporan gabungan:</p>
+        ${opt('stress', '🚛 Stress Score')}
+        ${opt('fmea', '⚠️ FMEA')}
+        ${opt('cspp', '📦 CSPP (suku cadang kritis)')}
+        ${opt('avail', '🟢 Availability')}
+      </div>`;
+      const footer = `
+        <button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
+        <button onclick="lanjutLaporanGabungan()" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy-700 text-white text-sm font-semibold">Lanjut →</button>`;
+      openModal({ title: 'Susun Laporan Gabungan', body, footer, maxWidth: 'max-w-sm' });
+    }
+    function lanjutLaporanGabungan() {
+      const sel = {
+        stress: document.getElementById('lg-stress')?.checked,
+        fmea: document.getElementById('lg-fmea')?.checked,
+        cspp: document.getElementById('lg-cspp')?.checked,
+        avail: document.getElementById('lg-avail')?.checked,
+      };
+      if (!sel.stress && !sel.fmea && !sel.cspp && !sel.avail) { toast('Pilih minimal 1 bagian.', 'warn'); return; }
+      closeModal();
+      cetakLaporanGabungan(sel);
+    }
+    window.openLaporanGabunganPicker = openLaporanGabunganPicker;
+    window.lanjutLaporanGabungan = lanjutLaporanGabungan;
+
+    async function cetakLaporanGabungan(sel) {
+      sel = sel || { stress: true, fmea: true, cspp: true, avail: true };
       let su = [], se = [], fm = [], mats = [], dt = [], eqAll = [];
       try {
         const r = await Promise.all([
@@ -8327,8 +8356,12 @@
       const sAvail = sec('🟢 4. Availability — Kesiapan Equipment') + `<p>Availability rata-rata fleet (365 hari): <b>${fleetAvail.toFixed(1)}%</b> · Sedang down: <b>${sedangDown}</b>.</p>`
         + (avRows ? tbl(['#', 'Equipment', 'Availability', 'Down'], avRows) : '<p style="color:#6b7280">Belum ada catatan downtime.</p>');
 
-      const bodyHtml = sStress + sFmea + sCspp + sAvail;
-      const kesimpulan = `Laporan ini merangkum keandalan & ketersediaan aset (RAM). <b style="color:#dc2626">Prioritas tindak lanjut:</b> ${kritis} mode kegagalan kritis (FMEA), ${critHabis.length} suku cadang kritis habis (CSPP), ${sedangDown} equipment sedang down. Mohon dukungan persetujuan untuk perbaikan & pengadaan terkait.`;
+      const bodyHtml = (sel.stress ? sStress : '') + (sel.fmea ? sFmea : '') + (sel.cspp ? sCspp : '') + (sel.avail ? sAvail : '');
+      const prio = [];
+      if (sel.fmea) prio.push(`${kritis} mode kegagalan kritis (FMEA)`);
+      if (sel.cspp) prio.push(`${critHabis.length} suku cadang kritis habis (CSPP)`);
+      if (sel.avail) prio.push(`${sedangDown} equipment sedang down (Availability)`);
+      const kesimpulan = `Laporan ini merangkum keandalan & ketersediaan aset (RAM).${prio.length ? ` <b style="color:#dc2626">Prioritas tindak lanjut:</b> ${prio.join(', ')}.` : ''} Mohon dukungan persetujuan untuk perbaikan & pengadaan terkait.`;
       openSignDialog({ title: 'Laporan Asset Performance (RAM)', type: 'RAM', bodyHtml, kesimpulan });
     }
     window.cetakLaporanGabungan = cetakLaporanGabungan;
