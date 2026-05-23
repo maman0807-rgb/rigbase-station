@@ -2284,7 +2284,11 @@
 
       try {
         const { data, error } = await state.supabase.functions.invoke('create-user', { body: payload });
-        if (error) throw error;
+        if (error) {
+          let detail = error.message || 'Unknown error';
+          try { const b = await error.context?.json?.(); if (b && b.error) detail = b.error; } catch (_) {}
+          throw new Error(detail);
+        }
         if (data && !data.ok) throw new Error(data.error || 'Unknown error');
 
         toast(`✅ User ${payload.email} berhasil dibuat sebagai ${payload.role}.`, 'success');
