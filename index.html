@@ -1325,8 +1325,9 @@
       let lastGroup = null;
       visibleNavItems().forEach(item => {
         if (item.group && item.group !== lastGroup) {
+          const first = nav.children.length === 0;
           const h = document.createElement('div');
-          h.className = 'px-3 pt-4 pb-1 text-[10px] font-bold uppercase tracking-wider text-blue-300/70';
+          h.className = `px-3 pb-1 text-[10px] font-bold uppercase tracking-widest text-blue-200/70 ${first ? 'pt-1' : 'pt-4 mt-2 border-t border-white/10'}`;
           h.textContent = item.group;
           nav.appendChild(h);
           lastGroup = item.group;
