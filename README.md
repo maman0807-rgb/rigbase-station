@@ -1,8 +1,9 @@
-# 🛢️ Rigbase Station
+# 🛢️ eRAMHoist
 
-Web app database equipment rig drilling untuk tim operasional Pertamina EP.
+Web app database equipment & Asset Reliability (RAM) untuk Hoist & Heavy Equipment — PT Pertamina Hulu Rokan.
 
-**Live app:** [https://maman0807-rgb.github.io/rigbase-station/](https://maman0807-rgb.github.io/rigbase-station/)
+**Live app:** [https://eramhoist.vercel.app](https://eramhoist.vercel.app)
+**(URL lama `rigbase.vercel.app` otomatis redirect ke sini.)**
 
 ---
 
