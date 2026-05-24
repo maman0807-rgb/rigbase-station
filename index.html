@@ -8357,7 +8357,7 @@
       const sedang = list.filter(e => { const r = Number(e.rpn) || 0; return r >= 40 && r < 100; }).length;
       const rendah = list.filter(e => (Number(e.rpn) || 0) < 40).length;
       const chart = chartBars('Distribusi RPN', [{ label: 'Kritis ≥200', value: kritis, color: '#dc2626' }, { label: 'Tinggi ≥100', value: tinggi, color: '#d97706' }, { label: 'Sedang ≥40', value: sedang, color: '#ca8a04' }, { label: 'Rendah <40', value: rendah, color: '#16a34a' }]);
-      openSignDialog({ title: 'Justifikasi Tindakan Perbaikan (SPK)', type: 'FMEA', summary, chart, intro, table, kesimpulan });
+      openSignDialog({ title: 'Justifikasi Tindakan Perbaikan', type: 'FMEA', summary, chart, intro, table, kesimpulan });
     }
     window.cetakFmeaReport = cetakFmeaReport;
 
@@ -8388,7 +8388,7 @@
       const availCell = (p) => { const st = p >= 95 ? 'color:#16a34a' : p >= 85 ? 'background:#fffbeb;color:#d97706' : 'background:#fef2f2;color:#dc2626'; return `<td style="text-align:center;font-weight:bold;${st}">${p.toFixed(1)}%</td>`; };
       const rows = eqList.slice(0, 300).map((o, i) => `<tr><td style="text-align:center">${i + 1}</td><td>${escapeHtml(o.tag || '-')}<br><span style="color:#6b7280">${escapeHtml(o.name || '')}</span></td>${availCell(o.avail)}<td style="text-align:center">${o.events}</td><td style="text-align:center">${fmtH(o.downH)}</td><td style="text-align:center">${fmtH(o.mttr)}</td></tr>`).join('');
       const table = `<table><thead><tr><th>No</th><th>Equipment</th><th>Availability</th><th>Jml Down</th><th>Total Down</th><th>MTTR</th></tr></thead><tbody>${rows || '<tr><td colspan="6" style="text-align:center">Belum ada catatan downtime</td></tr>'}</tbody></table>`;
-      const kesimpulan = `<b style="color:#dc2626">⚠️ Dampak:</b> equipment dengan availability rendah / sedang down menurunkan kesiapan rig &amp; berpotensi menghambat operasi.<br><br><b style="color:#16a34a">✅ Permohonan:</b> mohon dukungan mempercepat perbaikan (suku cadang/SPK) pada equipment availability terendah di atas guna memulihkan kesiapan operasi.`;
+      const kesimpulan = `<b style="color:#dc2626">⚠️ Dampak:</b> equipment dengan availability rendah / sedang down berpotensi menghambat operasi.<br><br><b style="color:#16a34a">✅ Permohonan:</b> mohon dukungan mempercepat perbaikan (suku cadang/SPK) pada equipment availability terendah di atas guna memulihkan kesiapan operasi.`;
       const catMap = {}; data.forEach(d2 => { const c = DT_CAT[d2.category] || 'Lainnya'; catMap[c] = (catMap[c] || 0) + (Number(d2.duration_hours) || 0); });
       const chart = chartBars('Jam Downtime per Penyebab', Object.entries(catMap).map(([k, v]) => ({ label: k, value: Math.round(v), color: '#11335d' })));
       openSignDialog({ title: 'Laporan Availability Equipment', type: 'AVAIL', summary, chart, intro, table, kesimpulan });
