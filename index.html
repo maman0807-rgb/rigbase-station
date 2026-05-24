@@ -7997,7 +7997,7 @@
       if (!state.reliabilityTab) state.reliabilityTab = 'overview';
       const div = document.createElement('div');
       div.className = 'page space-y-4';
-      const pillars = [['reliability', '🛡️ Reliability'], ['availability', '🟢 Availability'], ['maintenance', '🛠️ Maintenance']];
+      const pillars = [['reliability', '🛡️ Reliability'], ['availability', '🟢 Availability'], ['maintenance', '🛠️ Maintenance'], ['kelayakan', '📋 Kelayakan']];
       div.innerHTML = `
         <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           <div class="flex border-b border-slate-200 overflow-x-auto" id="ram-tabs">
@@ -8015,6 +8015,7 @@
       const t = state.ramTab;
       if (t === 'availability') { host.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat…</div>'; renderAvailabilityPage(host); return; }
       if (t === 'maintenance') { host.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat…</div>'; renderRamMaintenance(host); return; }
+      if (t === 'kelayakan') { host.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat…</div>'; renderKelayakanPage(host); return; }
       // Pilar Reliability → sub-tab Overview / Stress / FMEA / CSPP
       const sub = [['overview', '📊 Overview'], ['stress', '🚛 Stress'], ['fmea', '⚠️ FMEA'], ['cspp', '📦 CSPP']];
       host.innerHTML = `
@@ -8100,8 +8101,10 @@
     // 10v. AVAILABILITY — downtime tracking & uptime % (analisa Sr Mekanik+)
     // ============================================================
     const DT_CAT = {
-      breakdown: 'Breakdown', tunggu_spare: 'Tunggu Spare', pm: 'PM', mobilisasi: 'Mobilisasi', lainnya: 'Lainnya',
+      breakdown: 'Breakdown', troubleshoot: 'Troubleshoot', tunggu_spare: 'Tunggu Spare', pm: 'PM', mobilisasi: 'Mobilisasi', lainnya: 'Lainnya',
     };
+    // Kategori yang dihitung sebagai KEJADIAN kerusakan (penyebut MTBF). Tunggu spare = durasi saja, bukan event baru.
+    const FAILURE_CATS = ['breakdown', 'troubleshoot'];
     let availPeriodDays = 365;
     let availData = [];
     let availFilter = { unit_id: '', category: '' };
@@ -8118,6 +8121,110 @@
     function availPct(p) { p = Number(p) || 0; const cls = p >= 95 ? 'bg-green-100 text-green-700' : p >= 85 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'; return `<span class="px-2 py-0.5 rounded-full text-xs font-semibold ${cls}">${p.toFixed(1)}%</span>`; }
     function fmtH(h) { h = Number(h) || 0; if (h < 24) return h.toFixed(1) + ' jam'; return (h / 24).toFixed(1) + ' hari'; }
     function toLocalInput(iso) { if (!iso) return ''; const d = new Date(iso); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); }
+
+    // ============================================================
+    // KELAYAKAN ARMADA (Fase 2) — gabung UMUR (lifecycle) + KEANDALAN (MTBF-HM/Avail)
+    // ============================================================
+    async function renderKelayakanPage(host) {
+      let eqAll = [], dtAll = [];
+      try {
+        const [eq, dt] = await Promise.all([
+          state.supabase.from('equipment')
+            .select('id, tag_number, nama_equipment, assigned_unit_id, running_hours, toh_interval_hours, goh_interval_hours, economic_life_hours, last_toh_hours, last_goh_hours')
+            .gt('running_hours', 0),
+          state.supabase.from('downtime_events').select('*'),
+        ]);
+        if (eq.error) throw eq.error; if (dt.error) throw dt.error;
+        eqAll = eq.data || []; dtAll = dt.data || [];
+      } catch (e) {
+        host.innerHTML = `<div class="bg-red-50 text-red-700 p-4 rounded-xl text-sm">Gagal memuat: ${escapeHtml(e.message)}</div>`;
+        return;
+      }
+      const periodDays = 365, now = Date.now(), start = now - periodDays * 86400000, periodH = periodDays * 24;
+      const dAgg = {};
+      dtAll.forEach(d => {
+        const k = d.equipment_id; if (!dAgg[k]) dAgg[k] = { fails: 0, downH: 0 };
+        if (FAILURE_CATS.includes(d.category)) dAgg[k].fails++;
+        const s = new Date(d.start_at).getTime(), e2 = d.end_at ? new Date(d.end_at).getTime() : now;
+        dAgg[k].downH += Math.max(0, Math.min(e2, now) - Math.max(s, start)) / 3600000;
+      });
+      const VW = { replace: 0, watch: 1, keep: 2 };
+      const rows = eqAll.map(x => {
+        const lc = computeLifecycle(x);
+        const d = dAgg[x.id] || { fails: 0, downH: 0 };
+        const rh = Number(x.running_hours) || 0;
+        const mtbf = d.fails > 0 ? rh / d.fails : null;                 // MTBF(HM) seumur hidup = jam jalan ÷ kerusakan
+        const avail = Math.max(0, Math.min(100, (periodH - d.downH) / periodH * 100));
+        const cycle = Number(x.toh_interval_hours) || Number(x.goh_interval_hours) || 0;
+        let rel = 'na';
+        if (d.fails === 0) rel = 'green';
+        else if (cycle > 0) rel = mtbf < 0.5 * cycle ? 'red' : (mtbf < cycle ? 'amber' : 'green');
+        const umur = lc ? lc.verdict : null;                           // replace/watch/keep/null
+        let v = 'keep';
+        if (umur === 'replace' && (rel === 'red' || rel === 'amber')) v = 'replace';
+        else if (umur === 'replace' || rel === 'red' || umur === 'watch') v = 'watch';
+        return { x, lc, d, rh, mtbf, avail, cycle, rel, umur, v };
+      }).sort((a, b) => VW[a.v] - VW[b.v] || a.avail - b.avail);
+
+      const nRep = rows.filter(r => r.v === 'replace').length;
+      const nWatch = rows.filter(r => r.v === 'watch').length;
+      const nKeep = rows.filter(r => r.v === 'keep').length;
+      const vBadge = (v) => v === 'replace' ? '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700">🔴 Kandidat ganti</span>'
+        : v === 'watch' ? '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700">🟡 Pantau</span>'
+        : '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700">🟢 Sehat</span>';
+
+      const tbody = rows.map((r, i) => {
+        const lc = r.lc;
+        const umurTxt = lc && lc.eco ? `${Math.round(lc.eco.pct)}%` : '—';
+        const gohTxt = lc && lc.goh ? (lc.goh.remaining < 0 ? `<span class="text-red-600">lewat ${fmtNumber(-lc.goh.remaining)}</span>` : fmtNumber(lc.goh.remaining)) : '—';
+        const mtbfTxt = r.mtbf != null ? fmtNumber(Math.round(r.mtbf), ' jam') : (r.d.fails === 0 ? '<span class="text-slate-400">blm rusak</span>' : '—');
+        return `<tr class="border-b border-slate-100 hover:bg-slate-50 cursor-pointer" onclick="setEquipmentView('detail','${r.x.id}'); navigate('equipment')">
+          <td class="px-3 py-2 text-sm text-slate-500">${i + 1}</td>
+          <td class="px-3 py-2 text-sm font-mono font-bold text-navy whitespace-nowrap">${escapeHtml(r.x.tag_number)}</td>
+          <td class="px-3 py-2 text-sm text-slate-600 whitespace-nowrap">${escapeHtml(getParentUnitName(r.x.assigned_unit_id))}</td>
+          <td class="px-3 py-2 text-sm text-right font-semibold whitespace-nowrap">${fmtNumber(r.rh, ' jam')}</td>
+          <td class="px-3 py-2 text-sm text-right">${umurTxt}</td>
+          <td class="px-3 py-2 text-sm text-right whitespace-nowrap">${gohTxt}</td>
+          <td class="px-3 py-2 text-sm text-right">${r.d.fails}</td>
+          <td class="px-3 py-2 text-sm text-right whitespace-nowrap">${mtbfTxt}</td>
+          <td class="px-3 py-2 text-center">${availPct(r.avail)}</td>
+          <td class="px-3 py-2 text-center whitespace-nowrap">${vBadge(r.v)}</td>
+        </tr>`;
+      }).join('');
+
+      host.innerHTML = `
+        <div class="space-y-4">
+          <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+            <h3 class="text-lg font-bold text-slate-900">📋 Kelayakan Armada — Layak Maintain vs Ganti</h3>
+            <p class="text-sm text-slate-500 mt-1">Gabungan <b>umur jam</b> (TOH/GOH/umur ekonomis) + <b>keandalan</b> (MTBF berbasis HM &amp; Availability). Klik baris → detail unit.</p>
+          </div>
+          <div class="grid grid-cols-3 gap-3">
+            <div class="bg-white rounded-xl border border-slate-200 p-4 text-center"><div class="text-2xl font-extrabold text-green-700">${nKeep}</div><div class="text-xs text-slate-500">🟢 Sehat</div></div>
+            <div class="bg-white rounded-xl border border-slate-200 p-4 text-center"><div class="text-2xl font-extrabold text-amber-600">${nWatch}</div><div class="text-xs text-slate-500">🟡 Pantau</div></div>
+            <div class="bg-white rounded-xl border border-slate-200 p-4 text-center"><div class="text-2xl font-extrabold text-red-700">${nRep}</div><div class="text-xs text-slate-500">🔴 Kandidat ganti</div></div>
+          </div>
+          <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto">
+            <table class="w-full">
+              <thead><tr class="bg-slate-50 border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+                <th class="px-3 py-2">#</th><th class="px-3 py-2">Tag</th><th class="px-3 py-2">Rig</th>
+                <th class="px-3 py-2 text-right">HM</th><th class="px-3 py-2 text-right">Umur</th>
+                <th class="px-3 py-2 text-right">Sisa GOH</th><th class="px-3 py-2 text-right">Rusak</th>
+                <th class="px-3 py-2 text-right">MTBF(HM)</th><th class="px-3 py-2 text-center">Avail</th>
+                <th class="px-3 py-2 text-center">Verdict</th>
+              </tr></thead>
+              <tbody>${tbody || '<tr><td colspan="10" class="px-3 py-6 text-center text-slate-400 text-sm">Belum ada engine ber-HM dengan interval terisi. Isi interval TOH/GOH di data equipment.</td></tr>'}</tbody>
+            </table>
+          </div>
+          <div class="bg-blue-50 border border-blue-200 rounded-xl p-4 text-xs text-slate-600 leading-relaxed">
+            <b>Cara baca (transparan &amp; bisa dipertanggungjawabkan):</b><br>
+            • <b>Umur</b> = jam jalan vs batas ekonomis/GOH (Fase 1).<br>
+            • <b>MTBF(HM)</b> = jam jalan ÷ jumlah kerusakan (breakdown + troubleshoot). Dibandingkan ke siklus TOH unit: di bawah ½ siklus = keandalan rendah.<br>
+            • 🔴 <b>Kandidat ganti</b> = umur lewat batas <b>DAN</b> keandalan rendah. 🟡 <b>Pantau</b> = salah satu sumbu bermasalah. 🟢 <b>Sehat</b> = keduanya aman.<br>
+            • Kolom <b>Rusak / MTBF / Avail</b> terisi seiring kamu mencatat kerusakan di tab <b>Availability</b>. Selama belum ada catatan, verdict bersandar pada umur.
+          </div>
+        </div>`;
+    }
+    window.renderKelayakanPage = renderKelayakanPage;
 
     async function renderAvailabilityPage(host) {
       let eqAll = [];
