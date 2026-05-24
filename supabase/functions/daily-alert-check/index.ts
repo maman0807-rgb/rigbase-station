@@ -68,8 +68,34 @@ serve(async (_req) => {
     const unitName: Record<number, string> = {};
     (units || []).forEach((u) => unitName[u.id] = u.name);
 
+    // PM & Overhaul berbasis JAM (HM) — hanya unit ber-HM
+    const { data: hmEq } = await sb.from("equipment")
+      .select("tag_number, nama_equipment, assigned_unit_id, running_hours, last_pm_hours, pm_interval_hours, toh_interval_hours, goh_interval_hours, last_toh_hours, last_goh_hours")
+      .gt("running_hours", 0);
+
+    const pmHoursDue: any[] = [];
+    const overhaulDue: any[] = [];
+    (hmEq || []).forEach((e) => {
+      const rh = Number(e.running_hours) || 0;
+      const pmInt = Number(e.pm_interval_hours) || 0;
+      if (pmInt > 0) {
+        const rem = pmInt - (rh - (Number(e.last_pm_hours) || 0));
+        if (rem <= 50) pmHoursDue.push({ ...e, _rem: rem });
+      }
+      const tohInt = Number(e.toh_interval_hours) || 0;
+      const gohInt = Number(e.goh_interval_hours) || 0;
+      const baseTOH = Number(e.last_toh_hours ?? e.last_goh_hours ?? 0) || 0;
+      const baseGOH = Number(e.last_goh_hours ?? 0) || 0;
+      let bestRem = Infinity, kind = "";
+      if (tohInt > 0) { const r = tohInt - (rh - baseTOH); if (r < bestRem) { bestRem = r; kind = "TOH"; } }
+      if (gohInt > 0) { const r = gohInt - (rh - baseGOH); if (r < bestRem) { bestRem = r; kind = "GOH"; } }
+      if (kind && bestRem <= 500) overhaulDue.push({ ...e, _rem: bestRem, _kind: kind });
+    });
+    pmHoursDue.sort((a, b) => a._rem - b._rem);
+    overhaulDue.sort((a, b) => a._rem - b._rem);
+
     // Build message
-    const lines: string[] = [`🛢️ <b>Rigbase Daily Alert</b>\n<i>${now.toLocaleDateString("id-ID", { weekday: "long", day: "2-digit", month: "long", year: "numeric" })}</i>`];
+    const lines: string[] = [`🛢️ <b>eRAMHoist Daily Alert</b>\n<i>${now.toLocaleDateString("id-ID", { weekday: "long", day: "2-digit", month: "long", year: "numeric" })}</i>`];
 
     if (skpi && skpi.length > 0) {
       lines.push(`\n📜 <b>Sertifikat Hampir/Sudah Expired (${skpi.length})</b>`);
@@ -100,25 +126,43 @@ serve(async (_req) => {
       if (down.length > 10) lines.push(`<i>...dan ${down.length - 10} lainnya</i>`);
     }
 
-    if ((skpi?.length || 0) + (maint?.length || 0) + (down?.length || 0) === 0) {
-      lines.push(`\n✅ <b>Semua aman.</b> Tidak ada SKPI expired, maintenance due, atau equipment Down hari ini.`);
+    if (pmHoursDue.length > 0) {
+      lines.push(`\n⏱️ <b>PM Berbasis Jam (${pmHoursDue.length})</b>`);
+      pmHoursDue.slice(0, 10).forEach((e) => {
+        const t = e._rem < 0 ? `⚠️ lewat ${Math.round(-e._rem)} jam` : `🟡 sisa ${Math.round(e._rem)} jam`;
+        lines.push(`• <b>${e.tag_number}</b> @ ${unitName[e.assigned_unit_id] || "—"} — ${t}`);
+      });
+      if (pmHoursDue.length > 10) lines.push(`<i>...dan ${pmHoursDue.length - 10} lainnya</i>`);
     }
 
-    lines.push(`\n🔗 <a href="${APP_URL}">Buka Rigbase Station</a>`);
+    if (overhaulDue.length > 0) {
+      lines.push(`\n🔧 <b>Overhaul Jatuh Tempo — jam (${overhaulDue.length})</b>`);
+      overhaulDue.slice(0, 10).forEach((e) => {
+        const t = e._rem < 0 ? `⚠️ ${e._kind} lewat ${Math.round(-e._rem)} jam` : `🟡 ${e._kind} sisa ${Math.round(e._rem)} jam`;
+        lines.push(`• <b>${e.tag_number}</b> @ ${unitName[e.assigned_unit_id] || "—"} — ${t}`);
+      });
+      if (overhaulDue.length > 10) lines.push(`<i>...dan ${overhaulDue.length - 10} lainnya</i>`);
+    }
+
+    if ((skpi?.length || 0) + (maint?.length || 0) + (down?.length || 0) + pmHoursDue.length + overhaulDue.length === 0) {
+      lines.push(`\n✅ <b>Semua aman.</b> Tidak ada SKPI expired, maintenance due (tanggal/jam), overhaul, atau equipment Down hari ini.`);
+    }
+
+    lines.push(`\n🔗 <a href="${APP_URL}">Buka eRAMHoist</a>`);
 
     await sendTelegram(lines.join("\n"));
 
     // Log ke alert_log
     await sb.from("alert_log").insert({
       alert_type: "daily-check",
-      message: `Daily alert: ${skpi?.length || 0} SKPI, ${maint?.length || 0} maintenance, ${down?.length || 0} down`,
+      message: `Daily alert: ${skpi?.length || 0} SKPI, ${maint?.length || 0} maintenance, ${down?.length || 0} down, ${pmHoursDue.length} PM-jam, ${overhaulDue.length} overhaul`,
       sent_to: CHAT_ID,
       status: "sent",
     });
 
     return new Response(JSON.stringify({
       ok: true,
-      counts: { skpi: skpi?.length || 0, maintenance: maint?.length || 0, down: down?.length || 0 }
+      counts: { skpi: skpi?.length || 0, maintenance: maint?.length || 0, down: down?.length || 0, pmHours: pmHoursDue.length, overhaul: overhaulDue.length }
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
     return new Response(JSON.stringify({ ok: false, error: String(err) }), {
