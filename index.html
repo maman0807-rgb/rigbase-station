@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#1E3A8A" />
-  <title>Rigbase Station</title>
+  <title>eRAMHoist</title>
 
   <!-- Tailwind CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -111,8 +111,8 @@
             <line x1="4" y1="58" x2="60" y2="58" stroke-width="3"/>
           </svg>
         </div>
-        <h1 class="text-2xl font-bold text-navy">Rigbase Station</h1>
-        <p class="text-slate-500 text-sm mt-1">Database Equipment Rig Drilling</p>
+        <h1 class="text-2xl font-bold text-navy">e<span class="text-safety">RAM</span>Hoist</h1>
+        <p class="text-slate-500 text-sm mt-1">Hoist &amp; Heavy Equipment — Asset Reliability (RAM)</p>
       </div>
 
       <form id="login-form" class="space-y-4">
@@ -172,8 +172,8 @@
           <rect x="10" y="50" width="44" height="4" fill="currentColor" stroke="none"/>
         </svg>
         <div>
-          <div class="font-bold leading-none text-base">Rigbase</div>
-          <div class="text-xs text-blue-200 leading-tight mt-0.5">Station</div>
+          <div class="font-bold leading-none text-base">e<span class="text-safety">RAM</span>Hoist</div>
+          <div class="text-xs text-blue-200 leading-tight mt-0.5">Hoist &amp; Heavy Equipment</div>
         </div>
       </div>
       <nav id="sidebar-nav" class="flex-1 p-3 space-y-1 text-sm">
@@ -204,7 +204,7 @@
             <line x1="41" y1="28" x2="20" y2="38"/>
             <rect x="10" y="50" width="44" height="4" fill="currentColor" stroke="none"/>
           </svg>
-          <span class="font-bold text-navy">Rigbase Station</span>
+          <span class="font-bold text-navy">e<span class="text-safety">RAM</span>Hoist</span>
         </div>
         <h2 id="page-title" class="hidden md:block text-lg font-semibold text-slate-800">Dashboard</h2>
         <div class="flex items-center gap-3">
@@ -2050,7 +2050,7 @@
 
         // Bikin metadata sheet
         const meta = [
-          ['Export dari Rigbase Station'],
+          ['Export dari eRAMHoist'],
           ['Tanggal Export', new Date().toLocaleString('id-ID')],
           ['Total Records', rows.length],
           [],
@@ -2067,7 +2067,7 @@
 
         // Generate filename
         const ts = new Date().toISOString().slice(0, 16).replace(/[:\-T]/g, '');
-        const filename = `rigbase_equipment_${ts}.xlsx`;
+        const filename = `eramhoist_equipment_${ts}.xlsx`;
         XLSX.writeFile(wb, filename);
         toast(`✅ ${rows.length} equipment ter-export ke ${filename}`, 'success');
       } catch (err) {
@@ -3971,7 +3971,7 @@
 
       // Sheet 1: PETUNJUK
       const petunjuk = [
-        ['🛢️ RIGBASE STATION — Template Rekap Inspeksi v2'],
+        ['🛢️ eRAMHoist — Template Rekap Inspeksi v2'],
         [],
         ['CARA PAKAI:'],
         ['1. Isi sheet "SIKLUS INSPEKSI" untuk header siklus baru (1 baris per siklus)'],
@@ -3988,7 +3988,7 @@
         ['- Status valid: Open, Closed (status Closed wajib isi Tanggal Closed)'],
         ['- Format tanggal: YYYY-MM-DD atau DD/MM/YYYY'],
         ['- Equipment yang tidak ke-resolve akan disimpan sebagai unresolved (equipment_name tetap kepake)'],
-        ['- Rig harus match dengan parent_units di Rigbase (case-sensitive, lihat list di app)'],
+        ['- Rig harus match dengan parent_units di eRAMHoist (case-sensitive, lihat list di app)'],
       ];
       const wsP = XLSX.utils.aoa_to_sheet(petunjuk);
       wsP['!cols'] = [{ wch: 90 }];
@@ -4797,7 +4797,7 @@
         const ws = XLSX.utils.json_to_sheet(rows);
         XLSX.utils.book_append_sheet(wb, ws, 'Equipment Selected');
         const ts = new Date().toISOString().slice(0, 16).replace(/[:\-T]/g, '');
-        XLSX.writeFile(wb, `rigbase_selected_${ts}.xlsx`);
+        XLSX.writeFile(wb, `eramhoist_selected_${ts}.xlsx`);
         toast(`✅ ${rows.length} equipment ter-export.`, 'success');
       } catch (err) {
         toast('Gagal export: ' + err.message, 'error');
@@ -8233,7 +8233,7 @@
           .ttd .c{width:30%} .ttd .line{margin-top:56px;border-top:1px solid #1f2937;padding-top:3px}
           @media print{body{padding:0} button{display:none}}
         </style></head><body>
-        <div class="kop"><div style="font-size:28px">🛢️</div><div><div class="t">PT PERTAMINA HULU ROKAN — Hoist &amp; Heavy Equipment</div><div class="s">Rigbase Station · Asset Reliability (RAM)</div></div></div>
+        <div class="kop"><div style="font-size:28px">🛢️</div><div><div class="t">PT PERTAMINA HULU ROKAN — Hoist &amp; Heavy Equipment</div><div class="s">eRAMHoist · Asset Reliability (RAM)</div></div></div>
         <h1>${escapeHtml(title)}</h1>
         <div class="meta">Nomor: ${noDok} &nbsp;·&nbsp; Tanggal: ${tgl}</div>
         ${bodyHtml ? bodyHtml : `${summaryHtml || ''}${chartHtml || ''}${introHtml || ''}${tableHtml || ''}`}
@@ -8306,7 +8306,7 @@
         <div class="card red"><div class="num">${habis}</div><div class="lbl">Habis Stok</div></div>
         <div class="card amber"><div class="num">${rendah}</div><div class="lbl">Di Bawah Safety</div></div>
       </div>`;
-      const intro = `<p>Daftar suku cadang yang memerlukan tindak lanjut pengadaan, berdasarkan status stok &amp; kekritisan (kategori Critical) di sistem RAM Rigbase Station.</p>`;
+      const intro = `<p>Daftar suku cadang yang memerlukan tindak lanjut pengadaan, berdasarkan status stok &amp; kekritisan (kategori Critical) di sistem RAM eRAMHoist.</p>`;
       const rows = list.slice(0, 300).map((m, i) => {
         const s = n(m.stok), sf = n(m.safety_stock);
         const cell = s === 0 ? '<td style="text-align:center;background:#fef2f2;color:#dc2626;font-weight:bold">HABIS</td>' : (sf > 0 && s < sf ? '<td style="text-align:center;background:#fffbeb;color:#d97706;font-weight:bold">RENDAH</td>' : '<td style="text-align:center;color:#16a34a">AMAN</td>');
