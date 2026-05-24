@@ -8219,8 +8219,15 @@
       const html = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
         <style>
           *{box-sizing:border-box} body{font-family:Arial,Helvetica,sans-serif;color:#1f2937;padding:32px;font-size:12px;line-height:1.5;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-          .kop{display:flex;align-items:center;gap:12px;border-bottom:3px solid #11335d;padding-bottom:10px;margin-bottom:8px}
-          .kop .t{font-size:16px;font-weight:bold;color:#11335d} .kop .s{font-size:11px;color:#6b7280}
+          @page{size:A4;margin:14mm}
+          .kop{display:flex;align-items:center;gap:14px;border-bottom:3px solid #11335d;padding-bottom:12px;margin-bottom:3px;position:relative}
+          .kop::after{content:"";position:absolute;left:0;right:0;bottom:-3px;height:2px;background:#f97316}
+          .kop .logo{flex:0 0 auto;width:46px;height:46px;color:#11335d}
+          .kop .brand{font-size:21px;font-weight:800;color:#11335d;letter-spacing:.3px;line-height:1.05}
+          .kop .brand .ram{color:#f97316}
+          .kop .t{font-size:12px;font-weight:bold;color:#11335d;margin-top:2px} .kop .s{font-size:10px;color:#6b7280;margin-top:1px}
+          .foot{margin-top:22px;border-top:1px solid #e2e8f0;padding-top:6px;font-size:9px;color:#94a3b8;display:flex;justify-content:space-between;align-items:center;gap:10px}
+          .foot b{color:#11335d}.foot .ram{color:#f97316}
           h1{font-size:15px;text-align:center;margin:14px 0 2px;text-transform:uppercase}
           h2{font-size:13px;color:#11335d;border-bottom:2px solid #cbd5e1;padding-bottom:3px;margin:18px 0 6px}
           .meta{text-align:center;font-size:11px;color:#374151;margin-bottom:14px}
@@ -8233,7 +8240,14 @@
           .ttd .c{width:30%} .ttd .line{margin-top:56px;border-top:1px solid #1f2937;padding-top:3px}
           @media print{body{padding:0} button{display:none}}
         </style></head><body>
-        <div class="kop"><div style="font-size:28px">🛢️</div><div><div class="t">PT PERTAMINA HULU ROKAN — Hoist &amp; Heavy Equipment</div><div class="s">eRAMHoist · Asset Reliability (RAM)</div></div></div>
+        <div class="kop">
+          <svg class="logo" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="26" y="6" width="12" height="4" fill="currentColor" stroke="none"/><line x1="32" y1="10" x2="32" y2="20"/><circle cx="32" cy="22" r="2" fill="currentColor" stroke="none"/><line x1="28" y1="10" x2="14" y2="50"/><line x1="36" y1="10" x2="50" y2="50"/><line x1="26" y1="18" x2="38" y2="18"/><line x1="23" y1="28" x2="41" y2="28"/><line x1="20" y1="38" x2="44" y2="38"/><line x1="17" y1="48" x2="47" y2="48"/><line x1="26" y1="18" x2="41" y2="28"/><line x1="38" y1="18" x2="23" y2="28"/><line x1="23" y1="28" x2="44" y2="38"/><line x1="41" y1="28" x2="20" y2="38"/><line x1="20" y1="38" x2="47" y2="48"/><line x1="44" y1="38" x2="17" y2="48"/><rect x="10" y="50" width="44" height="4" fill="currentColor" stroke="none"/><line x1="4" y1="58" x2="60" y2="58" stroke-width="3"/></svg>
+          <div>
+            <div class="brand">e<span class="ram">RAM</span>Hoist</div>
+            <div class="t">PT PERTAMINA HULU ROKAN — Hoist &amp; Heavy Equipment</div>
+            <div class="s">Asset Reliability Management · Reliability · Availability · Maintainability</div>
+          </div>
+        </div>
         <h1>${escapeHtml(title)}</h1>
         <div class="meta">Nomor: ${noDok} &nbsp;·&nbsp; Tanggal: ${tgl}</div>
         ${bodyHtml ? bodyHtml : `${summaryHtml || ''}${chartHtml || ''}${introHtml || ''}${tableHtml || ''}`}
@@ -8242,6 +8256,10 @@
           <div class="c">Dibuat oleh,<div class="line">${sDibuat}<br><span style="color:#6b7280">Sr Mekanik</span></div></div>
           <div class="c">Diperiksa,<div class="line">${sPeriksa}<br><span style="color:#6b7280">SPV / Sr SPV</span></div></div>
           <div class="c">Disetujui,<div class="line">${sSetuju}<br><span style="color:#6b7280">Astmen</span></div></div>
+        </div>
+        <div class="foot">
+          <div>Dokumen dihasilkan otomatis oleh <b>e<span class="ram">RAM</span>Hoist</b> · Asset Reliability (RAM)</div>
+          <div>Dicetak: ${tgl} · oleh ${who}</div>
         </div>
         <script>window.onload=function(){window.print()}<\/script>
         </body></html>`;
