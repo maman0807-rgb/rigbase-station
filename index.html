@@ -1685,7 +1685,7 @@
           </div>
           <div id="cat-list-container" class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">Memuat…</div>
         `;
-        reloadCategoriesList();
+        setTimeout(() => reloadCategoriesList(), 0); // tunda sampai elemen masuk DOM
         return div;
       },
 
@@ -1708,7 +1708,7 @@
           </div>
           <div id="user-list-container" class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">Memuat…</div>
         `;
-        reloadUsersList();
+        setTimeout(() => reloadUsersList(), 0); // tunda sampai elemen masuk DOM
         return div;
       },
 
@@ -1771,7 +1771,7 @@
             });
           }
         })();
-        reloadActivityLog();
+        setTimeout(() => reloadActivityLog(), 0); // tunda sampai elemen masuk DOM
         return div;
       },
 
@@ -2519,7 +2519,7 @@
         $('#insp-status').onchange   = e => { state.inspectionFilters.status = e.target.value; reloadInspectionList(); };
       }, 0);
 
-      reloadInspectionList();
+      setTimeout(() => reloadInspectionList(), 0); // tunda sampai elemen masuk DOM
       return div;
     }
 
@@ -4612,7 +4612,7 @@
         $('#filter-tipe').onchange   = e => { state.equipmentFilters.tipe_kepemilikan = e.target.value; reloadEquipmentList(); refreshFilterIndicator(); };
       }, 0);
 
-      reloadEquipmentList();
+      setTimeout(() => reloadEquipmentList(), 0); // tunda sampai elemen masuk DOM
       return div;
     }
 
