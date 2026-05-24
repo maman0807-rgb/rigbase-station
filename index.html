@@ -352,6 +352,13 @@
         { name: 'pic_mechanic',          label: 'PIC Mechanic',          type: 'text' },
         { name: 'goh_year',              label: 'GOH Year',              type: 'number', min: 1900, max: 2100 },
       ]},
+      { section: 'D2. Overhaul & Kelayakan (berbasis jam)', fields: [
+        { name: 'toh_interval_hours',  label: 'Interval TOH (jam)',        type: 'number', min: 0, placeholder: 'mis. 12000' },
+        { name: 'goh_interval_hours',  label: 'Interval GOH (jam)',        type: 'number', min: 0, placeholder: 'mis. 24000' },
+        { name: 'economic_life_hours', label: 'Batas Umur Ekonomis (jam)', type: 'number', min: 0, placeholder: 'mis. 48000' },
+        { name: 'last_toh_hours',      label: 'HM saat TOH Terakhir',      type: 'number', min: 0, step: '0.1' },
+        { name: 'last_goh_hours',      label: 'HM saat GOH Terakhir',      type: 'number', min: 0, step: '0.1' },
+      ]},
       { section: 'E. Sertifikasi & Refurbish', fields: [
         { name: 'nomor_skpi',             label: 'Nomor SKPI',             type: 'text' },
         { name: 'skpi_start_date',        label: 'SKPI Start Date',        type: 'date' },
@@ -639,6 +646,47 @@
         .filter(e => e._remaining <= thresholdHours)
         .sort((a, b) => a._remaining - b._remaining)
         .slice(0, 15);
+    }
+
+    // Posisi siklus hidup engine berbasis JAM (TOH/GOH/umur ekonomis). Null jika belum ada HM.
+    // Verdict FASE 1 = berbasis UMUR saja (keandalan/MTBF menyusul di fase 2).
+    function computeLifecycle(eq) {
+      const rh = Number(eq.running_hours);
+      if (!(rh > 0)) return null;
+      const tohInt  = Number(eq.toh_interval_hours)  || 0;
+      const gohInt  = Number(eq.goh_interval_hours)  || 0;
+      const ecoLife = Number(eq.economic_life_hours) || 0;
+      if (!tohInt && !gohInt && !ecoLife) return null; // belum diisi interval → tidak dihitung
+      const baseTOH = Number(eq.last_toh_hours ?? eq.last_goh_hours ?? 0) || 0;
+      const baseGOH = Number(eq.last_goh_hours ?? 0) || 0;
+      const out = { running: rh };
+      if (tohInt > 0)  { const s = rh - baseTOH; out.toh = { since: s, interval: tohInt, remaining: tohInt - s, pct: s / tohInt * 100 }; }
+      if (gohInt > 0)  { const s = rh - baseGOH; out.goh = { since: s, interval: gohInt, remaining: gohInt - s, pct: s / gohInt * 100 }; }
+      if (ecoLife > 0) { out.eco = { used: rh, life: ecoLife, remaining: ecoLife - rh, pct: rh / ecoLife * 100 }; }
+      let verdict = 'keep';
+      if (ecoLife > 0 && rh >= ecoLife) verdict = 'replace';
+      else if ((ecoLife > 0 && rh >= ecoLife * 0.9) || (out.goh && out.goh.remaining < 0)) verdict = 'watch';
+      out.verdict = verdict;
+      return out;
+    }
+
+    // Unit yang mendekati/lewat overhaul atau batas umur (berbasis jam).
+    async function fetchOverhaulDue(thresholdHours = 500) {
+      const { data, error } = await state.supabase
+        .from('equipment')
+        .select('id, tag_number, nama_equipment, assigned_unit_id, running_hours, toh_interval_hours, goh_interval_hours, economic_life_hours, last_toh_hours, last_goh_hours')
+        .gt('running_hours', 0);
+      if (error) throw error;
+      const out = [];
+      (data || []).forEach(e => {
+        const lc = computeLifecycle(e);
+        if (!lc) return;
+        const tohRem = lc.toh ? lc.toh.remaining : Infinity;
+        const gohRem = lc.goh ? lc.goh.remaining : Infinity;
+        const minRem = Math.min(tohRem, gohRem);
+        if (lc.verdict !== 'keep' || minRem <= thresholdHours) out.push({ ...e, _lc: lc, _minRem: minRem });
+      });
+      return out.sort((a, b) => a._minRem - b._minRem).slice(0, 15);
     }
 
     async function fetchExpiringSkpi(days = 60) {
@@ -1461,6 +1509,11 @@
             <div id="dash-pmhours" class="space-y-2 text-sm">Memuat…</div>
           </div>
           <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+            <h4 class="text-base font-bold text-slate-800 mb-3 flex items-center gap-2">🔧 Overhaul & Kelayakan (berbasis jam)</h4>
+            <p class="text-xs text-slate-400 mb-3">TOH/GOH jatuh tempo & kandidat ganti berdasarkan umur jam. Isi interval TOH/GOH di data equipment.</p>
+            <div id="dash-overhaul" class="space-y-2 text-sm">Memuat…</div>
+          </div>
+          <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
             <h4 class="text-base font-bold text-slate-800 mb-3 flex items-center gap-2">🤝 Pinjaman Aktif</h4>
             <div id="dash-loans" class="space-y-2">Memuat…</div>
           </div>
@@ -1472,12 +1525,13 @@
 
         (async () => {
           try {
-            const [stats, due, skpi, loans, pmHours] = await Promise.all([
+            const [stats, due, skpi, loans, pmHours, overhaul] = await Promise.all([
               fetchDashboardStats(),
               fetchDueMaintenance(30),
               fetchExpiringSkpi(60),
               fetchAllActiveLoans().catch(() => []),
               fetchPMDueByHours(50).catch(() => []),
+              fetchOverhaulDue(500).catch(() => []),
             ]);
             // Stats
             $('#dash-stats').innerHTML = `
@@ -1535,6 +1589,30 @@
                     <div class="text-right flex-shrink-0 ml-2">
                       <div class="${color} font-semibold text-sm">${over ? `lewat ${fmtNumber(-e._remaining, ' jam')}` : `sisa ${fmtNumber(e._remaining, ' jam')}`}</div>
                       <div class="text-xs text-slate-500">${fmtNumber(e.running_hours, ' jam')} · PM tiap ${fmtNumber(e._interval, ' jam')}</div>
+                    </div>
+                  </button>`;
+                }).join('');
+            // Overhaul & kelayakan (berbasis jam)
+            $('#dash-overhaul').innerHTML = overhaul.length === 0
+              ? '<div class="text-slate-400 text-sm">Belum ada unit mendekati overhaul/batas umur. (Isi interval TOH/GOH di data equipment.)</div>'
+              : overhaul.map(e => {
+                  const lc = e._lc;
+                  const vColor = lc.verdict === 'replace' ? 'text-red-700' : (lc.verdict === 'watch' ? 'text-amber-700' : 'text-slate-700');
+                  const vLabel = lc.verdict === 'replace' ? '🔴 Tinjau ganti' : (lc.verdict === 'watch' ? '🟡 Pantau' : '🟢 Sehat');
+                  let ms = '';
+                  if (lc.goh && lc.goh.remaining < 0)      ms = `GOH lewat ${fmtNumber(-lc.goh.remaining, ' jam')}`;
+                  else if (lc.toh && lc.toh.remaining < 0) ms = `TOH lewat ${fmtNumber(-lc.toh.remaining, ' jam')}`;
+                  else if (lc.toh && lc.toh.remaining <= (lc.goh ? lc.goh.remaining : Infinity)) ms = `TOH sisa ${fmtNumber(lc.toh.remaining, ' jam')}`;
+                  else if (lc.goh) ms = `GOH sisa ${fmtNumber(lc.goh.remaining, ' jam')}`;
+                  if (lc.eco) ms += `${ms ? ' · ' : ''}umur ${Math.round(lc.eco.pct)}%`;
+                  return `<button onclick="setEquipmentView('detail','${e.id}'); navigate('equipment')" class="w-full text-left flex items-center justify-between hover:bg-slate-50 px-2 py-1.5 rounded">
+                    <div class="min-w-0">
+                      <div class="font-semibold text-navy text-sm truncate">${escapeHtml(e.tag_number)}</div>
+                      <div class="text-xs text-slate-500 truncate">${escapeHtml(e.nama_equipment)} • ${escapeHtml(getParentUnitName(e.assigned_unit_id))}</div>
+                    </div>
+                    <div class="text-right flex-shrink-0 ml-2">
+                      <div class="${vColor} font-semibold text-sm">${vLabel}</div>
+                      <div class="text-xs text-slate-500">${ms}</div>
                     </div>
                   </button>`;
                 }).join('');
@@ -5136,6 +5214,8 @@
     }
 
     function renderInfoTab(eq) {
+      const lc = computeLifecycle(eq);
+      const lcVerdict = lc ? (lc.verdict === 'replace' ? '🔴 Kandidat ganti (umur)' : lc.verdict === 'watch' ? '🟡 Pantau' : '🟢 Sehat') : null;
       const sections = [
         ['Identitas', [
           ['Tag Number', eq.tag_number],
@@ -5172,6 +5252,15 @@
           ['Interval', eq.maintenance_interval],
           ['PIC Mechanic', eq.pic_mechanic],
           ['GOH Year', eq.goh_year],
+        ]],
+        ['Overhaul & Kelayakan (jam)', [
+          ['Interval TOH', eq.toh_interval_hours != null ? fmtNumber(eq.toh_interval_hours, ' jam') : null],
+          ['Interval GOH', eq.goh_interval_hours != null ? fmtNumber(eq.goh_interval_hours, ' jam') : null],
+          ['Batas Umur Ekonomis', eq.economic_life_hours != null ? fmtNumber(eq.economic_life_hours, ' jam') : null],
+          ['Sisa Jam ke TOH', lc && lc.toh ? (lc.toh.remaining < 0 ? `⚠️ lewat ${fmtNumber(-lc.toh.remaining, ' jam')}` : fmtNumber(lc.toh.remaining, ' jam')) : null],
+          ['Sisa Jam ke GOH', lc && lc.goh ? (lc.goh.remaining < 0 ? `⚠️ lewat ${fmtNumber(-lc.goh.remaining, ' jam')}` : fmtNumber(lc.goh.remaining, ' jam')) : null],
+          ['Umur Ekonomis Terpakai', lc && lc.eco ? `${Math.round(lc.eco.pct)}%` : null],
+          ['Status Kelayakan', lcVerdict],
         ]],
         ['Finansial', [
           ['Tgl Pembelian', fmtDate(eq.tgl_pembelian)],
