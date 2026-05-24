@@ -3181,23 +3181,9 @@
         const { error } = await state.supabase.from('inspection_findings').insert(rows);
         if (error) throw error;
         toast(`✅ ${rows.length} temuan diimport.`, 'success');
-        // 🔔 Telegram alert untuk temuan Critical hasil import (fire-and-forget, ringkas 1 pesan/batch)
-        const critRows = rows.filter(r => r.category === 'Critical');
-        if (critRows.length) {
-          const rigName = getParentUnitName(insp.parent_unit_id);
-          const maxList = 15;
-          const lines = critRows.slice(0, maxList)
-            .map((r, i) => `${i + 1}. <b>${r.equipment_name_snapshot}</b> — ${r.finding || '—'}`)
-            .join('\n');
-          const extra = critRows.length > maxList ? `\n…dan ${critRows.length - maxList} temuan Critical lainnya.` : '';
-          sendTelegramAlert(
-            `🚨 <b>${critRows.length} CRITICAL FINDING (Import)</b>\n` +
-            `Siklus: <b>${insp.inspection_code}</b>\n` +
-            `Rig: ${rigName}\n\n` +
-            lines + extra +
-            `\n\n👤 ${state.profile.full_name || state.profile.email}`
-          );
-        }
+        // 🔔 Alert Telegram Critical ditangani SERVER-SIDE via DB trigger
+        //    (trg_critical_finding_alert), menangkap tiap row Critical termasuk hasil import.
+        //    Lihat supabase_critical_finding_trigger.sql
         closeModal();
         setInspectionView('detail', insp.id, 'temuan');
       } catch (e) {
@@ -3741,18 +3727,10 @@
           saved = await createFinding(payload);
           logActivity('created', 'finding', saved.id, payload.equipment_name_snapshot, { siklus: insp.inspection_code, category: payload.category });
           toast('Temuan baru berhasil dibuat.', 'success');
-          // 🔔 Telegram alert untuk Critical baru
-          if (payload.category === 'Critical') {
-            sendTelegramAlert(
-              `🚨 <b>CRITICAL FINDING</b>\n` +
-              `Siklus: <b>${insp.inspection_code}</b>\n` +
-              `Rig: ${getParentUnitName(insp.parent_unit_id)}\n` +
-              `Equipment: <b>${payload.equipment_name_snapshot}</b>${payload.bagian ? ' (' + payload.bagian + ')' : ''}\n` +
-              `📝 ${payload.finding || '—'}\n` +
-              (payload.recommendation ? `💡 ${payload.recommendation}\n` : '') +
-              `👤 ${state.profile.full_name || state.profile.email}`
-            );
-          }
+          // 🔔 Alert Telegram Critical kini ditangani SERVER-SIDE via DB trigger
+          //    (trg_critical_finding_alert → Edge Function critical-inspection-alert),
+          //    supaya tidak dobel & menangkap semua jalur insert.
+          //    Lihat supabase_critical_finding_trigger.sql
         }
         closeModal();
         // Refresh detail view
