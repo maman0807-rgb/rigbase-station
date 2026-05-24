@@ -3181,6 +3181,23 @@
         const { error } = await state.supabase.from('inspection_findings').insert(rows);
         if (error) throw error;
         toast(`✅ ${rows.length} temuan diimport.`, 'success');
+        // 🔔 Telegram alert untuk temuan Critical hasil import (fire-and-forget, ringkas 1 pesan/batch)
+        const critRows = rows.filter(r => r.category === 'Critical');
+        if (critRows.length) {
+          const rigName = getParentUnitName(insp.parent_unit_id);
+          const maxList = 15;
+          const lines = critRows.slice(0, maxList)
+            .map((r, i) => `${i + 1}. <b>${r.equipment_name_snapshot}</b> — ${r.finding || '—'}`)
+            .join('\n');
+          const extra = critRows.length > maxList ? `\n…dan ${critRows.length - maxList} temuan Critical lainnya.` : '';
+          sendTelegramAlert(
+            `🚨 <b>${critRows.length} CRITICAL FINDING (Import)</b>\n` +
+            `Siklus: <b>${insp.inspection_code}</b>\n` +
+            `Rig: ${rigName}\n\n` +
+            lines + extra +
+            `\n\n👤 ${state.profile.full_name || state.profile.email}`
+          );
+        }
         closeModal();
         setInspectionView('detail', insp.id, 'temuan');
       } catch (e) {
