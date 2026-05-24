@@ -5418,15 +5418,23 @@
           })
           .sort((a, b) => b.year.localeCompare(a.year));  // terbaru di atas
 
-        // Deteksi recurring per bagian (kalau bagian sama muncul ≥2x dengan category non-N/A)
-        const recurringMap = {};  // { 'Crown Block': [finding1, finding2, ...] }
+        // Deteksi recurring (non-N/A):
+        //  - per BAGIAN spesifik (mis. Crown Block) → cukup muncul ≥2×
+        //  - LEVEL ALAT (temuan tanpa bagian) → wajib lintas ≥2 siklus inspeksi
+        //    berbeda, biar bukan sekadar banyak temuan di 1 inspeksi.
+        const ALAT_KEY = '(seluruh alat)';
+        const recurringMap = {};  // { 'Crown Block': [...], '(seluruh alat)': [...] }
         findings.forEach(f => {
-          if (f.category === 'N/A' || !f.bagian) return;
-          const key = f.bagian;
+          if (f.category === 'N/A') return;
+          const key = f.bagian || ALAT_KEY;
           if (!recurringMap[key]) recurringMap[key] = [];
           recurringMap[key].push(f);
         });
-        const recurring = Object.entries(recurringMap).filter(([_, arr]) => arr.length >= 2);
+        const recurring = Object.entries(recurringMap).filter(([key, arr]) => {
+          if (arr.length < 2) return false;
+          if (key === ALAT_KEY) return new Set(arr.map(f => f.inspection_id)).size >= 2;
+          return true;
+        });
 
         // Index finding → occurrence number (untuk badge "Ke-N")
         const findingOccurrence = {};
@@ -5443,9 +5451,13 @@
             </div>
             <div class="text-sm text-red-800 mb-2">Equipment ini punya finding berulang di bagian/area yang sama. Pertimbangkan <b>replacement permanen</b> atau <b>overhaul</b>:</div>
             <ul class="text-sm text-red-800 space-y-1">
-              ${recurring.map(([bagian, arr]) => `
-                <li>• <b>${escapeHtml(bagian)}</b>: ${arr.length}× temuan (${arr.map(a => fmtDate(a.tgl_ditemukan)).join(', ')})</li>
-              `).join('')}
+              ${recurring.map(([bagian, arr]) => {
+                const isAlat = bagian === ALAT_KEY;
+                const label = isAlat ? '⚙️ Seluruh alat (lintas siklus)' : bagian;
+                const nSiklus = new Set(arr.map(a => a.inspection_id)).size;
+                const meta = isAlat ? `${arr.length}× temuan di ${nSiklus} siklus` : `${arr.length}× temuan`;
+                return `<li>• <b>${escapeHtml(label)}</b>: ${meta} (${arr.map(a => fmtDate(a.tgl_ditemukan)).join(', ')})</li>`;
+              }).join('')}
             </ul>
           </div>
         ` : '';
