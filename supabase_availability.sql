@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS downtime_events (
   unit_name      TEXT,
   start_at       TIMESTAMPTZ NOT NULL,
   end_at         TIMESTAMPTZ,                 -- NULL = masih down
-  category       TEXT CHECK (category IN ('breakdown','tunggu_spare','pm','mobilisasi','lainnya')),
+  category       TEXT CHECK (category IN ('breakdown','troubleshoot','tunggu_spare','pm','mobilisasi','lainnya')),
   notes          TEXT,
   -- durasi jam (otomatis; NULL kalau belum selesai)
   duration_hours NUMERIC GENERATED ALWAYS AS (EXTRACT(EPOCH FROM (end_at - start_at)) / 3600.0) STORED,
