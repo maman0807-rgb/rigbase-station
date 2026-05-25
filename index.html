@@ -5244,6 +5244,7 @@
           ['Last Maintenance', fmtDate(eq.last_maintenance_date)],
           ['Last Type', eq.last_maintenance_type],
           ['Next Maintenance', fmtDate(eq.next_maintenance_date)],
+          ['Tgl PM Terakhir', eq.last_pm_date ? fmtDate(eq.last_pm_date) : null],
           ['Interval PM (jam)', eq.pm_interval_hours != null ? fmtNumber(eq.pm_interval_hours, ' jam') : null],
           ['Sisa Jam ke PM', (eq.running_hours != null && eq.pm_interval_hours)
             ? (() => { const rem = Number(eq.pm_interval_hours) - (Number(eq.running_hours || 0) - Number(eq.last_pm_hours || 0));
@@ -5254,6 +5255,7 @@
           ['GOH Year', eq.goh_year],
         ]],
         ['Overhaul & Kelayakan (jam)', [
+          ['Tgl GOH Terakhir', eq.last_goh_date ? fmtDate(eq.last_goh_date) : null],
           ['Interval TOH', eq.toh_interval_hours != null ? fmtNumber(eq.toh_interval_hours, ' jam') : null],
           ['Interval GOH', eq.goh_interval_hours != null ? fmtNumber(eq.goh_interval_hours, ' jam') : null],
           ['Batas Umur Ekonomis', eq.economic_life_hours != null ? fmtNumber(eq.economic_life_hours, ' jam') : null],
