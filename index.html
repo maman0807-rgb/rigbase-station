@@ -342,7 +342,7 @@
         { name: 'status_operasi', label: 'Status Operasi', type: 'select', options: ['Aktif','Standby','Repair','Down','Scrap'] },
         { name: 'kondisi_fisik',  label: 'Kondisi Fisik',  type: 'select', options: ['Good','Fair','Poor'] },
         { name: 'lokasi_fisik',   label: 'Lokasi Fisik',   type: 'text' },
-        { name: 'running_hours',  label: 'Running Hours',  type: 'number', step: '0.1', min: 0 },
+        { name: 'running_hours',  label: 'Running Hours / KM (counter)',  type: 'number', step: '0.1', min: 0, placeholder: 'jam (HM) untuk engine/genset, kilometer (KM) untuk kendaraan' },
       ]},
       { section: 'D. Maintenance', fields: [
         { name: 'last_maintenance_date', label: 'Last Maintenance Date', type: 'date' },
@@ -352,12 +352,14 @@
         { name: 'pic_mechanic',          label: 'PIC Mechanic',          type: 'text' },
         { name: 'goh_year',              label: 'GOH Year',              type: 'number', min: 1900, max: 2100 },
       ]},
-      { section: 'D2. Overhaul & Kelayakan (berbasis jam)', fields: [
-        { name: 'toh_interval_hours',  label: 'Interval TOH (jam)',        type: 'number', min: 0, placeholder: 'mis. 12000' },
-        { name: 'goh_interval_hours',  label: 'Interval GOH (jam)',        type: 'number', min: 0, placeholder: 'mis. 24000' },
-        { name: 'economic_life_hours', label: 'Batas Umur Ekonomis (jam)', type: 'number', min: 0, placeholder: 'mis. 48000' },
-        { name: 'last_toh_hours',      label: 'HM saat TOH Terakhir',      type: 'number', min: 0, step: '0.1' },
-        { name: 'last_goh_hours',      label: 'HM saat GOH Terakhir',      type: 'number', min: 0, step: '0.1' },
+      { section: 'D2. PM, Overhaul & Kelayakan (basis jam atau km — ikut pm_type)', fields: [
+        { name: 'pm_type',             label: 'Basis Pemakaian',           type: 'select', options: ['hours','km','time'], placeholder: 'hours = jam (default engine/genset), km = kendaraan, time = kalender' },
+        { name: 'pm_interval_hours',   label: 'Interval PM (jam / km)',    type: 'number', min: 0, placeholder: 'mis. 250 jam atau 5000 km' },
+        { name: 'toh_interval_hours',  label: 'Interval TOH (jam / km)',   type: 'number', min: 0, placeholder: 'mis. 12000' },
+        { name: 'goh_interval_hours',  label: 'Interval GOH (jam / km)',   type: 'number', min: 0, placeholder: 'mis. 24000' },
+        { name: 'economic_life_hours', label: 'Batas Umur Ekonomis (jam / km)', type: 'number', min: 0, placeholder: 'mis. 48000 jam atau 300000 km' },
+        { name: 'last_toh_hours',      label: 'Counter saat TOH Terakhir', type: 'number', min: 0, step: '0.1', placeholder: 'HM atau KM saat TOH' },
+        { name: 'last_goh_hours',      label: 'Counter saat GOH Terakhir', type: 'number', min: 0, step: '0.1', placeholder: 'HM atau KM saat GOH' },
       ]},
       { section: 'E. Sertifikasi & Refurbish', fields: [
         { name: 'nomor_skpi',             label: 'Nomor SKPI',             type: 'text' },
@@ -634,7 +636,8 @@
       const { data, error } = await state.supabase
         .from('equipment')
         .select('id, tag_number, nama_equipment, assigned_unit_id, status_operasi, running_hours, last_pm_hours, pm_interval_hours, pm_type')
-        .gt('running_hours', 0);
+        .gt('running_hours', 0)
+        .neq('pm_type', 'km');  // exclude unit KM dari analisa PM-jam
       if (error) throw error;
       return (data || [])
         .map(e => {
@@ -644,6 +647,26 @@
           return { ...e, _interval: interval, _used: used, _remaining: remaining };
         })
         .filter(e => e._remaining <= thresholdHours)
+        .sort((a, b) => a._remaining - b._remaining)
+        .slice(0, 15);
+    }
+
+    // PM berbasis KM: utk Damkar, Slickline truck, Kendaraan (pm_type='km').
+    // Field running_hours dipakai sbg odometer KM; pm_interval_hours dipakai sbg interval KM (default 5.000 km).
+    async function fetchPMDueByKm(thresholdKm = 500) {
+      const { data, error } = await state.supabase
+        .from('equipment')
+        .select('id, tag_number, nama_equipment, assigned_unit_id, status_operasi, running_hours, last_pm_hours, pm_interval_hours, pm_type')
+        .eq('pm_type', 'km');
+      if (error) throw error;
+      return (data || [])
+        .map(e => {
+          const interval  = Number(e.pm_interval_hours) || 5000;
+          const used      = Number(e.running_hours || 0) - Number(e.last_pm_hours || 0);
+          const remaining = interval - used;
+          return { ...e, _interval: interval, _used: used, _remaining: remaining };
+        })
+        .filter(e => Number(e.running_hours) > 0 && e._remaining <= thresholdKm)
         .sort((a, b) => a._remaining - b._remaining)
         .slice(0, 15);
     }
@@ -674,8 +697,9 @@
     async function fetchOverhaulDue(thresholdHours = 500) {
       const { data, error } = await state.supabase
         .from('equipment')
-        .select('id, tag_number, nama_equipment, assigned_unit_id, running_hours, toh_interval_hours, goh_interval_hours, economic_life_hours, last_toh_hours, last_goh_hours')
-        .gt('running_hours', 0);
+        .select('id, tag_number, nama_equipment, assigned_unit_id, running_hours, toh_interval_hours, goh_interval_hours, economic_life_hours, last_toh_hours, last_goh_hours, pm_type')
+        .gt('running_hours', 0)
+        .neq('pm_type', 'km');  // exclude unit KM dari analisa overhaul-jam
       if (error) throw error;
       const out = [];
       (data || []).forEach(e => {
@@ -1509,6 +1533,11 @@
             <div id="dash-pmhours" class="space-y-2 text-sm">Memuat…</div>
           </div>
           <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+            <h4 class="text-base font-bold text-slate-800 mb-3 flex items-center gap-2">🛻 PM Berbasis KM (Kendaraan)</h4>
+            <p class="text-xs text-slate-400 mb-3">Damkar, slickline truck, kendaraan dinas. Interval default 5.000 km bila belum diisi.</p>
+            <div id="dash-pmkm" class="space-y-2 text-sm">Memuat…</div>
+          </div>
+          <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
             <h4 class="text-base font-bold text-slate-800 mb-3 flex items-center gap-2">🔧 Overhaul & Kelayakan (berbasis jam)</h4>
             <p class="text-xs text-slate-400 mb-3">TOH/GOH jatuh tempo & kandidat ganti berdasarkan umur jam. Isi interval TOH/GOH di data equipment.</p>
             <div id="dash-overhaul" class="space-y-2 text-sm">Memuat…</div>
@@ -1525,12 +1554,13 @@
 
         (async () => {
           try {
-            const [stats, due, skpi, loans, pmHours, overhaul] = await Promise.all([
+            const [stats, due, skpi, loans, pmHours, pmKm, overhaul] = await Promise.all([
               fetchDashboardStats(),
               fetchDueMaintenance(30),
               fetchExpiringSkpi(60),
               fetchAllActiveLoans().catch(() => []),
               fetchPMDueByHours(50).catch(() => []),
+              fetchPMDueByKm(500).catch(() => []),
               fetchOverhaulDue(500).catch(() => []),
             ]);
             // Stats
@@ -1592,6 +1622,23 @@
                     </div>
                   </button>`;
                 }).join('');
+            // PM berbasis km (Kendaraan)
+            $('#dash-pmkm').innerHTML = pmKm.length === 0
+              ? '<div class="text-slate-400 text-sm">Tidak ada kendaraan mendekati km PM. (Isi pm_interval_hours sbg interval km, atau pakai default 5.000 km.)</div>'
+              : pmKm.map(e => {
+                  const over  = e._remaining < 0;
+                  const color = over ? 'text-red-700' : (e._remaining <= 200 ? 'text-amber-700' : 'text-slate-700');
+                  return `<button onclick="setEquipmentView('detail','${e.id}'); navigate('equipment')" class="w-full text-left flex items-center justify-between hover:bg-slate-50 px-2 py-1.5 rounded">
+                    <div class="min-w-0">
+                      <div class="font-semibold text-navy text-sm truncate">${escapeHtml(e.tag_number)}</div>
+                      <div class="text-xs text-slate-500 truncate">${escapeHtml(e.nama_equipment)} • ${escapeHtml(getParentUnitName(e.assigned_unit_id))}</div>
+                    </div>
+                    <div class="text-right flex-shrink-0 ml-2">
+                      <div class="${color} font-semibold text-sm">${over ? `lewat ${fmtNumber(-e._remaining, ' km')}` : `sisa ${fmtNumber(e._remaining, ' km')}`}</div>
+                      <div class="text-xs text-slate-500">${fmtNumber(e.running_hours, ' km')} · PM tiap ${fmtNumber(e._interval, ' km')}</div>
+                    </div>
+                  </button>`;
+                }).join('');
             // Overhaul & kelayakan (berbasis jam)
             $('#dash-overhaul').innerHTML = overhaul.length === 0
               ? '<div class="text-slate-400 text-sm">Belum ada unit mendekati overhaul/batas umur. (Isi interval TOH/GOH di data equipment.)</div>'
@@ -1644,7 +1691,7 @@
             $('#dash-unit').innerHTML = state.parentUnits.map(u => {
               const cnt = stats.byUnit[u.id] || 0;
               const pct = (cnt / maxCount) * 100;
-              const bar = u.type === 'Rig' ? 'bg-navy' : 'bg-safety';
+              const bar = ({ 'Rig':'bg-navy','Standalone':'bg-safety','Alat Berat':'bg-amber-600','Kendaraan':'bg-emerald-600','Fire & Safety':'bg-rose-600' }[u.type]) || 'bg-slate-500';
               return `<div>
                 <div class="flex items-center justify-between text-sm mb-0.5">
                   <span class="font-medium text-slate-700">${escapeHtml(u.name)} <span class="text-xs text-slate-400">(${u.type})</span></span>
@@ -1973,9 +2020,7 @@
               <tbody class="divide-y divide-slate-200">
                 ${state.categories.map(cat => {
                   const usage = eqCount[cat.id] || 0;
-                  const typeBadge = cat.parent_unit_type === 'Rig' ? 'bg-navy text-white'
-                    : cat.parent_unit_type === 'Standalone' ? 'bg-safety text-white'
-                    : 'bg-slate-500 text-white';
+                  const typeBadge = ({ 'Rig':'bg-navy text-white','Standalone':'bg-safety text-white','Alat Berat':'bg-amber-600 text-white','Kendaraan':'bg-emerald-600 text-white','Fire & Safety':'bg-rose-600 text-white' }[cat.parent_unit_type]) || 'bg-slate-500 text-white';
                   return `
                     <tr class="hover:bg-slate-50">
                       <td class="px-3 py-2 text-sm font-semibold text-slate-800">${escapeHtml(cat.name)}</td>
@@ -2014,9 +2059,9 @@
             <div>
               <label class="block text-sm font-semibold text-slate-700 mb-1">Untuk Unit Type *</label>
               <select name="parent_unit_type" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">
-                ${['Rig','Standalone','Both'].map(t => `<option value="${t}" ${existing?.parent_unit_type === t ? 'selected' : ''}>${t}</option>`).join('')}
+                ${['Rig','Standalone','Alat Berat','Kendaraan','Fire & Safety','Both'].map(t => `<option value="${t}" ${existing?.parent_unit_type === t ? 'selected' : ''}>${t}</option>`).join('')}
               </select>
-              <p class="text-xs text-slate-500 mt-1">Rig: untuk equipment di rig. Standalone: untuk MTU/Slickline/Independent. Both: bisa dua-duanya.</p>
+              <p class="text-xs text-slate-500 mt-1">Rig: equipment di rig. Standalone: MTU/Slickline/Independent. Alat Berat: civil heavy eq. Kendaraan: truk/manlift (KM). Fire & Safety: fire pump portable & damkar. Both: bisa multi-armada.</p>
             </div>
           </form>
         `,
@@ -5216,6 +5261,8 @@
     function renderInfoTab(eq) {
       const lc = computeLifecycle(eq);
       const lcVerdict = lc ? (lc.verdict === 'replace' ? '🔴 Kandidat ganti (umur)' : lc.verdict === 'watch' ? '🟡 Pantau' : '🟢 Sehat') : null;
+      const u = (eq.pm_type === 'km') ? 'km' : 'jam';  // satuan tampil sesuai basis pemakaian
+      const U = u.toUpperCase();
       const sections = [
         ['Identitas', [
           ['Tag Number', eq.tag_number],
@@ -5238,29 +5285,30 @@
           ['Status Operasi', eq.status_operasi],
           ['Kondisi Fisik', eq.kondisi_fisik],
           ['Lokasi Fisik', eq.lokasi_fisik],
-          ['Running Hours', eq.running_hours != null ? fmtNumber(eq.running_hours, ' jam') : null],
+          [`Counter (${U})`, eq.running_hours != null ? fmtNumber(eq.running_hours, ' ' + u) : null],
+          ['Basis Pemakaian', eq.pm_type || 'hours'],
         ]],
         ['Maintenance', [
           ['Last Maintenance', fmtDate(eq.last_maintenance_date)],
           ['Last Type', eq.last_maintenance_type],
           ['Next Maintenance', fmtDate(eq.next_maintenance_date)],
           ['Tgl PM Terakhir', eq.last_pm_date ? fmtDate(eq.last_pm_date) : null],
-          ['Interval PM (jam)', eq.pm_interval_hours != null ? fmtNumber(eq.pm_interval_hours, ' jam') : null],
-          ['Sisa Jam ke PM', (eq.running_hours != null && eq.pm_interval_hours)
+          [`Interval PM (${u})`, eq.pm_interval_hours != null ? fmtNumber(eq.pm_interval_hours, ' ' + u) : null],
+          [`Sisa ${U} ke PM`, (eq.running_hours != null && eq.pm_interval_hours)
             ? (() => { const rem = Number(eq.pm_interval_hours) - (Number(eq.running_hours || 0) - Number(eq.last_pm_hours || 0));
-                       return rem < 0 ? `⚠️ lewat ${fmtNumber(-rem, ' jam')}` : fmtNumber(rem, ' jam'); })()
+                       return rem < 0 ? `⚠️ lewat ${fmtNumber(-rem, ' ' + u)}` : fmtNumber(rem, ' ' + u); })()
             : null],
           ['Interval', eq.maintenance_interval],
           ['PIC Mechanic', eq.pic_mechanic],
           ['GOH Year', eq.goh_year],
         ]],
-        ['Overhaul & Kelayakan (jam)', [
+        [`Overhaul & Kelayakan (${u})`, [
           ['Tgl GOH Terakhir', eq.last_goh_date ? fmtDate(eq.last_goh_date) : null],
-          ['Interval TOH', eq.toh_interval_hours != null ? fmtNumber(eq.toh_interval_hours, ' jam') : null],
-          ['Interval GOH', eq.goh_interval_hours != null ? fmtNumber(eq.goh_interval_hours, ' jam') : null],
-          ['Batas Umur Ekonomis', eq.economic_life_hours != null ? fmtNumber(eq.economic_life_hours, ' jam') : null],
-          ['Sisa Jam ke TOH', lc && lc.toh ? (lc.toh.remaining < 0 ? `⚠️ lewat ${fmtNumber(-lc.toh.remaining, ' jam')}` : fmtNumber(lc.toh.remaining, ' jam')) : null],
-          ['Sisa Jam ke GOH', lc && lc.goh ? (lc.goh.remaining < 0 ? `⚠️ lewat ${fmtNumber(-lc.goh.remaining, ' jam')}` : fmtNumber(lc.goh.remaining, ' jam')) : null],
+          ['Interval TOH', eq.toh_interval_hours != null ? fmtNumber(eq.toh_interval_hours, ' ' + u) : null],
+          ['Interval GOH', eq.goh_interval_hours != null ? fmtNumber(eq.goh_interval_hours, ' ' + u) : null],
+          ['Batas Umur Ekonomis', eq.economic_life_hours != null ? fmtNumber(eq.economic_life_hours, ' ' + u) : null],
+          [`Sisa ${U} ke TOH`, lc && lc.toh ? (lc.toh.remaining < 0 ? `⚠️ lewat ${fmtNumber(-lc.toh.remaining, ' ' + u)}` : fmtNumber(lc.toh.remaining, ' ' + u)) : null],
+          [`Sisa ${U} ke GOH`, lc && lc.goh ? (lc.goh.remaining < 0 ? `⚠️ lewat ${fmtNumber(-lc.goh.remaining, ' ' + u)}` : fmtNumber(lc.goh.remaining, ' ' + u)) : null],
           ['Umur Ekonomis Terpakai', lc && lc.eco ? `${Math.round(lc.eco.pct)}%` : null],
           ['Status Kelayakan', lcVerdict],
         ]],
@@ -7216,7 +7264,7 @@
     function mobRowHtml(r) {
       const pdf = r.pdf_storage_path ? ` <button onclick="openJmpPdf('${r.pdf_storage_path}')" class="text-navy hover:underline" title="Buka PDF JMP">📎</button>` : '';
       return `<tr class="border-b border-slate-100">
-        <td class="px-3 py-2 text-sm font-semibold text-slate-700">${escapeHtml(r.mob_date || '—')}</td>
+        <td class="px-3 py-2 text-sm font-semibold text-slate-700">${r.mob_date ? fmtDate(r.mob_date) : '—'}</td>
         <td class="px-3 py-2 text-sm font-bold text-slate-800">${escapeHtml(r.unit_name || '—')}</td>
         <td class="px-3 py-2 text-sm font-medium text-slate-700">${escapeHtml(r.origin || '?')} → ${escapeHtml(r.destination || '?')}${pdf}</td>
         <td class="px-3 py-2 text-base font-extrabold text-slate-900">${r.total_score}</td>
@@ -7355,7 +7403,7 @@
           const total = list.reduce((s, r) => s + r.applied, 0);
           const rows = list.map(r => `
             <tr class="border-b border-slate-100">
-              <td class="px-3 py-2 text-sm">${escapeHtml(r.mob_date || '—')}</td>
+              <td class="px-3 py-2 text-sm">${r.mob_date ? fmtDate(r.mob_date) : '—'}</td>
               <td class="px-3 py-2 text-sm">${escapeHtml(r.unit_name || '—')}</td>
               <td class="px-3 py-2 text-sm text-slate-600">${escapeHtml(r.origin || '?')} → ${escapeHtml(r.destination || '?')}</td>
               <td class="px-3 py-2 text-sm font-bold">${r.applied}</td>
@@ -8128,16 +8176,16 @@
     // KELAYAKAN ARMADA (Fase 2) — gabung UMUR (lifecycle) + KEANDALAN (MTBF-HM/Avail)
     // ============================================================
     async function renderKelayakanPage(host) {
-      let eqAll = [], dtAll = [];
+      let eqHm = [], eqKm = [], dtAll = [];
       try {
-        const [eq, dt] = await Promise.all([
-          state.supabase.from('equipment')
-            .select('id, tag_number, nama_equipment, assigned_unit_id, running_hours, toh_interval_hours, goh_interval_hours, economic_life_hours, last_toh_hours, last_goh_hours')
-            .gt('running_hours', 0),
+        const fields = 'id, tag_number, nama_equipment, assigned_unit_id, running_hours, toh_interval_hours, goh_interval_hours, economic_life_hours, last_toh_hours, last_goh_hours, pm_type';
+        const [hm, km, dt] = await Promise.all([
+          state.supabase.from('equipment').select(fields).gt('running_hours', 0).neq('pm_type', 'km'),
+          state.supabase.from('equipment').select(fields).gt('running_hours', 0).eq('pm_type', 'km'),
           state.supabase.from('downtime_events').select('*'),
         ]);
-        if (eq.error) throw eq.error; if (dt.error) throw dt.error;
-        eqAll = eq.data || []; dtAll = dt.data || [];
+        if (hm.error) throw hm.error; if (km.error) throw km.error; if (dt.error) throw dt.error;
+        eqHm = hm.data || []; eqKm = km.data || []; dtAll = dt.data || [];
       } catch (e) {
         host.innerHTML = `<div class="bg-red-50 text-red-700 p-4 rounded-xl text-sm">Gagal memuat: ${escapeHtml(e.message)}</div>`;
         return;
@@ -8151,78 +8199,97 @@
         dAgg[k].downH += Math.max(0, Math.min(e2, now) - Math.max(s, start)) / 3600000;
       });
       const VW = { replace: 0, watch: 1, keep: 2 };
-      const rows = eqAll.map(x => {
-        const lc = computeLifecycle(x);
-        const d = dAgg[x.id] || { fails: 0, downH: 0 };
-        const rh = Number(x.running_hours) || 0;
-        const mtbf = d.fails > 0 ? rh / d.fails : null;                 // MTBF(HM) seumur hidup = jam jalan ÷ kerusakan
-        const avail = Math.max(0, Math.min(100, (periodH - d.downH) / periodH * 100));
-        const cycle = Number(x.toh_interval_hours) || Number(x.goh_interval_hours) || 0;
-        let rel = 'na';
-        if (d.fails === 0) rel = 'green';
-        else if (cycle > 0) rel = mtbf < 0.5 * cycle ? 'red' : (mtbf < cycle ? 'amber' : 'green');
-        const umur = lc ? lc.verdict : null;                           // replace/watch/keep/null
-        let v = 'keep';
-        if (umur === 'replace' && (rel === 'red' || rel === 'amber')) v = 'replace';
-        else if (umur === 'replace' || rel === 'red' || umur === 'watch') v = 'watch';
-        return { x, lc, d, rh, mtbf, avail, cycle, rel, umur, v };
-      }).sort((a, b) => VW[a.v] - VW[b.v] || a.avail - b.avail);
-
-      const nRep = rows.filter(r => r.v === 'replace').length;
-      const nWatch = rows.filter(r => r.v === 'watch').length;
-      const nKeep = rows.filter(r => r.v === 'keep').length;
       const vBadge = (v) => v === 'replace' ? '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700">🔴 Kandidat ganti</span>'
         : v === 'watch' ? '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700">🟡 Pantau</span>'
         : '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700">🟢 Sehat</span>';
 
-      const tbody = rows.map((r, i) => {
-        const lc = r.lc;
-        const umurTxt = lc && lc.eco ? `${Math.round(lc.eco.pct)}%` : '—';
-        const gohTxt = lc && lc.goh ? (lc.goh.remaining < 0 ? `<span class="text-red-600">lewat ${fmtNumber(-lc.goh.remaining)}</span>` : fmtNumber(lc.goh.remaining)) : '—';
-        const mtbfTxt = r.mtbf != null ? fmtNumber(Math.round(r.mtbf), ' jam') : (r.d.fails === 0 ? '<span class="text-slate-400">blm rusak</span>' : '—');
-        return `<tr class="border-b border-slate-100 hover:bg-slate-50 cursor-pointer" onclick="setEquipmentView('detail','${r.x.id}'); navigate('equipment')">
-          <td class="px-3 py-2 text-sm text-slate-500">${i + 1}</td>
-          <td class="px-3 py-2 text-sm font-mono font-bold text-navy whitespace-nowrap">${escapeHtml(r.x.tag_number)}</td>
-          <td class="px-3 py-2 text-sm text-slate-600 whitespace-nowrap">${escapeHtml(getParentUnitName(r.x.assigned_unit_id))}</td>
-          <td class="px-3 py-2 text-sm text-right font-semibold whitespace-nowrap">${fmtNumber(r.rh, ' jam')}</td>
-          <td class="px-3 py-2 text-sm text-right">${umurTxt}</td>
-          <td class="px-3 py-2 text-sm text-right whitespace-nowrap">${gohTxt}</td>
-          <td class="px-3 py-2 text-sm text-right">${r.d.fails}</td>
-          <td class="px-3 py-2 text-sm text-right whitespace-nowrap">${mtbfTxt}</td>
-          <td class="px-3 py-2 text-center">${availPct(r.avail)}</td>
-          <td class="px-3 py-2 text-center whitespace-nowrap">${vBadge(r.v)}</td>
-        </tr>`;
-      }).join('');
+      function buildSection(eqAll, unit) {
+        const rows = eqAll.map(x => {
+          const lc = computeLifecycle(x);  // sama utk HM/KM (field semantik di-overload by pm_type)
+          const d = dAgg[x.id] || { fails: 0, downH: 0 };
+          const rh = Number(x.running_hours) || 0;
+          const mtbf = d.fails > 0 ? rh / d.fails : null;
+          const avail = Math.max(0, Math.min(100, (periodH - d.downH) / periodH * 100));
+          const cycle = Number(x.toh_interval_hours) || Number(x.goh_interval_hours) || 0;
+          let rel = 'na';
+          if (d.fails === 0) rel = 'green';
+          else if (cycle > 0) rel = mtbf < 0.5 * cycle ? 'red' : (mtbf < cycle ? 'amber' : 'green');
+          const umur = lc ? lc.verdict : null;
+          let v = 'keep';
+          if (umur === 'replace' && (rel === 'red' || rel === 'amber')) v = 'replace';
+          else if (umur === 'replace' || rel === 'red' || umur === 'watch') v = 'watch';
+          return { x, lc, d, rh, mtbf, avail, cycle, rel, umur, v };
+        }).sort((a, b) => VW[a.v] - VW[b.v] || a.avail - b.avail);
+
+        const tbody = rows.map((r, i) => {
+          const lc = r.lc;
+          const umurTxt = lc && lc.eco ? `${Math.round(lc.eco.pct)}%` : '—';
+          const gohTxt = lc && lc.goh ? (lc.goh.remaining < 0 ? `<span class="text-red-600">lewat ${fmtNumber(-lc.goh.remaining)}</span>` : fmtNumber(lc.goh.remaining)) : '—';
+          const mtbfTxt = r.mtbf != null ? fmtNumber(Math.round(r.mtbf), ' ' + unit) : (r.d.fails === 0 ? '<span class="text-slate-400">blm rusak</span>' : '—');
+          return `<tr class="border-b border-slate-100 hover:bg-slate-50 cursor-pointer" onclick="setEquipmentView('detail','${r.x.id}'); navigate('equipment')">
+            <td class="px-3 py-2 text-sm text-slate-500">${i + 1}</td>
+            <td class="px-3 py-2 text-sm font-mono font-bold text-navy whitespace-nowrap">${escapeHtml(r.x.tag_number)}</td>
+            <td class="px-3 py-2 text-sm text-slate-600 whitespace-nowrap">${escapeHtml(getParentUnitName(r.x.assigned_unit_id))}</td>
+            <td class="px-3 py-2 text-sm text-right font-semibold whitespace-nowrap">${fmtNumber(r.rh, ' ' + unit)}</td>
+            <td class="px-3 py-2 text-sm text-right">${umurTxt}</td>
+            <td class="px-3 py-2 text-sm text-right whitespace-nowrap">${gohTxt}</td>
+            <td class="px-3 py-2 text-sm text-right">${r.d.fails}</td>
+            <td class="px-3 py-2 text-sm text-right whitespace-nowrap">${mtbfTxt}</td>
+            <td class="px-3 py-2 text-center">${availPct(r.avail)}</td>
+            <td class="px-3 py-2 text-center whitespace-nowrap">${vBadge(r.v)}</td>
+          </tr>`;
+        }).join('');
+        return {
+          nRep: rows.filter(r => r.v === 'replace').length,
+          nWatch: rows.filter(r => r.v === 'watch').length,
+          nKeep: rows.filter(r => r.v === 'keep').length,
+          tbody,
+        };
+      }
+
+      function renderSection(sec, unit, title, emptyMsg) {
+        const U = unit.toUpperCase();
+        return `
+          <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+            <h4 class="text-base font-bold text-slate-800">${title}</h4>
+          </div>
+          <div class="grid grid-cols-3 gap-3">
+            <div class="bg-white rounded-xl border border-slate-200 p-4 text-center"><div class="text-2xl font-extrabold text-green-700">${sec.nKeep}</div><div class="text-xs text-slate-500">🟢 Sehat</div></div>
+            <div class="bg-white rounded-xl border border-slate-200 p-4 text-center"><div class="text-2xl font-extrabold text-amber-600">${sec.nWatch}</div><div class="text-xs text-slate-500">🟡 Pantau</div></div>
+            <div class="bg-white rounded-xl border border-slate-200 p-4 text-center"><div class="text-2xl font-extrabold text-red-700">${sec.nRep}</div><div class="text-xs text-slate-500">🔴 Kandidat ganti</div></div>
+          </div>
+          <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto">
+            <table class="w-full">
+              <thead><tr class="bg-slate-50 border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+                <th class="px-3 py-2">#</th><th class="px-3 py-2">Tag</th><th class="px-3 py-2">Armada</th>
+                <th class="px-3 py-2 text-right">${U}</th><th class="px-3 py-2 text-right">Umur</th>
+                <th class="px-3 py-2 text-right">Sisa GOH</th><th class="px-3 py-2 text-right">Rusak</th>
+                <th class="px-3 py-2 text-right">MTBF(${U})</th><th class="px-3 py-2 text-center">Avail</th>
+                <th class="px-3 py-2 text-center">Verdict</th>
+              </tr></thead>
+              <tbody>${sec.tbody || `<tr><td colspan="10" class="px-3 py-6 text-center text-slate-400 text-sm">${emptyMsg}</td></tr>`}</tbody>
+            </table>
+          </div>`;
+      }
+
+      const sHm = buildSection(eqHm, 'jam');
+      const sKm = buildSection(eqKm, 'km');
 
       host.innerHTML = `
         <div class="space-y-4">
           <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
             <h3 class="text-lg font-bold text-slate-900">📋 Kelayakan Armada — Layak Maintain vs Ganti</h3>
-            <p class="text-sm text-slate-500 mt-1">Gabungan <b>umur jam</b> (TOH/GOH/umur ekonomis) + <b>keandalan</b> (MTBF berbasis HM &amp; Availability). Klik baris → detail unit.</p>
+            <p class="text-sm text-slate-500 mt-1">Gabungan <b>umur</b> (TOH/GOH/umur ekonomis) + <b>keandalan</b> (MTBF &amp; Availability). Klik baris → detail unit.</p>
           </div>
-          <div class="grid grid-cols-3 gap-3">
-            <div class="bg-white rounded-xl border border-slate-200 p-4 text-center"><div class="text-2xl font-extrabold text-green-700">${nKeep}</div><div class="text-xs text-slate-500">🟢 Sehat</div></div>
-            <div class="bg-white rounded-xl border border-slate-200 p-4 text-center"><div class="text-2xl font-extrabold text-amber-600">${nWatch}</div><div class="text-xs text-slate-500">🟡 Pantau</div></div>
-            <div class="bg-white rounded-xl border border-slate-200 p-4 text-center"><div class="text-2xl font-extrabold text-red-700">${nRep}</div><div class="text-xs text-slate-500">🔴 Kandidat ganti</div></div>
-          </div>
-          <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto">
-            <table class="w-full">
-              <thead><tr class="bg-slate-50 border-b border-slate-200 text-left text-xs uppercase text-slate-500">
-                <th class="px-3 py-2">#</th><th class="px-3 py-2">Tag</th><th class="px-3 py-2">Rig</th>
-                <th class="px-3 py-2 text-right">HM</th><th class="px-3 py-2 text-right">Umur</th>
-                <th class="px-3 py-2 text-right">Sisa GOH</th><th class="px-3 py-2 text-right">Rusak</th>
-                <th class="px-3 py-2 text-right">MTBF(HM)</th><th class="px-3 py-2 text-center">Avail</th>
-                <th class="px-3 py-2 text-center">Verdict</th>
-              </tr></thead>
-              <tbody>${tbody || '<tr><td colspan="10" class="px-3 py-6 text-center text-slate-400 text-sm">Belum ada engine ber-HM dengan interval terisi. Isi interval TOH/GOH di data equipment.</td></tr>'}</tbody>
-            </table>
-          </div>
+          ${renderSection(sHm, 'jam', '⏱️ Berbasis JAM (engine, genset, pump)', 'Belum ada unit ber-HM dengan interval terisi. Isi interval TOH/GOH di data equipment.')}
+          ${renderSection(sKm, 'km', '🛻 Berbasis KM (Kendaraan, Damkar, Slickline truck)', 'Belum ada kendaraan ber-KM dengan interval terisi. Isi economic_life_hours / toh_interval_hours sbg batas KM di data equipment.')}
           <div class="bg-blue-50 border border-blue-200 rounded-xl p-4 text-xs text-slate-600 leading-relaxed">
             <b>Cara baca (transparan &amp; bisa dipertanggungjawabkan):</b><br>
-            • <b>Umur</b> = jam jalan vs batas ekonomis/GOH (Fase 1).<br>
-            • <b>MTBF(HM)</b> = jam jalan ÷ jumlah kerusakan (breakdown + troubleshoot). Dibandingkan ke siklus TOH unit: di bawah ½ siklus = keandalan rendah.<br>
+            • <b>Umur</b> = jam/km jalan vs batas ekonomis / GOH.<br>
+            • <b>MTBF</b> = jam/km jalan ÷ jumlah kerusakan (breakdown + troubleshoot). Dibandingkan ke siklus TOH unit: di bawah ½ siklus = keandalan rendah.<br>
             • 🔴 <b>Kandidat ganti</b> = umur lewat batas <b>DAN</b> keandalan rendah. 🟡 <b>Pantau</b> = salah satu sumbu bermasalah. 🟢 <b>Sehat</b> = keduanya aman.<br>
-            • Kolom <b>Rusak / MTBF / Avail</b> terisi seiring kamu mencatat kerusakan di tab <b>Availability</b>. Selama belum ada catatan, verdict bersandar pada umur.
+            • Kolom <b>Rusak / MTBF / Avail</b> terisi seiring kamu mencatat kerusakan di tab <b>Availability</b>. Selama belum ada catatan, verdict bersandar pada umur.<br>
+            • <i>Catatan KM: field <code>toh_interval_hours</code> / <code>economic_life_hours</code> dipakai sbg batas KM utk pm_type='km' (semantik di-overload, akan dipecah jadi kolom km tersendiri di fase berikutnya).</i>
           </div>
         </div>`;
     }
@@ -8420,7 +8487,7 @@
       const totalBiaya = logs.reduce((a, b) => a + (Number(b.total) || 0), 0);
       const typeBadge = (t) => { const m = { PM: 'bg-blue-100 text-blue-700', CM: 'bg-orange-100 text-orange-700', PdM: 'bg-purple-100 text-purple-700', BD: 'bg-red-100 text-red-700' }; return `<span class="px-2 py-0.5 rounded-full text-xs font-semibold ${m[t] || 'bg-slate-100 text-slate-600'}">${escapeHtml(t || '-')}</span>`; };
       const rows = logs.map(l => `<tr class="border-b border-slate-100">
-        <td class="px-3 py-2 text-sm font-semibold text-slate-700 whitespace-nowrap">${escapeHtml(l.log_date || '—')}</td>
+        <td class="px-3 py-2 text-sm font-semibold text-slate-700 whitespace-nowrap">${l.log_date ? fmtDate(l.log_date) : '—'}</td>
         <td class="px-3 py-2 text-sm font-bold text-slate-800">${escapeHtml(l.equipment_name || '—')}</td>
         <td class="px-3 py-2">${typeBadge(l.maintenance_type)}</td>
         <td class="px-3 py-2 text-sm font-semibold text-slate-700">${fmtRp(l.total)}</td>
