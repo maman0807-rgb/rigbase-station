@@ -65,6 +65,14 @@
       h2, h3, h4, td, th, span, div, p, li, label { display: revert !important; color: black !important; }
       /* Tab content tetap kelihatan */
       #detail-tab-content { display: block !important; }
+      /* Panduan eRAMHoist — mode slide: tiap section = 1 halaman */
+      .panduan-page .pdsec { break-after: page; page-break-after: always; }
+      .panduan-page .pdsec:last-child { break-after: auto; page-break-after: auto; }
+      .panduan-page .text-safety, .panduan-page .ram { color: #f97316 !important; }
+      .panduan-page .bg-blue-50 { background: #eff6ff !important; border: 1px solid #93c5fd !important; }
+      .panduan-page .bg-amber-50 { background: #fffbeb !important; border: 1px solid #fcd34d !important; }
+      .panduan-page table th { background: #f1f5f9 !important; }
+      @page { size: A4; margin: 12mm; }
     }
   </style>
 </head>
@@ -1460,7 +1468,7 @@
         return;
       }
       state.currentPage = pageId;
-      $('#page-title').textContent = item.label;
+      $('#page-title').innerHTML = item.label;
       renderSidebar();
       renderBottomNav();
       const main = $('#main-content');
@@ -8987,9 +8995,9 @@
     // ============================================================
     PAGES.panduan = function () {
       const div = document.createElement('div');
-      div.className = 'page space-y-4 max-w-4xl';
+      div.className = 'page panduan-page space-y-4 max-w-4xl';
       const sec = (color, icon, title, bodyHtml) => `
-        <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="pdsec bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           <div class="px-5 py-3 border-b border-slate-100 flex items-center gap-2" style="border-left:4px solid ${color}">
             <span class="text-xl">${icon}</span><span class="font-bold text-slate-800">${title}</span>
           </div>
@@ -8998,9 +9006,12 @@
       const tbl = (head, rows) => `<table class="w-full text-xs border border-slate-200 my-2"><thead><tr class="bg-slate-50 text-left font-bold text-slate-600">${head.map(h => `<th class="px-2 py-1 border border-slate-200">${h}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr>${r.map(c => `<td class="px-2 py-1 border border-slate-200">${c}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
 
       div.innerHTML = `
-        <div>
-          <h3 class="text-2xl font-bold text-slate-900">📖 Panduan e<span class="text-safety">RAM</span>Hoist</h3>
-          <p class="text-sm text-slate-500">Penjelasan singkat tentang modul.</p>
+        <div class="flex items-start justify-between gap-3 flex-wrap no-print">
+          <div>
+            <h3 class="text-2xl font-bold text-slate-900">📖 Panduan e<span class="text-safety">RAM</span>Hoist</h3>
+            <p class="text-sm text-slate-500">Penjelasan singkat tentang modul. Mode cetak: tiap section = 1 halaman (slide).</p>
+          </div>
+          <button onclick="window.print()" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy-700 text-white text-sm font-semibold whitespace-nowrap">🖨 Cetak / Save PDF</button>
         </div>
 
         <div class="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-900">
