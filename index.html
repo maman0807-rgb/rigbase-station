@@ -9004,7 +9004,9 @@
         </div>
 
         <div class="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-900">
-          <b>Alur RAM:</b> 🚛 <b>Stress Score</b> (beban mobilisasi) → menaikkan <b>Occurrence</b> di ⚠️ <b>FMEA</b> (risiko/RPN) → komponen RPN tinggi → spare-nya prioritas di 📦 <b>CSPP</b>. 🟢 <b>Availability</b> mengukur kesiapan; 🛠️ <b>Maintenance</b> (dari Logbook) = riwayat perbaikan.
+          <b>Alur RAM:</b> 🚛 <b>Stress Score</b> (beban mobilisasi) → menaikkan <b>Occurrence</b> di ⚠️ <b>FMEA</b> (risiko/RPN) → komponen RPN tinggi → spare-nya prioritas di 📦 <b>CSPP</b>.
+          🟢 <b>Availability</b> mengukur kesiapan harian; 🛠️ <b>Maintenance</b> (PM/TOH/GOH) jaga performa; 📋 <b>Kelayakan</b> putuskan unit layak dirawat atau ganti.
+          📸 <b>Catat Downtime + Foto</b> = audit trail visual tiap kejadian.
         </div>
 
         ${sec('#dc2626', '🚛', 'Stress Score — beban mobilisasi', `
@@ -9027,6 +9029,37 @@
           <p class="bg-slate-50 border border-slate-200 rounded p-2 font-mono text-xs">Availability % = (Jam periode − Jam down) ÷ Jam periode × 100</p>
           ${tbl(['Istilah', 'Arti'], [['MTTR', 'Mean Time To Repair — rata-rata lama perbaikan (makin cepat makin baik)'], ['MTBF', 'Mean Time Between Failures — rata-rata waktu antar kerusakan (makin lama makin andal)'], ['Rumus RAM', 'A = MTBF ÷ (MTBF + MTTR)']])}
           <p><b>Kategori:</b> 🟢 ≥95% · 🟡 ≥85% · 🔴 &lt;85%. Equipment yang belum pernah down = 100%.</p>`)}
+
+        ${sec('#0ea5e9', '🛠️', 'Maintenance — PM, TOH, GOH', `
+          <p>Sistem perawatan berbasis <b>jam jalan (HM)</b> atau <b>kilometer (KM)</b> sesuai jenis unit.</p>
+          ${tbl(['Jenis unit', 'Basis', 'Field interval', 'Default'], [['Engine, Genset, Pompa', 'jam', 'pm_interval_hours', '500 jam'], ['Kendaraan, Damkar, Slickline truck', 'km', 'pm_interval_hours (sebagai km)', '5.000 km']])}
+          <p><b>4 Tier interval OEM</b> diterapkan otomatis sesuai engine class (lihat dokumen PANDUAN_INTERVAL_HM.md di GitHub):</p>
+          ${tbl(['Tier', 'Contoh', 'PM', 'TOH', 'GOH', 'Eco life'], [['A', 'Perkins 1103A, Cummins 4BTA', '500', '6.000', '12.000', '30.000'], ['B', 'CAT C4.4, Deutz 1013', '500', '8.000', '16.000', '35.000'], ['C', 'FG Wilson P220 (Perkins 1106A)', '500', '10.000', '20.000', '40.000'], ['D', 'CAT D3406/C13/C15 (rig prime mover)', '500', '10.000', '20.000', '45.000']])}
+          <p><b>Sisa PM</b> = (last_pm_hours + pm_interval_hours) − running_hours. Kalau ≤ 0 → ⚠️ lewat.</p>`)}
+
+        ${sec('#ef4444', '📋', 'Kelayakan Armada — Maintain vs Ganti', `
+          <p>Gabungan <b>umur jam/km</b> (TOH/GOH/eco life) + <b>keandalan</b> (MTBF berbasis HM). Pakai 2 sumbu untuk verdict.</p>
+          ${tbl(['Verdict', 'Aturan'], [['🟢 Sehat', 'Umur &lt;80% AND keandalan ≥1 siklus TOH'], ['🟡 Pantau', 'Salah satu sumbu bermasalah (umur 80-99% atau MTBF &lt;1 siklus)'], ['🔴 Kandidat ganti', 'Umur ≥100% AND keandalan &lt;½ TOH']])}
+          <p><b>Layout:</b> 2 section terpisah — Berbasis JAM (engine, genset, pump) + Berbasis KM (Kendaraan, Damkar, Slickline truck).</p>
+          <p><b>Catatan:</b> kolom Rusak/MTBF/Avail terisi seiring kamu mencatat kerusakan di tab Availability. Selama belum ada catatan, verdict bersandar pada umur saja.</p>`)}
+
+        ${sec('#7c3aed', '📸', 'Catat Downtime + Foto — workflow real-time', `
+          <p>Setiap kejadian downtime bisa diupload <b>foto dengan tanggal kejadian</b> (bukan tanggal upload — supaya audit trail jujur kalau telat upload).</p>
+          ${tbl(['Phase', 'Saat upload', 'Border warna'], [['Sebelum (before)', 'Saat lapor rusak / kondisi awal', '🔴 merah'], ['Part (part)', 'Saat part datang / dipasang', '🔵 biru'], ['Sesudah (after)', 'Saat perbaikan selesai', '🟢 hijau'], ['Lainnya (other)', 'Foto update progress', '⚪ abu-abu']])}
+          <p><b>Alur 3 fase multi-day repair:</b></p>
+          <ol class="list-decimal pl-5 space-y-1">
+            <li><b>Hari 1 — Rusak:</b> + Catat Downtime → catatan + foto fase "Sebelum". Selesai dikosongkan.</li>
+            <li><b>Hari 3 — Part datang:</b> Edit record yg sama → tambah foto fase "Part" dgn tgl kejadian = tgl part datang. Status tetap 🔴 Sedang Down.</li>
+            <li><b>Hari 5 — Selesai:</b> Edit → isi tanggal Selesai + foto fase "Sesudah". Record closed, durasi auto-terhitung.</li>
+          </ol>
+          <p><b>Hasil di History tab</b> equipment: 3 baris timeline (DOWN → PART → SELESAI) dengan thumbnail foto + nama pelapor.</p>
+          <p>Foto auto-compress ke ≤300KB (1280px JPEG q78). Max 5 per upload session (bisa multiple session via Edit).</p>`)}
+
+        <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-slate-700">
+          <b class="text-amber-800">📚 Dokumen lengkap di GitHub:</b><br>
+          • <a href="https://github.com/maman0807-rgb/rigbase-station/blob/main/PANDUAN_RAM_eRAMHoist.md" target="_blank" class="text-navy underline hover:text-navy-700"><b>PANDUAN_RAM_eRAMHoist.md</b></a> — user manual operasional komprehensif (SOP harian/mingguan, workflow detail, common pitfalls)<br>
+          • <a href="https://github.com/maman0807-rgb/rigbase-station/blob/main/PANDUAN_INTERVAL_HM.md" target="_blank" class="text-navy underline hover:text-navy-700"><b>PANDUAN_INTERVAL_HM.md</b></a> — angka OEM tier per merek (Perkins/CAT/Cummins/Deutz/FG Wilson) + audit trail rename
+        </div>
         `;
       return div;
     };
