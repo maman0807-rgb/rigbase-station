@@ -6031,6 +6031,18 @@
         <b>Filter:</b> ${filterLabel} &nbsp;|&nbsp; <b>Jumlah baris:</b> ${ev.length}<br>
         Dokumen ini merupakan rekaman pergerakan (mutasi/pinjaman), downtime, &amp; gejala (early warning) equipment untuk keperluan penelusuran (traceability).<br>
         <span style="color:#92400e"><b>Catatan:</b> <i>Gejala</i> = tanda awal kelainan; alat masih jalan, TIDAK menurunkan availability. Dipisah dari Downtime real (alat berhenti).</span></p>`;
+      // Helper: detail bisa HTML (ada <b>, <br>, <span>) → render rapi di PDF.
+      // Strip tag yg tidak perlu utk print, ganti <br> jadi " · ", buang class CSS.
+      const detailForPrint = (e) => {
+        const raw = e.detail || '-';
+        if (!e.detailIsHtml) return escapeHtml(raw);
+        return String(raw)
+          .replace(/<br\s*\/?>/gi, ' · ')
+          .replace(/<span[^>]*>/gi, '')
+          .replace(/<\/span>/gi, '')
+          .replace(/<b>/gi, '<strong>')
+          .replace(/<\/b>/gi, '</strong>');
+      };
       const rows = ev.slice(0, 500).map((e, i) => {
         const title = e.title.replace(/[🔴🟢🤝↩️🟡📦📝]/g, '').trim();
         // Tentukan label Jenis: untuk group downtime, lihat subgroup
@@ -6039,7 +6051,7 @@
           : (grpLabel[e.group] || '-');
         // Beri warna baris kalau gejala (amber soft)
         const rowStyle = e.subgroup === 'gejala' ? ' style="background:#fffbeb"' : '';
-        return `<tr${rowStyle}><td style="text-align:center">${i + 1}</td><td style="text-align:center">${escapeHtml(fmtDate(e.date))}</td><td style="text-align:center">${escapeHtml(jenis)}</td><td>${escapeHtml(title)}</td><td>${escapeHtml(e.detail || '-')}</td></tr>`;
+        return `<tr${rowStyle}><td style="text-align:center">${i + 1}</td><td style="text-align:center">${escapeHtml(fmtDate(e.date))}</td><td style="text-align:center">${escapeHtml(jenis)}</td><td>${escapeHtml(title)}</td><td>${detailForPrint(e)}</td></tr>`;
       }).join('');
       const table = `<table><thead><tr><th>No</th><th>Tanggal</th><th>Jenis</th><th>Keterangan</th><th>Detail / Alasan</th></tr></thead><tbody>${rows || '<tr><td colspan="5" style="text-align:center">Tidak ada data</td></tr>'}</tbody></table>`;
       const kesimpulan = `Rekaman riwayat di atas digunakan untuk pelacakan pergerakan aset, audit, dan dasar analisa keandalan (RAM). Total <b>${ev.length}</b> kejadian tercatat untuk equipment <b>${escapeHtml(eq.tag_number || '')}</b> — terdiri dari <b>${cnt.downtime}</b> downtime real, <b>${cnt.gejala}</b> gejala (early warning), <b>${cnt.mutasi}</b> mutasi, <b>${cnt.pinjam}</b> pinjaman.`;
