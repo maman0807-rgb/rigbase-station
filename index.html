@@ -5839,24 +5839,43 @@
         // Downtime & Perbaikan — pecah per milestone (DOWN → part datang/dipasang → SELESAI)
         dt.forEach(d => {
           const cat = (typeof DT_CAT !== 'undefined' && DT_CAT[d.category]) || d.category || 'Lainnya';
+          const isGejala = d.category === 'gejala';
           const allPhotos = photosByEvent[d.id] || [];
           const beforePhotos = allPhotos.filter(p => p.phase === 'before' || !p.phase);
           const partOrOtherPhotos = allPhotos.filter(p => p.phase === 'part' || p.phase === 'other');
           const afterPhotos = allPhotos.filter(p => p.phase === 'after');
 
-          // 1) DOWN event (kerusakan awal) — penyebab + pelapor + catatan kerusakan
+          // Pecah notes: bagian original (sebelum TINDAKAN/ESKALASI) vs daftar TINDAKAN/ESKALASI
+          // notes format: "originalNotes · [TINDAKAN 28/5/2026, 09.17] isi · [TINDAKAN ...] ..."
+          const rawNotes = d.notes || '';
+          const markerRe = / · \[(TINDAKAN|ESKALASI) ([^\]]+)\] /;
+          const firstMarker = rawNotes.search(/ · \[(TINDAKAN|ESKALASI) /);
+          const originalNotes = firstMarker >= 0 ? rawNotes.slice(0, firstMarker).trim() : rawNotes.trim();
+          const actionEntries = [];
+          if (firstMarker >= 0) {
+            const tail = rawNotes.slice(firstMarker);
+            // split tiap entry
+            const parts = tail.split(/ · (?=\[(?:TINDAKAN|ESKALASI) )/).map(s => s.replace(/^ · /, '').trim()).filter(Boolean);
+            parts.forEach(p => {
+              const m = p.match(/^\[(TINDAKAN|ESKALASI) ([^\]]+)\]\s*(.*)$/);
+              if (m) actionEntries.push({ kind: m[1], when: m[2], text: m[3].trim() });
+            });
+          }
+
+          // 1) DOWN/GEJALA event (kerusakan awal) — penyebab + pelapor + catatan ORIGINAL saja
           const reporter = d.created_by_name || '-';
           const downDetailLines = [];
           downDetailLines.push(`👷 Dilaporkan oleh: <b>${escapeHtml(reporter)}</b>`);
-          if (d.notes) downDetailLines.push(`📝 ${escapeHtml(d.notes)}`);
+          if (originalNotes) downDetailLines.push(`📝 ${escapeHtml(originalNotes)}`);
+          const titleNotes = (originalNotes || '-').slice(0, 80);
           events.push({
-            group: 'downtime', kind: 'down',
+            group: 'downtime', kind: isGejala ? 'gejala' : 'down',
             date: d.start_at,
-            title: `🔴 Penyebab: ${cat}`,
+            title: isGejala ? `🟡 Gejala terdeteksi: ${titleNotes}` : `🔴 Penyebab: ${cat}`,
             detail: downDetailLines.join('<br>'),
             detailIsHtml: true,
-            color: 'bg-red-500',
-            status: d.end_at ? null : 'down',
+            color: isGejala ? 'bg-amber-500' : 'bg-red-500',
+            status: d.end_at ? null : (isGejala ? 'gejala' : 'down'),
             photos: beforePhotos,
             eventId: d.id,
           });
@@ -5886,18 +5905,23 @@
             });
           });
 
-          // 3) SELESAI event — detail = caption foto after, BUKAN catatan (biar tidak duplikat dgn DOWN)
+          // 3) SELESAI event — detail = TINDAKAN/ESKALASI dari notes + caption foto after
           if (d.end_at) {
             const dur = Number(d.duration_hours) || ((new Date(d.end_at) - new Date(d.start_at)) / 3600000);
             const afterCaptions = afterPhotos.map(p => p.caption).filter(Boolean).join(' · ');
             const afterUploaders = [...new Set(afterPhotos.map(p => p.uploaded_by_name).filter(Boolean))];
             const doneDetail = [];
             if (afterUploaders.length) doneDetail.push(`👷 Diselesaikan oleh: <b>${escapeHtml(afterUploaders.join(', '))}</b>`);
+            // Tampilkan tindakan/eskalasi yg tercatat di notes
+            actionEntries.forEach(a => {
+              const icon = a.kind === 'ESKALASI' ? '⚠️' : '🔧';
+              doneDetail.push(`${icon} <b>${escapeHtml(a.kind)}</b> <span class="text-slate-400">(${escapeHtml(a.when)})</span>: ${escapeHtml(a.text)}`);
+            });
             if (afterCaptions) doneDetail.push(`📝 ${escapeHtml(afterCaptions)}`);
             events.push({
               group: 'downtime', kind: 'repaired',
               date: d.end_at,
-              title: `🟢 SELESAI PERBAIKAN (lama ${fmtH(dur)})`,
+              title: isGejala ? `🟢 Gejala selesai diinvestigasi (durasi ${fmtH(dur)})` : `🟢 SELESAI PERBAIKAN (lama ${fmtH(dur)})`,
               detail: doneDetail.join('<br>') || null,
               detailIsHtml: true,
               color: 'bg-green-600',
@@ -5953,6 +5977,7 @@
                     <span class="text-slate-700 font-semibold">${escapeHtml(e.title)}</span>
                     ${e.kind === 'pinjam' && e.status === 'active' ? '<span class="px-2 py-0.5 bg-amber-100 text-amber-800 text-xs font-semibold rounded">aktif</span>' : ''}
                     ${e.kind === 'down' && e.status === 'down' ? '<span class="px-2 py-0.5 bg-red-100 text-red-800 text-xs font-semibold rounded">masih down</span>' : ''}
+                    ${e.kind === 'gejala' && e.status === 'gejala' ? '<span class="px-2 py-0.5 bg-amber-100 text-amber-800 text-xs font-semibold rounded">diselidiki</span>' : ''}
                   </div>
                   ${e.detail ? `<div class="text-xs text-slate-600 leading-relaxed">${e.detailIsHtml ? e.detail : escapeHtml(e.detail)}</div>` : ''}
                   ${(e.photos && e.photos.length) ? `<div class="mt-2 flex flex-wrap gap-2">${e.photos.map(p => {
@@ -8235,10 +8260,12 @@
     // 10v. AVAILABILITY — downtime tracking & uptime % (analisa Sr Mekanik+)
     // ============================================================
     const DT_CAT = {
-      breakdown: 'Breakdown', troubleshoot: 'Troubleshoot', tunggu_spare: 'Tunggu Spare', pm: 'PM', mobilisasi: 'Mobilisasi', lainnya: 'Lainnya',
+      breakdown: 'Breakdown', troubleshoot: 'Troubleshoot', tunggu_spare: 'Tunggu Spare', pm: 'PM', mobilisasi: 'Mobilisasi', gejala: '🟡 Gejala (Investigasi)', lainnya: 'Lainnya',
     };
     // Kategori yang dihitung sebagai KEJADIAN kerusakan (penyebut MTBF). Tunggu spare = durasi saja, bukan event baru.
     const FAILURE_CATS = ['breakdown', 'troubleshoot'];
+    // Gejala = early warning; alat MASIH JALAN. Tidak masuk perhitungan availability/MTBF/MTTR.
+    const GEJALA_CAT = 'gejala';
     let availPeriodDays = 365;
     let availData = [];
     let availFilter = { unit_id: '', category: '' };
@@ -8277,6 +8304,7 @@
       const periodDays = 365, now = Date.now(), start = now - periodDays * 86400000, periodH = periodDays * 24;
       const dAgg = {};
       dtAll.forEach(d => {
+        if (d.category === GEJALA_CAT) return; // gejala = alat masih jalan, skip
         const k = d.equipment_id; if (!dAgg[k]) dAgg[k] = { fails: 0, downH: 0 };
         if (FAILURE_CATS.includes(d.category)) dAgg[k].fails++;
         const s = new Date(d.start_at).getTime(), e2 = d.end_at ? new Date(d.end_at).getTime() : now;
@@ -8392,9 +8420,12 @@
         host.innerHTML = `<div class="bg-red-50 text-red-700 p-4 rounded-xl text-sm">Gagal memuat: ${escapeHtml(e.message)}</div>`;
         return;
       }
-      const data = availFilteredData();
+      const dataAll = availFilteredData();
+      // GEJALA = early warning, alat masih jalan → DIPISAH dari perhitungan
+      const data = dataAll.filter(d => d.category !== GEJALA_CAT);
+      const gejalaAll = dataAll.filter(d => d.category === GEJALA_CAT);
       const now = Date.now(), start = now - availPeriodDays * 86400000, periodH = availPeriodDays * 24;
-      // agregasi downtime per equipment
+      // agregasi downtime per equipment (TANPA gejala)
       const agg = {};
       data.forEach(d => {
         const k = d.equipment_id; if (!agg[k]) agg[k] = { events: 0, downH: 0, dur: [] };
@@ -8413,6 +8444,7 @@
             mttr: a.dur.length ? a.dur.reduce((p, q) => p + q, 0) / a.dur.length : null };
         }).sort((a, b) => a.avail - b.avail);
       const ongoing = data.filter(d => !d.end_at);
+      const gejalaOngoing = gejalaAll.filter(d => !d.end_at);
       const allDur = data.filter(d => d.end_at).map(d => Number(d.duration_hours) || 0);
       const mttr = allDur.length ? allDur.reduce((a, b) => a + b, 0) / allDur.length : null;
       const totalFail = data.length;
@@ -8424,7 +8456,7 @@
         ? failedEq.reduce((sum, o) => sum + (periodH - o.downH) / o.events, 0) / failedEq.length
         : null;
       const fleetAvail = eqList.length ? eqList.reduce((a, b) => a + b.avail, 0) / eqList.length : 100;
-      const cat = {}; data.forEach(d => { const c = DT_CAT[d.category] || 'Lainnya'; if (!cat[c]) cat[c] = { n: 0, h: 0 }; cat[c].n++; cat[c].h += Number(d.duration_hours) || 0; });
+      const cat = {}; dataAll.forEach(d => { const c = DT_CAT[d.category] || 'Lainnya'; if (!cat[c]) cat[c] = { n: 0, h: 0 }; cat[c].n++; cat[c].h += Number(d.duration_hours) || 0; });
 
       const kpi = (label, val, sub) => `<div class="bg-white rounded-xl border border-slate-200 p-4"><div class="text-xs text-slate-500 mb-1">${label}</div><div class="text-2xl font-extrabold text-slate-900">${val}</div>${sub ? `<div class="text-[11px] text-slate-400 mt-0.5">${sub}</div>` : ''}</div>`;
       const ongoingRows = ongoing.map(d => `<tr class="border-b border-slate-100">
@@ -8433,6 +8465,17 @@
         <td class="px-3 py-2 text-sm">${escapeHtml(d.start_at ? new Date(d.start_at).toLocaleString('id-ID') : '—')}</td>
         <td class="px-3 py-2 text-sm text-red-600 font-semibold">${fmtH((now - new Date(d.start_at).getTime()) / 3600000)}</td>
         <td class="px-3 py-2 text-right whitespace-nowrap"><button onclick="markDowntimeDone('${d.id}')" class="px-2 py-1 rounded bg-green-100 hover:bg-green-200 text-green-700 text-xs font-semibold">✓ Selesai</button> <button onclick="openDowntimeEdit('${d.id}')" class="px-2 py-1 rounded bg-navy hover:bg-navy-700 text-white text-xs">✏</button></td>
+      </tr>`).join('');
+      const gejalaRows = gejalaOngoing.map(d => `<tr class="border-b border-slate-100">
+        <td class="px-3 py-2 text-sm font-mono text-navy">${escapeHtml(d.equipment_tag || '—')}</td>
+        <td class="px-3 py-2 text-sm">${escapeHtml(d.notes || '—')}</td>
+        <td class="px-3 py-2 text-sm">${escapeHtml(d.start_at ? new Date(d.start_at).toLocaleString('id-ID') : '—')}</td>
+        <td class="px-3 py-2 text-sm text-amber-600 font-semibold">${fmtH((now - new Date(d.start_at).getTime()) / 3600000)}</td>
+        <td class="px-3 py-2 text-right whitespace-nowrap">
+          <button onclick="escalateGejala('${d.id}')" class="px-2 py-1 rounded bg-red-100 hover:bg-red-200 text-red-700 text-xs font-semibold" title="Naikkan ke breakdown / troubleshoot">⚠ Eskalasi</button>
+          <button onclick="closeGejala('${d.id}')" class="px-2 py-1 rounded bg-green-100 hover:bg-green-200 text-green-700 text-xs font-semibold" title="Tutup gejala — wajib catat tindakan">✓ Tutup</button>
+          <button onclick="openDowntimeEdit('${d.id}')" class="px-2 py-1 rounded bg-navy hover:bg-navy-700 text-white text-xs">✏</button>
+        </td>
       </tr>`).join('');
       const eqRows = eqList.map(o => `<tr class="border-b border-slate-100 hover:bg-slate-50 cursor-pointer" onclick="setEquipmentView('detail','${o.id}'); navigate('equipment')">
         <td class="px-3 py-2 text-sm font-mono font-bold text-navy">${escapeHtml(o.tag || '—')}</td>
@@ -8468,15 +8511,23 @@
             <button onclick="cetakAvailReport()" class="px-4 py-2.5 rounded-lg border border-slate-300 hover:bg-slate-50 text-sm font-semibold text-slate-700 whitespace-nowrap">🖨 Cetak</button>
           </div>
         </div>
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
           ${kpi('Availability rata-rata', eqList.length ? fleetAvail.toFixed(1) + '%' : '—')}
-          ${kpi('Sedang Down', ongoing.length)}
+          ${kpi('🔴 Sedang Down', ongoing.length)}
+          ${kpi('🟡 Sedang Diselidiki', gejalaOngoing.length, 'gejala awal, alat masih jalan')}
           ${kpi('MTTR (rata² perbaikan)', mttr != null ? fmtH(mttr) : '—', allDur.length ? `dari ${allDur.length} perbaikan` : 'belum ada perbaikan selesai')}
           ${kpi('MTBF (rata² antar rusak)', mtbf != null ? fmtH(mtbf) : '—', mtbf != null ? `dari ${totalFail} kerusakan · ${failedEq.length} alat` : 'belum ada kerusakan')}
         </div>
         ${ongoing.length ? `<div class="bg-white rounded-xl border border-red-200 overflow-hidden">
           <div class="px-4 py-3 border-b border-slate-100 font-semibold text-red-700 text-sm">🔴 Sedang Down (${ongoing.length})</div>
           <div class="overflow-x-auto"><table class="w-full"><thead><tr class="bg-slate-50 text-left text-xs font-bold text-slate-600"><th class="px-3 py-2">Equipment</th><th class="px-3 py-2">Penyebab</th><th class="px-3 py-2">Mulai</th><th class="px-3 py-2">Lama</th><th class="px-3 py-2"></th></tr></thead><tbody>${ongoingRows}</tbody></table></div>
+        </div>` : ''}
+        ${gejalaOngoing.length ? `<div class="bg-amber-50 rounded-xl border border-amber-300 overflow-hidden">
+          <div class="px-4 py-3 border-b border-amber-200 font-semibold text-amber-800 text-sm flex items-center justify-between">
+            <span>🟡 Sedang Diselidiki — Gejala Awal (${gejalaOngoing.length})</span>
+            <span class="text-[11px] font-normal text-amber-700">Alat masih jalan; tidak menurunkan availability. Eskalasi kalau jadi rusak.</span>
+          </div>
+          <div class="overflow-x-auto"><table class="w-full"><thead><tr class="bg-amber-100/60 text-left text-xs font-bold text-amber-900"><th class="px-3 py-2">Equipment</th><th class="px-3 py-2">Gejala</th><th class="px-3 py-2">Mulai</th><th class="px-3 py-2">Sudah</th><th class="px-3 py-2"></th></tr></thead><tbody>${gejalaRows}</tbody></table></div>
         </div>` : ''}
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div class="lg:col-span-2 bg-white rounded-xl border border-slate-200 overflow-hidden">
@@ -8511,7 +8562,11 @@
           <div><label class="text-xs text-slate-500">Penyebab</label>
             <select id="dt-cat" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-navy">
               ${Object.entries(DT_CAT).map(([k, l]) => `<option value="${k}" ${e.category === k ? 'selected' : ''}>${l}</option>`).join('')}
-            </select></div>
+            </select>
+            <p class="text-[11px] text-slate-400 mt-1">💡 <b>Gejala</b> = alat masih jalan tapi ada tanda-tanda aneh (asap, suara, getaran). Tidak menurunkan availability. Kalau benar-benar rusak → pilih Breakdown / Troubleshoot.</p></div>
+          <div><label class="text-xs text-slate-500">Dilaporkan oleh (operator / motoris)</label>
+            <input id="dt-reporter" value="${escapeHtml(e.created_by_name || (existing ? '' : (state.profile?.full_name || state.profile?.email || '')))}" placeholder="mis. Sukirman (motoris shift 1)" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy">
+            <p class="text-[11px] text-slate-400 mt-1">Nama orang yg melaporkan ke mekanik (bisa diisi manual). Default = nama login.</p></div>
           <div><label class="text-xs text-slate-500">Catatan</label><input id="dt-notes" value="${escapeHtml(e.notes || '')}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy"></div>
           <div class="border-t border-slate-200 pt-3">
             <label class="text-xs font-semibold text-slate-600 uppercase">📸 Foto Pendukung (optional)</label>
@@ -8566,17 +8621,20 @@
       if (endV && new Date(endV) < new Date(startV)) { toast('Waktu selesai tidak boleh sebelum mulai.', 'warn'); return; }
       const opt = eqSel.selectedOptions[0];
       const unitId = opt?.dataset?.unit ? Number(opt.dataset.unit) : null;
+      const reporterName = (document.getElementById('dt-reporter')?.value || '').trim()
+        || state.profile?.full_name || state.profile?.email || '';
       const payload = {
         equipment_id: eqId, equipment_tag: opt?.dataset?.tag || null, equipment_name: opt?.dataset?.name || null,
         unit_id: unitId, unit_name: unitId ? getParentUnitName(unitId) : null,
         start_at: new Date(startV).toISOString(), end_at: endV ? new Date(endV).toISOString() : null,
         category: document.getElementById('dt-cat')?.value || 'lainnya',
         notes: (document.getElementById('dt-notes')?.value || '').trim() || null,
+        created_by_name: reporterName,  // PELAPOR (manual), bukan user login
       };
       let savedId = id;
       try {
         if (id) { const { error } = await state.supabase.from('downtime_events').update(payload).eq('id', id); if (error) throw error; }
-        else { payload.created_by = state.user.id; payload.created_by_name = state.profile?.full_name || state.profile?.email || '';
+        else { payload.created_by = state.user.id;  // tetap simpan user login utk audit "siapa input ke sistem"
           const { data, error } = await state.supabase.from('downtime_events').insert(payload).select('id').single(); if (error) throw error;
           savedId = data.id;
         }
@@ -8666,6 +8724,107 @@
       renderAvailabilityPage(document.getElementById('ram-content'));
     }
     window.markDowntimeDone = markDowntimeDone;
+
+    // Tutup gejala (false alarm / sudah ditangani tanpa rusak). Modal dgn textarea + upload foto bukti.
+    async function closeGejala(id) {
+      if (!isSrMekanikOrAbove()) { toast('Khusus Sr Mekanik ke atas.', 'warn'); return; }
+      const today = new Date().toISOString().slice(0, 10);
+      const body = `
+        <div class="space-y-3">
+          <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">
+            <b>🟡 Tutup Gejala</b> — pakai ini kalau gejala sudah hilang setelah pengecekan/perbaikan ringan, alat <b>tidak jadi rusak</b>. Kalau gejala berlanjut & alat rusak, batalkan & klik <b>⚠ Eskalasi</b>.
+          </div>
+          <div>
+            <label class="text-xs font-semibold text-slate-600 uppercase">Tindakan yang dilakukan *</label>
+            <textarea id="cg-tindakan" rows="3" placeholder="mis. Pengencangan baut bearing cathead oleh M. Rifki. Setelah dikencangkan, suara kasar hilang. Pelumasan ulang dilakukan. Alat kembali normal." class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy"></textarea>
+            <p class="text-[11px] text-slate-400 mt-1">Tulis SIAPA cek, APA tindakannya, HASIL akhirnya. Ini jadi audit trail.</p>
+          </div>
+          <div class="border-t border-slate-200 pt-3">
+            <label class="text-xs font-semibold text-slate-600 uppercase">📸 Foto bukti perbaikan (opsional)</label>
+            <div class="grid grid-cols-2 gap-2 mt-1">
+              <div><label class="text-xs text-slate-500">Pilih foto</label>
+                <input id="cg-photo-files" type="file" accept="image/*" multiple class="w-full text-sm py-2"></div>
+              <div><label class="text-xs text-slate-500">Tgl kejadian foto</label>
+                <input id="cg-photo-eventdate" type="date" value="${today}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none"></div>
+            </div>
+            <div class="mt-1">
+              <label class="text-xs text-slate-500">Caption (opsional)</label>
+              <input id="cg-photo-caption" placeholder="mis. Baut bearing sudah dikencangkan torque 80 Nm" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none">
+            </div>
+            <p class="text-[11px] text-slate-400 mt-1">Max 5 foto. Otomatis disimpan dgn fase "Sesudah / Bukti Perbaikan". Auto-compress ≤300KB.</p>
+          </div>
+        </div>`;
+      const footer = `<button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
+        <button onclick="submitCloseGejala('${id}')" class="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-semibold">✓ Tutup Gejala</button>`;
+      openModal({ title: '✓ Tutup Gejala — Catat Tindakan', body, footer, maxWidth: 'max-w-lg' });
+    }
+    window.closeGejala = closeGejala;
+
+    async function submitCloseGejala(id) {
+      const tindakan = (document.getElementById('cg-tindakan')?.value || '').trim();
+      if (!tindakan) { toast('Catatan tindakan wajib diisi.', 'warn'); return; }
+      // 1) update event: end_at + notes
+      const { data: row } = await state.supabase.from('downtime_events').select('notes').eq('id', id).maybeSingle();
+      const oldNotes = row?.notes || '';
+      const stamp = new Date().toLocaleString('id-ID');
+      const newNotes = [oldNotes, `[TINDAKAN ${stamp}] ${tindakan}`].filter(Boolean).join(' · ');
+      const { error } = await state.supabase.from('downtime_events').update({
+        end_at: new Date().toISOString(),
+        notes: newNotes,
+      }).eq('id', id);
+      if (error) { toast('Gagal tutup: ' + error.message, 'error'); return; }
+      // 2) upload foto (kalau ada). Phase = after; caption opsional; event_date dari form.
+      const fi = document.getElementById('cg-photo-files');
+      const files = fi ? Array.from(fi.files || []).slice(0, 5) : [];
+      const caption = (document.getElementById('cg-photo-caption')?.value || '').trim().slice(0, 200) || null;
+      const eventDate = document.getElementById('cg-photo-eventdate')?.value || new Date().toISOString().slice(0, 10);
+      let okFoto = 0;
+      for (const raw of files) {
+        try {
+          const file = (raw.type || '').startsWith('image/') ? await compressImage(raw, { maxDim: 1280, quality: 0.78 }) : raw;
+          const safeName = (file.name || 'photo').replace(/[^a-zA-Z0-9._-]/g, '_');
+          const path = `${id}/${Date.now()}-${safeName}`;
+          await uploadFile('downtime-photos', path, file);
+          const { error: pErr } = await state.supabase.from('downtime_photos').insert({
+            downtime_event_id: id, storage_path: path, phase: 'after', caption,
+            event_date: eventDate,
+            uploaded_by: state.user.id,
+            uploaded_by_name: state.profile?.full_name || state.profile?.email || null,
+          });
+          if (pErr) throw pErr;
+          okFoto++;
+        } catch (e) { console.error('foto gagal:', e); }
+      }
+      closeModal();
+      toast(okFoto ? `Gejala ditutup + ${okFoto} foto disimpan.` : 'Gejala ditutup. Tindakan dicatat.', 'success');
+      renderAvailabilityPage(document.getElementById('ram-content'));
+    }
+    window.submitCloseGejala = submitCloseGejala;
+
+    // Eskalasi gejala → breakdown/troubleshoot. Start_at di-reset ke sekarang supaya
+    // perhitungan downtime mulai dari saat alat BENAR-BENAR rusak, bukan dari gejala awal.
+    async function escalateGejala(id) {
+      if (!isSrMekanikOrAbove()) { toast('Khusus Sr Mekanik ke atas.', 'warn'); return; }
+      const pick = prompt('Naikkan gejala ke kategori apa?\n  1 = Breakdown (rusak total, alat berhenti)\n  2 = Troubleshoot (gangguan, perlu perbaikan)\n\nKetik 1 atau 2:');
+      if (!pick) return;
+      const newCat = pick.trim() === '1' ? 'breakdown' : pick.trim() === '2' ? 'troubleshoot' : null;
+      if (!newCat) { toast('Pilihan tidak valid.', 'warn'); return; }
+      const note = prompt('Catatan eskalasi (opsional, mis. "asap makin tebal, alat berhenti jam 14:00"):') || '';
+      // ambil row dulu utk gabung catatan lama
+      const { data: row } = await state.supabase.from('downtime_events').select('notes').eq('id', id).maybeSingle();
+      const oldNotes = row?.notes || '';
+      const stamp = new Date().toLocaleString('id-ID');
+      const newNotes = [oldNotes, `[ESKALASI ${stamp}] ${note}`].filter(Boolean).join(' · ');
+      const { error } = await state.supabase.from('downtime_events').update({
+        category: newCat,
+        start_at: new Date().toISOString(),
+        notes: newNotes,
+      }).eq('id', id);
+      if (error) { toast('Gagal eskalasi: ' + error.message, 'error'); return; }
+      toast('Gejala dieskalasi ke ' + DT_CAT[newCat] + '.', 'success');
+      renderAvailabilityPage(document.getElementById('ram-content'));
+    }
+    window.escalateGejala = escalateGejala;
 
     // Pilar Maintenance di RAM = baca data Logbook (daily_logs), READ-ONLY.
     async function renderRamMaintenance(host) {
@@ -8871,7 +9030,9 @@
     window.cetakFmeaReport = cetakFmeaReport;
 
     function cetakAvailReport() {
-      const data = availFilteredData();
+      const dataAll = availFilteredData();
+      // GEJALA dipisah, tidak ikut perhitungan availability
+      const data = dataAll.filter(d => d.category !== GEJALA_CAT);
       const now = Date.now(), start = now - availPeriodDays * 86400000, periodH = availPeriodDays * 24;
       const byEq = {};
       data.forEach(d => {
@@ -8898,7 +9059,7 @@
       const rows = eqList.slice(0, 300).map((o, i) => `<tr><td style="text-align:center">${i + 1}</td><td>${escapeHtml(o.tag || '-')}<br><span style="color:#6b7280">${escapeHtml(o.name || '')}</span></td>${availCell(o.avail)}<td style="text-align:center">${o.events}</td><td style="text-align:center">${fmtH(o.downH)}</td><td style="text-align:center">${fmtH(o.mttr)}</td></tr>`).join('');
       const table = `<table><thead><tr><th>No</th><th>Equipment</th><th>Availability</th><th>Jml Down</th><th>Total Down</th><th>MTTR</th></tr></thead><tbody>${rows || '<tr><td colspan="6" style="text-align:center">Belum ada catatan downtime</td></tr>'}</tbody></table>`;
       const kesimpulan = `<b style="color:#dc2626">⚠️ Dampak:</b> equipment dengan availability rendah / sedang down berpotensi menghambat operasi.<br><br><b style="color:#16a34a">✅ Permohonan:</b> mohon dukungan mempercepat perbaikan (suku cadang/SPK) pada equipment availability terendah di atas guna memulihkan kesiapan operasi.`;
-      const catMap = {}; data.forEach(d2 => { const c = DT_CAT[d2.category] || 'Lainnya'; catMap[c] = (catMap[c] || 0) + (Number(d2.duration_hours) || 0); });
+      const catMap = {}; dataAll.forEach(d2 => { const c = DT_CAT[d2.category] || 'Lainnya'; catMap[c] = (catMap[c] || 0) + (Number(d2.duration_hours) || 0); });
       const chart = chartBars('Jam Downtime per Penyebab', Object.entries(catMap).map(([k, v]) => ({ label: k, value: Math.round(v), color: '#11335d' })));
       openSignDialog({ title: 'Laporan Availability Equipment', type: 'AVAIL', summary, chart, intro, table, kesimpulan });
     }
