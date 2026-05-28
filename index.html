@@ -405,6 +405,34 @@
     // ============================================================
     // Template field nameplate per kategori. Mulai Genset & Centrifugal Pump; nanti extend ke Triplex Mud Pump, Engine, dll.
     // Match by kategori NAME (case-insensitive, partial), bukan id (id bisa beda antar env).
+    const TRANSMISSION_TPL = {
+      icon: '⚙️',
+      label: 'Spesifikasi Transmission / Gearbox (Nameplate)',
+      fields: [
+        // BASIC
+        { key: 'manufacturer',     label: 'Manufacturer',            unit: '',      type: 'text',   placeholder: 'mis. Allison Transmission' },
+        { key: 'model_code',       label: 'Model / Type Code',       unit: '',      type: 'text',   placeholder: 'mis. T1DB, 4500RDS' },
+        { key: 'serial_number',    label: 'Serial Number',           unit: '',      type: 'text',   placeholder: 'mis. 6620043193' },
+        { key: 'date_code',        label: 'Date / Build Code',       unit: '',      type: 'text',   placeholder: 'mis. 22K04' },
+        { key: 'made_in',          label: 'Made In',                 unit: '',      type: 'text',   placeholder: 'mis. Szentgotthárd, Hungary' },
+        // RATING
+        { key: 'gear_ratio',       label: 'Output Gear Ratio',       unit: ':1',    type: 'text',   placeholder: 'mis. 4.6678' },
+        { key: 'forward_gears',    label: 'Jumlah Gigi Maju',        unit: '',      type: 'number' },
+        { key: 'reverse_gears',    label: 'Jumlah Gigi Mundur',      unit: '',      type: 'number' },
+        { key: 'rated_input_hp',   label: 'Rated Input Power',       unit: 'HP',    type: 'number' },
+        { key: 'rated_input_rpm',  label: 'Rated Input RPM',         unit: 'rpm',   type: 'number' },
+        { key: 'rated_torque',     label: 'Rated Input Torque',      unit: 'ft-lb', type: 'number' },
+        // MOUNT & COOLING
+        { key: 'mount_type',       label: 'Mounting Type / Bell Housing', unit: '', type: 'text',   placeholder: 'mis. SAE 1, SAE 2, SAE 3' },
+        { key: 'cooling_type',     label: 'Cooling Type',            unit: '',      type: 'select', options: ['Water','Air','Oil-to-water','Oil-to-air'] },
+        // LUB
+        { key: 'oil_capacity_qt',  label: 'Oil Capacity',            unit: 'qt',    type: 'number', step: '0.1' },
+        { key: 'oil_spec',         label: 'Oil Specification',       unit: '',      type: 'textarea', placeholder: 'mis.\nAllison TES-295 (synthetic, drain 300,000 km / 6 yrs)\nAllison TES-389 (mineral, drain shorter)' },
+        // APPLICATION
+        { key: 'application',      label: 'Application / Drives',    unit: '',      type: 'text',   placeholder: 'mis. JWS400 Mud Pump Drive, Drawwork, Carrier truck' },
+      ],
+    };
+
     const TRIPLEX_MUD_PUMP_TPL = {
       icon: '🔧',
       label: 'Spesifikasi Triplex Mud Pump (Nameplate)',
@@ -501,13 +529,33 @@
       'Pompa':         CENTRIFUGAL_PUMP_TPL,
       'Pump (MTU)':    CENTRIFUGAL_PUMP_TPL,
       'MUDPUMP Acid':  CENTRIFUGAL_PUMP_TPL,
+      // Primover (engine + transmission) — smart-routed via tag pattern di getSpecTemplate.
+      // Diisi dengan TRANSMISSION sebagai fallback; engine ditangani via prefix match.
     };
 
-    function getSpecTemplate(kategoriId) {
+    // Smart routing untuk kategori "Primover" yg dipake bareng engine & transmisi.
+    // Tag/nama pattern menentukan template mana yg dipake.
+    // Sekarang baru ada Transmission; Engine akan disambungkan saat nameplate engine masuk.
+    function pickPrimoverTemplate(eq) {
+      const tag = String(eq?.tag_number || '').toUpperCase();
+      const name = String(eq?.nama_equipment || '').toUpperCase();
+      const hay = tag + ' ' + name;
+      if (/\b(TRANS|TX|TRX|GEARBOX|GBX)\b/.test(hay) || /^TRANS/.test(tag)) return TRANSMISSION_TPL;
+      // Engine template belum ada — return null biar tidak salah tampil
+      return null;
+    }
+
+    function getSpecTemplate(kategoriId, eq) {
       const name = getCategoryName(kategoriId) || '';
+      const lc = name.toLowerCase();
+      // Special case: kategori Primover bisa Engine ATAU Transmission — smart route via tag
+      if (lc.includes('primover') && eq) {
+        const tpl = pickPrimoverTemplate(eq);
+        if (tpl) return { key: 'Primover-routed', ...tpl };
+        return null;
+      }
       // exact match dulu, lalu partial (case-insensitive)
       if (SPEC_TEMPLATES[name]) return { key: name, ...SPEC_TEMPLATES[name] };
-      const lc = name.toLowerCase();
       for (const k of Object.keys(SPEC_TEMPLATES)) {
         if (lc.includes(k.toLowerCase())) return { key: k, ...SPEC_TEMPLATES[k] };
       }
@@ -5433,7 +5481,7 @@
         ]],
       ];
       // Spesifikasi nameplate per kategori (spec_data JSONB)
-      const tpl = getSpecTemplate(eq.kategori_id);
+      const tpl = getSpecTemplate(eq.kategori_id, eq);
       let specSectionHtml = '';
       if (tpl) {
         const sd = (eq.spec_data && typeof eq.spec_data === 'object') ? eq.spec_data : {};
@@ -6302,11 +6350,18 @@
         }, 0);
       };
 
-      // Render section "Spesifikasi Genset" dinamis berdasarkan kategori
+      // Render section "Spesifikasi <Kategori>" dinamis berdasarkan kategori + tag/nama (smart route untuk Primover)
       function renderSpecSection(kategoriId) {
         const host = document.getElementById('spec-section-host');
         if (!host) return;
-        const tpl = getSpecTemplate(kategoriId);
+        // Ambil tag & nama dari form (kalau user lagi ngetik) atau dari data awal
+        const tagEl = document.querySelector('#eq-form input[name="tag_number"]');
+        const nameEl = document.querySelector('#eq-form input[name="nama_equipment"]');
+        const eqHint = {
+          tag_number:    tagEl?.value || data.tag_number || '',
+          nama_equipment: nameEl?.value || data.nama_equipment || '',
+        };
+        const tpl = getSpecTemplate(kategoriId, eqHint);
         if (!tpl) { host.innerHTML = ''; return; }
         const buf = window.__specDataBuffer || {};
         const inputs = tpl.fields.map(f => {
