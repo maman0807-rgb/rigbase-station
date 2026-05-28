@@ -8676,7 +8676,7 @@
     async function renderKelayakanPage(host) {
       let eqHm = [], eqKm = [], dtAll = [];
       try {
-        const fields = 'id, tag_number, nama_equipment, assigned_unit_id, running_hours, toh_interval_hours, goh_interval_hours, economic_life_hours, last_toh_hours, last_goh_hours, pm_type';
+        const fields = 'id, tag_number, nama_equipment, assigned_unit_id, running_hours, pm_interval_hours, last_pm_hours, last_pm_date, toh_interval_hours, goh_interval_hours, economic_life_hours, last_toh_hours, last_toh_date, last_goh_hours, last_goh_date, pm_type';
         const [hm, km, dt] = await Promise.all([
           state.supabase.from('equipment').select(fields).gt('running_hours', 0).neq('pm_type', 'km'),
           state.supabase.from('equipment').select(fields).gt('running_hours', 0).eq('pm_type', 'km'),
@@ -8688,6 +8688,135 @@
         host.innerHTML = `<div class="bg-red-50 text-red-700 p-4 rounded-xl text-sm">Gagal memuat: ${escapeHtml(e.message)}</div>`;
         return;
       }
+      // Compute Maintenance Due Soon (P2.2) — analisa SEMUA equipment ber-HM/KM
+      const dueAll = [];
+      [...eqHm, ...eqKm].forEach(x => {
+        const u = (x.pm_type === 'km') ? 'km' : 'jam';
+        const rh = Number(x.running_hours) || 0;
+        // PM (sisa = interval - (rh - last_pm))
+        const pmInt = Number(x.pm_interval_hours) || 0;
+        if (pmInt > 0) {
+          const sisa = pmInt - (rh - (Number(x.last_pm_hours) || 0));
+          if (sisa < pmInt) // hanya kalau sudah running > 0 sejak last_pm
+            dueAll.push({ x, u, kind: 'PM', sisa, interval: pmInt, lastDate: x.last_pm_date });
+        }
+        // TOH (sisa = interval - (rh - last_toh atau last_goh))
+        const tohInt = Number(x.toh_interval_hours) || 0;
+        if (tohInt > 0) {
+          const base = Number(x.last_toh_hours ?? x.last_goh_hours ?? 0) || 0;
+          const sisa = tohInt - (rh - base);
+          if (sisa < tohInt)
+            dueAll.push({ x, u, kind: 'TOH', sisa, interval: tohInt, lastDate: x.last_toh_date });
+        }
+        // GOH (sisa = interval - (rh - last_goh))
+        const gohInt = Number(x.goh_interval_hours) || 0;
+        if (gohInt > 0) {
+          const base = Number(x.last_goh_hours) || 0;
+          const sisa = gohInt - (rh - base);
+          if (sisa < gohInt)
+            dueAll.push({ x, u, kind: 'GOH', sisa, interval: gohInt, lastDate: x.last_goh_date });
+        }
+        // Eco Life (pct umur)
+        const ecoInt = Number(x.economic_life_hours) || 0;
+        if (ecoInt > 0) {
+          const pct = rh / ecoInt * 100;
+          if (pct >= 80)
+            dueAll.push({ x, u, kind: 'EOL', sisa: ecoInt - rh, interval: ecoInt, pct });
+        }
+      });
+      // Threshold per milestone
+      const T = { PM: 500, TOH: 1000, GOH: 2000, EOL: 0 };
+      const overdue = dueAll.filter(d => d.kind !== 'EOL' && d.sisa < 0).sort((a, b) => a.sisa - b.sisa);
+      const soon = dueAll.filter(d => d.kind !== 'EOL' && d.sisa >= 0 && d.sisa < T[d.kind]).sort((a, b) => a.sisa - b.sisa);
+      const eolNear = dueAll.filter(d => d.kind === 'EOL').sort((a, b) => b.pct - a.pct);
+
+      const rowDue = (d, withSisa = true) => {
+        const unitName = getParentUnitName(d.x.assigned_unit_id);
+        const sisaTxt = d.kind === 'EOL'
+          ? `${d.pct.toFixed(0)}% (${fmtNumber(d.sisa, ' ' + d.u)} sisa)`
+          : (d.sisa < 0 ? `<span class="text-red-700 font-bold">lewat ${fmtNumber(-d.sisa, ' ' + d.u)}</span>` : `${fmtNumber(d.sisa, ' ' + d.u)}`);
+        const lastTxt = d.lastDate ? fmtDate(d.lastDate) : '—';
+        return `<tr class="border-b border-slate-100 hover:bg-slate-50 cursor-pointer" onclick="setEquipmentView('detail','${d.x.id}'); navigate('equipment')">
+          <td class="px-3 py-2 text-sm font-mono font-bold text-navy whitespace-nowrap">${escapeHtml(d.x.tag_number)}</td>
+          <td class="px-3 py-2 text-sm text-slate-700">${escapeHtml(d.x.nama_equipment || '')}</td>
+          <td class="px-3 py-2 text-sm text-slate-500 whitespace-nowrap">${escapeHtml(unitName)}</td>
+          <td class="px-3 py-2 text-sm text-center font-bold whitespace-nowrap">
+            ${d.kind === 'PM' ? '<span class="text-green-700">PM</span>' :
+              d.kind === 'TOH' ? '<span class="text-amber-700">TOH</span>' :
+              d.kind === 'GOH' ? '<span class="text-red-700">GOH</span>' :
+              '<span class="text-slate-700">EOL</span>'}
+          </td>
+          <td class="px-3 py-2 text-sm text-right whitespace-nowrap">${fmtNumber(d.x.running_hours, ' ' + d.u)}</td>
+          <td class="px-3 py-2 text-sm text-right whitespace-nowrap">${withSisa ? sisaTxt : fmtNumber(d.interval, ' ' + d.u)}</td>
+          <td class="px-3 py-2 text-sm text-slate-500 whitespace-nowrap">${lastTxt}</td>
+        </tr>`;
+      };
+
+      const overdueHtml = overdue.length ? `
+        <div class="bg-white rounded-xl border-2 border-red-300 shadow-sm overflow-hidden">
+          <div class="px-4 py-3 bg-red-50 border-b border-red-200 flex items-center justify-between">
+            <h4 class="font-bold text-red-800 text-sm">🔴 OVERDUE — Sudah Lewat Threshold (${overdue.length})</h4>
+            <span class="text-xs text-red-600 font-semibold">URGENT — schedule maintenance segera</span>
+          </div>
+          <div class="overflow-x-auto"><table class="w-full">
+            <thead><tr class="bg-slate-50 text-left text-xs font-bold text-slate-600">
+              <th class="px-3 py-2">Tag</th><th class="px-3 py-2">Nama</th><th class="px-3 py-2">Armada</th>
+              <th class="px-3 py-2 text-center">Milestone</th><th class="px-3 py-2 text-right">HM/KM</th>
+              <th class="px-3 py-2 text-right">Status</th><th class="px-3 py-2">Last service</th>
+            </tr></thead>
+            <tbody>${overdue.map(d => rowDue(d)).join('')}</tbody>
+          </table></div>
+        </div>` : '';
+
+      const soonHtml = soon.length ? `
+        <div class="bg-white rounded-xl border-2 border-amber-300 shadow-sm overflow-hidden">
+          <div class="px-4 py-3 bg-amber-50 border-b border-amber-200 flex items-center justify-between">
+            <h4 class="font-bold text-amber-800 text-sm">🟡 PERLU PLAN — Mendekati Threshold (${soon.length})</h4>
+            <span class="text-xs text-amber-700">Mulai siapkan parts & jadwal vendor</span>
+          </div>
+          <div class="overflow-x-auto"><table class="w-full">
+            <thead><tr class="bg-slate-50 text-left text-xs font-bold text-slate-600">
+              <th class="px-3 py-2">Tag</th><th class="px-3 py-2">Nama</th><th class="px-3 py-2">Armada</th>
+              <th class="px-3 py-2 text-center">Milestone</th><th class="px-3 py-2 text-right">HM/KM</th>
+              <th class="px-3 py-2 text-right">Sisa</th><th class="px-3 py-2">Last service</th>
+            </tr></thead>
+            <tbody>${soon.map(d => rowDue(d)).join('')}</tbody>
+          </table></div>
+        </div>` : '';
+
+      const eolHtml = eolNear.length ? `
+        <div class="bg-white rounded-xl border border-slate-300 shadow-sm overflow-hidden">
+          <div class="px-4 py-3 bg-slate-100 border-b border-slate-200 flex items-center justify-between">
+            <h4 class="font-bold text-slate-800 text-sm">⚫ NEAR ECONOMIC LIFE — Umur ≥ 80% (${eolNear.length})</h4>
+            <span class="text-xs text-slate-600">Review replacement, masuk CAPEX planning</span>
+          </div>
+          <div class="overflow-x-auto"><table class="w-full">
+            <thead><tr class="bg-slate-50 text-left text-xs font-bold text-slate-600">
+              <th class="px-3 py-2">Tag</th><th class="px-3 py-2">Nama</th><th class="px-3 py-2">Armada</th>
+              <th class="px-3 py-2 text-center">Milestone</th><th class="px-3 py-2 text-right">HM/KM</th>
+              <th class="px-3 py-2 text-right">Umur</th><th class="px-3 py-2">—</th>
+            </tr></thead>
+            <tbody>${eolNear.map(d => rowDue(d)).join('')}</tbody>
+          </table></div>
+        </div>` : '';
+
+      const dueSoonPanel = (overdue.length || soon.length || eolNear.length) ? `
+        <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+          <h3 class="text-lg font-bold text-slate-900">🛠️ Maintenance Due Soon &amp; Overdue</h3>
+          <p class="text-sm text-slate-500 mt-1">Equipment yg sudah / hampir lewat threshold maintenance. Klik baris → detail equipment + prep notes.</p>
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+            <div class="bg-red-50 border border-red-200 rounded-lg p-3 text-center"><div class="text-2xl font-extrabold text-red-700">${overdue.length}</div><div class="text-xs text-red-700 font-semibold">🔴 OVERDUE</div></div>
+            <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-center"><div class="text-2xl font-extrabold text-amber-700">${soon.length}</div><div class="text-xs text-amber-700 font-semibold">🟡 PERLU PLAN</div></div>
+            <div class="bg-slate-50 border border-slate-300 rounded-lg p-3 text-center"><div class="text-2xl font-extrabold text-slate-700">${eolNear.length}</div><div class="text-xs text-slate-700 font-semibold">⚫ NEAR EOL</div></div>
+            <div class="bg-green-50 border border-green-200 rounded-lg p-3 text-center"><div class="text-2xl font-extrabold text-green-700">${eqHm.length + eqKm.length - overdue.length - soon.length}</div><div class="text-xs text-green-700 font-semibold">🟢 Aman</div></div>
+          </div>
+        </div>
+        ${overdueHtml}
+        ${soonHtml}
+        ${eolHtml}` : `
+        <div class="bg-green-50 border border-green-200 rounded-xl p-4 text-sm text-green-800">
+          ✅ Tidak ada equipment yg overdue maintenance atau mendekati threshold. Semua aman.
+        </div>`;
       const periodDays = 365, now = Date.now(), start = now - periodDays * 86400000, periodH = periodDays * 24;
       const dAgg = {};
       dtAll.forEach(d => {
@@ -8776,6 +8905,7 @@
 
       host.innerHTML = `
         <div class="space-y-4">
+          ${dueSoonPanel}
           <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
             <h3 class="text-lg font-bold text-slate-900">📋 Kelayakan Armada — Layak Maintain vs Ganti</h3>
             <p class="text-sm text-slate-500 mt-1">Gabungan <b>umur</b> (TOH/GOH/umur ekonomis) + <b>keandalan</b> (MTBF &amp; Availability). Klik baris → detail unit.</p>
