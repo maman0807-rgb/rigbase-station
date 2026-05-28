@@ -405,6 +405,39 @@
     // ============================================================
     // Template field nameplate per kategori. Mulai Genset & Centrifugal Pump; nanti extend ke Triplex Mud Pump, Engine, dll.
     // Match by kategori NAME (case-insensitive, partial), bukan id (id bisa beda antar env).
+    const FORKLIFT_TPL = {
+      icon: '🚜',
+      label: 'Spesifikasi Forklift (Nameplate)',
+      fields: [
+        // BASIC
+        { key: 'model',             label: 'Model',                   unit: '',     type: 'text',   placeholder: 'mis. DP50NT, FD30, H50FT' },
+        { key: 'model_code',        label: 'Model Code',              unit: '',     type: 'text' },
+        { key: 'serial_no',         label: 'Serial Number',           unit: '',     type: 'text',   placeholder: 'mis. CT28C-51897' },
+        { key: 'manufacturer_license_no', label: 'Manufacturer License No', unit: '', type: 'text', placeholder: 'mis. TS2510568-2026' },
+        { key: 'year',              label: 'Year of Manufacture',     unit: '',     type: 'number' },
+        { key: 'made_by',           label: 'Made By',                 unit: '',     type: 'text',   placeholder: 'mis. Mitsubishi Heavy Industries (Dalian)' },
+        // CAPACITY & WEIGHT
+        { key: 'capacity_kg',       label: 'Lift Capacity',           unit: 'kg',   type: 'number' },
+        { key: 'truck_weight_kg',   label: 'Truck Weight',            unit: 'kg',   type: 'number' },
+        { key: 'load_center_mm',    label: 'Load Center (rated)',     unit: 'mm',   type: 'number', placeholder: 'umumnya 500-600 mm' },
+        // FUEL TYPE
+        { key: 'fuel_type',         label: 'Fuel Type',               unit: '',     type: 'select', options: ['Diesel','LPG','Gasoline','Electric'] },
+        // TIRE
+        { key: 'tire_pressure_front_kpa', label: 'Tire Pressure Front', unit: 'kPa', type: 'number' },
+        { key: 'tire_pressure_rear_kpa',  label: 'Tire Pressure Rear',  unit: 'kPa', type: 'number' },
+        { key: 'front_tire_size',         label: 'Front Tire Size',     unit: '',    type: 'text',   placeholder: 'mis. 300-15-18PR I' },
+        { key: 'rear_tire_size',          label: 'Rear Tire Size',      unit: '',    type: 'text',   placeholder: 'mis. 7.60-12-14PR I' },
+        // MAST
+        { key: 'max_rearward_mast_tilt_deg', label: 'Max Rearward Mast Tilt', unit: '°', type: 'number' },
+        { key: 'max_lift_height_mm', label: 'Max Lift Height',        unit: 'mm',   type: 'number', placeholder: 'cek di pump book / manual' },
+        { key: 'load_tire_tread_width_mm', label: 'Load Tire Tread Width', unit: 'mm', type: 'number' },
+        // ENGINE / DRIVE (kalau diesel/LPG)
+        { key: 'engine_model',      label: 'Engine Model',            unit: '',     type: 'text',   placeholder: 'mis. Mitsubishi S6S-T, Kubota V3300' },
+        { key: 'engine_sn',         label: 'Engine SN',               unit: '',     type: 'text' },
+        { key: 'transmission_type', label: 'Transmission Type',       unit: '',     type: 'select', options: ['Hydrostatic','Torque Converter','Manual','Electric'] },
+      ],
+    };
+
     const TRANSMISSION_TPL = {
       icon: '⚙️',
       label: 'Spesifikasi Transmission / Gearbox (Nameplate)',
@@ -522,6 +555,8 @@
           { key: 'sales_order',       label: 'Sales Order Reference', unit: '',     type: 'text' },
         ],
       },
+      // Forklift (Alat Berat) — kategori 'Forklift'
+      'Forklift':      FORKLIFT_TPL,
       // Triplex Mud Pump (positive displacement) — pump utama drilling rig
       'Mudpump':       TRIPLEX_MUD_PUMP_TPL,
       // Centrifugal pump — apply ke 3 kategori (Pompa, Pump (MTU), MUDPUMP Acid)
