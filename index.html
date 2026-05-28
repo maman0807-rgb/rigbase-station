@@ -405,6 +405,33 @@
     // ============================================================
     // Template field nameplate per kategori. Mulai Genset & Centrifugal Pump; nanti extend ke Triplex Mud Pump, Engine, dll.
     // Match by kategori NAME (case-insensitive, partial), bukan id (id bisa beda antar env).
+    const TRIPLEX_MUD_PUMP_TPL = {
+      icon: '🔧',
+      label: 'Spesifikasi Triplex Mud Pump (Nameplate)',
+      fields: [
+        // PUMP DATA
+        { key: 'model_no',           label: 'Model No',                unit: '',      type: 'text',   placeholder: 'mis. JWS400, 12-P-160, 14-P-220' },
+        { key: 'date_of_mfg',        label: 'Date of Manufacture',     unit: '',      type: 'text',   placeholder: 'mis. 1-5-24' },
+        { key: 'rated_power_hp',     label: 'Rated Power',             unit: 'HP',    type: 'number', placeholder: 'mis. 400 (JWS400)' },
+        // STROKE & PLUNGER
+        { key: 'max_speed_spm',      label: 'Max Speed',               unit: 'SPM',   type: 'number' },
+        { key: 'stroke_in',          label: 'Stroke Length',           unit: 'in',    type: 'number', step: '0.01' },
+        { key: 'plunger_size_in',    label: 'Plunger / Liner Size (Installed)', unit: 'in', type: 'number', step: '0.01' },
+        { key: 'plunger_type',       label: 'Plunger Type',            unit: '',      type: 'select', options: ['PISTON','PLUNGER'] },
+        // POWER END
+        { key: 'gear_ratio',         label: 'Gear Ratio',              unit: ':1',    type: 'text',   placeholder: 'mis. 4.6678' },
+        { key: 'oil_capacity_usgal', label: 'Crankcase Oil Capacity',  unit: 'USGAL', type: 'number', step: '0.1' },
+        { key: 'crankcase_lub_spec', label: 'Crankcase Lubrication Spec', unit: '',   type: 'textarea', placeholder: 'mis.\n50°F-155°F: AGMA 6 EP / ISO 320 EP\n20°F-100°F: AGMA 5 EP / ISO 220 EP\n-20°F-60°F: AGMA 2 EP / ISO 68 EP' },
+        // PRESSURE (dari pump book, current liner)
+        { key: 'max_discharge_psi',  label: 'Max Discharge Pressure (current liner)', unit: 'psi', type: 'number' },
+        // SERIAL — power end & fluid end terpisah (umum di triplex; FE bisa di-overhaul terpisah)
+        { key: 'pe_serial_no',       label: 'PE Serial No (Power End)', unit: '',    type: 'text' },
+        { key: 'fe_serial_no',       label: 'FE Serial No (Fluid End)', unit: '',    type: 'text' },
+        // MANUFACTURING ORIGIN
+        { key: 'assembled_in',       label: 'Assembled In',            unit: '',      type: 'text',   placeholder: 'mis. USA' },
+      ],
+    };
+
     const CENTRIFUGAL_PUMP_TPL = {
       icon: '🌀',
       label: 'Spesifikasi Centrifugal Pump (Nameplate)',
@@ -467,6 +494,8 @@
           { key: 'sales_order',       label: 'Sales Order Reference', unit: '',     type: 'text' },
         ],
       },
+      // Triplex Mud Pump (positive displacement) — pump utama drilling rig
+      'Mudpump':       TRIPLEX_MUD_PUMP_TPL,
       // Centrifugal pump — apply ke 3 kategori (Pompa, Pump (MTU), MUDPUMP Acid)
       // Catatan: partial-match getSpecTemplate juga akan menangkap variasi nama (mis. "Pompa Sentrifugal")
       'Pompa':         CENTRIFUGAL_PUMP_TPL,
@@ -5411,8 +5440,13 @@
         const hasAny = tpl.fields.some(f => sd[f.key] != null && sd[f.key] !== '');
         const specRows = tpl.fields.map(f => {
           const v = sd[f.key];
-          const display = v == null || v === '' ? null
-            : (f.unit ? `${escapeHtml(String(v))} <span class="text-slate-400 text-xs">${escapeHtml(f.unit)}</span>` : escapeHtml(String(v)));
+          if (v == null || v === '') return infoRow(f.label, null);
+          // Textarea content: pertahankan baris baru di tampilan
+          const escVal = escapeHtml(String(v));
+          const formatted = f.type === 'textarea' ? escVal.replace(/\n/g, '<br>') : escVal;
+          const display = f.unit
+            ? `${formatted} <span class="text-slate-400 text-xs">${escapeHtml(f.unit)}</span>`
+            : formatted;
           return infoRow(f.label, display);
         }).join('');
         specSectionHtml = `
@@ -6285,12 +6319,17 @@
               <option value="">—</option>
               ${f.options.map(o => `<option value="${o}" ${v == o ? 'selected' : ''}>${o}</option>`).join('')}
             </select>`;
+          } else if (f.type === 'textarea') {
+            const ph = f.placeholder ? ` placeholder="${escapeHtml(f.placeholder)}"` : '';
+            input = `<textarea data-spec-key="${f.key}" rows="3"${ph} class="${baseCls}">${escapeHtml(String(v))}</textarea>`;
           } else {
             const step = f.step ? ` step="${f.step}"` : '';
             const ph = f.placeholder ? ` placeholder="${escapeHtml(f.placeholder)}"` : '';
             input = `<input type="${f.type}" data-spec-key="${f.key}" value="${escapeHtml(String(v))}"${step}${ph} class="${baseCls}">`;
           }
-          return `<div>
+          // textarea ambil grid penuh (md:col-span-2) biar tidak sempit
+          const span = f.type === 'textarea' ? 'md:col-span-2' : '';
+          return `<div class="${span}">
             <label class="block text-xs font-medium text-slate-700 mb-1">${escapeHtml(f.label)} ${f.unit ? `<span class="text-slate-400">(${escapeHtml(f.unit)})</span>` : ''}</label>
             ${input}
           </div>`;
