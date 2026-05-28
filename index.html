@@ -403,8 +403,40 @@
     // ============================================================
     // 3c. SPEC TEMPLATES per kategori (Fase 8 — spec_data JSONB)
     // ============================================================
-    // Template field nameplate per kategori. Mulai Genset; nanti extend ke Engine, Mudpump, dll.
+    // Template field nameplate per kategori. Mulai Genset & Centrifugal Pump; nanti extend ke Triplex Mud Pump, Engine, dll.
     // Match by kategori NAME (case-insensitive, partial), bukan id (id bisa beda antar env).
+    const CENTRIFUGAL_PUMP_TPL = {
+      icon: '🌀',
+      label: 'Spesifikasi Centrifugal Pump (Nameplate)',
+      fields: [
+        // PUMP DATA
+        { key: 'pump_type',          label: 'Pump Type / Series',     unit: '',    type: 'text',   placeholder: 'mis. MAGNUM' },
+        { key: 'pump_part_no',       label: 'Pump Part No',           unit: '',    type: 'text',   placeholder: 'mis. 1793-217-090' },
+        { key: 'legacy_part_no',     label: 'Legacy Part No',         unit: '',    type: 'text',   placeholder: 'mis. 64020222T90' },
+        { key: 'pump_size',          label: 'Pump Size',              unit: '',    type: 'text',   placeholder: 'mis. 4X3X13 (suction×discharge×impeller)' },
+        { key: 'suction_in',         label: 'Suction Inlet',          unit: 'in',  type: 'number', step: '0.1' },
+        { key: 'discharge_in',       label: 'Discharge Outlet',       unit: 'in',  type: 'number', step: '0.1' },
+        { key: 'impeller_dia_in',    label: 'Impeller Diameter',      unit: 'in',  type: 'number', step: '0.1' },
+        // WET END
+        { key: 'fluid_end_material', label: 'Fluid End Material Code', unit: '',   type: 'text',   placeholder: 'mis. H1' },
+        { key: 'seal_type',          label: 'Seal Type',              unit: '',    type: 'text',   placeholder: 'mis. WBS' },
+        { key: 'max_fluid_temp_f',   label: 'Max Fluid Temp',         unit: '°F',  type: 'number' },
+        { key: 'max_fluid_temp_c',   label: 'Max Fluid Temp',         unit: '°C',  type: 'number', placeholder: 'opsional kalau °F sudah diisi' },
+        // RATED PERFORMANCE (opsional, biasanya dari curve sheet)
+        { key: 'rated_flow_gpm',     label: 'Rated Flow',             unit: 'GPM', type: 'number' },
+        { key: 'rated_head_ft',      label: 'Rated Head',             unit: 'ft',  type: 'number' },
+        { key: 'rated_rpm',          label: 'Rated RPM',              unit: 'rpm', type: 'number' },
+        { key: 'rated_power_hp',     label: 'Rated Power',            unit: 'HP',  type: 'number' },
+        // MANUFACTURING / ENVIRONMENT
+        { key: 'mfr_month_year',     label: 'Month / Year of Mfr',    unit: '',    type: 'text',   placeholder: 'mis. 03/23' },
+        { key: 'ambient_temp_range', label: 'Ambient Temp Range',     unit: '',    type: 'text',   placeholder: 'mis. -20°C to 55°C' },
+        // CERTIFICATION
+        { key: 'atex_class',         label: 'ATEX Classification',    unit: '',    type: 'text',   placeholder: 'mis. II 2G c T4' },
+        { key: 'dnv_cert_no',        label: 'DNV Cert No',            unit: '',    type: 'text' },
+        { key: 'tcf_ref',            label: 'TCF Reference',          unit: '',    type: 'text' },
+      ],
+    };
+
     const SPEC_TEMPLATES = {
       'Generator Set': {
         icon: '⚡',
@@ -435,6 +467,11 @@
           { key: 'sales_order',       label: 'Sales Order Reference', unit: '',     type: 'text' },
         ],
       },
+      // Centrifugal pump — apply ke 3 kategori (Pompa, Pump (MTU), MUDPUMP Acid)
+      // Catatan: partial-match getSpecTemplate juga akan menangkap variasi nama (mis. "Pompa Sentrifugal")
+      'Pompa':         CENTRIFUGAL_PUMP_TPL,
+      'Pump (MTU)':    CENTRIFUGAL_PUMP_TPL,
+      'MUDPUMP Acid':  CENTRIFUGAL_PUMP_TPL,
     };
 
     function getSpecTemplate(kategoriId) {
