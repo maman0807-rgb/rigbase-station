@@ -401,6 +401,54 @@
     ];
 
     // ============================================================
+    // 3c. SPEC TEMPLATES per kategori (Fase 8 — spec_data JSONB)
+    // ============================================================
+    // Template field nameplate per kategori. Mulai Genset; nanti extend ke Engine, Mudpump, dll.
+    // Match by kategori NAME (case-insensitive, partial), bukan id (id bisa beda antar env).
+    const SPEC_TEMPLATES = {
+      'Generator Set': {
+        icon: '⚡',
+        label: 'Spesifikasi Genset (Nameplate)',
+        fields: [
+          { key: 'rated_kva',         label: 'Rated Power (Prime)',   unit: 'kVA',  type: 'number', step: '0.1' },
+          { key: 'rated_kw',          label: 'Rated Power (Prime)',   unit: 'kW',   type: 'number', step: '0.1' },
+          { key: 'standby_kva',       label: 'Standby Power',         unit: 'kVA',  type: 'number', step: '0.1' },
+          { key: 'standby_kw',        label: 'Standby Power',         unit: 'kW',   type: 'number', step: '0.1' },
+          { key: 'power_factor',      label: 'Power Factor',          unit: 'cos φ', type: 'number', step: '0.01' },
+          { key: 'rated_voltage',     label: 'Rated Voltage',         unit: 'V',    type: 'text',   placeholder: 'mis. 400/230' },
+          { key: 'phase',             label: 'Phase',                 unit: '',     type: 'number' },
+          { key: 'frequency_hz',      label: 'Rated Frequency',       unit: 'Hz',   type: 'number' },
+          { key: 'rated_current_a',   label: 'Rated Current (Prime)', unit: 'A',    type: 'number', step: '0.1' },
+          { key: 'rpm',               label: 'Rated RPM',             unit: 'rpm',  type: 'number' },
+          { key: 'performance_class', label: 'Performance Class',     unit: '',     type: 'select', options: ['G1','G2','G3','G4'] },
+          { key: 'connection',        label: 'Generator Connection',  unit: '',     type: 'select', options: ['STAR','DELTA'] },
+          { key: 'enclosure_ip',      label: 'Enclosure IP',          unit: '',     type: 'text', placeholder: 'mis. IP23' },
+          { key: 'insulation_class',  label: 'Insulation Class',      unit: '',     type: 'text', placeholder: 'mis. H' },
+          { key: 'iso_8528',          label: 'ISO 8528-3 Rating',     unit: '',     type: 'text', placeholder: 'mis. BR' },
+          { key: 'excitation_v',      label: 'Excitation Voltage',    unit: 'V',    type: 'number', step: '0.1' },
+          { key: 'excitation_a',      label: 'Excitation Current',    unit: 'A',    type: 'number', step: '0.01' },
+          { key: 'mass_kg',           label: 'Mass',                  unit: 'kg',   type: 'number' },
+          { key: 'max_altitude_m',    label: 'Max Altitude',          unit: 'm',    type: 'number' },
+          { key: 'max_ambient_c',     label: 'Max Ambient Temp',      unit: '°C',   type: 'number' },
+          { key: 'generator_sn',      label: 'Generator SN (alternator)', unit: '', type: 'text' },
+          { key: 'engine_sn',         label: 'Engine SN (internal)',  unit: '',     type: 'text' },
+          { key: 'sales_order',       label: 'Sales Order Reference', unit: '',     type: 'text' },
+        ],
+      },
+    };
+
+    function getSpecTemplate(kategoriId) {
+      const name = getCategoryName(kategoriId) || '';
+      // exact match dulu, lalu partial (case-insensitive)
+      if (SPEC_TEMPLATES[name]) return { key: name, ...SPEC_TEMPLATES[name] };
+      const lc = name.toLowerCase();
+      for (const k of Object.keys(SPEC_TEMPLATES)) {
+        if (lc.includes(k.toLowerCase())) return { key: k, ...SPEC_TEMPLATES[k] };
+      }
+      return null;
+    }
+
+    // ============================================================
     // 4. UTILITAS UI & FORMATTERS
     // ============================================================
     function $(sel) { return document.querySelector(sel); }
@@ -5341,7 +5389,27 @@
           ['Remarks', eq.remarks],
         ]],
       ];
-      return sections.map(([title, rows]) => `
+      // Spesifikasi nameplate per kategori (spec_data JSONB)
+      const tpl = getSpecTemplate(eq.kategori_id);
+      let specSectionHtml = '';
+      if (tpl) {
+        const sd = (eq.spec_data && typeof eq.spec_data === 'object') ? eq.spec_data : {};
+        const hasAny = tpl.fields.some(f => sd[f.key] != null && sd[f.key] !== '');
+        const specRows = tpl.fields.map(f => {
+          const v = sd[f.key];
+          const display = v == null || v === '' ? null
+            : (f.unit ? `${escapeHtml(String(v))} <span class="text-slate-400 text-xs">${escapeHtml(f.unit)}</span>` : escapeHtml(String(v)));
+          return infoRow(f.label, display);
+        }).join('');
+        specSectionHtml = `
+          <div class="mb-5">
+            <h4 class="font-bold text-navy text-base uppercase tracking-wider mb-3">${tpl.icon} ${escapeHtml(tpl.label)}</h4>
+            <div class="bg-white border border-slate-200 rounded-lg p-4">
+              ${hasAny ? specRows : '<div class="text-sm text-slate-400 italic">Nameplate belum diisi. Klik ✏ Edit untuk input.</div>'}
+            </div>
+          </div>`;
+      }
+      const allSectionsHtml = sections.map(([title, rows]) => `
         <div class="mb-5 last:mb-0">
           <h4 class="font-bold text-navy text-base uppercase tracking-wider mb-3">${title}</h4>
           <div class="bg-white border border-slate-200 rounded-lg p-4">
@@ -5349,6 +5417,13 @@
           </div>
         </div>
       `).join('');
+      // Sisipkan section spek nameplate SETELAH section "Spesifikasi" (index 1)
+      if (specSectionHtml) {
+        const parts = allSectionsHtml.split('</div>\n        </div>\n      ');
+        // fallback simpler: append di akhir kalau split gagal
+        return allSectionsHtml + specSectionHtml;
+      }
+      return allSectionsHtml;
     }
 
     function renderSertifikasiTab(eq) {
@@ -6094,6 +6169,7 @@
           </div>
           <form id="eq-form" class="space-y-4">
             ${sections}
+            <div id="spec-section-host"></div>
             <div class="flex flex-col md:flex-row gap-3 sticky bottom-0 md:bottom-0 bg-white border border-slate-200 rounded-xl p-4 shadow-lg">
               <button type="button" onclick="${isEdit ? `setEquipmentView('detail', '${state.currentEquipmentId}')` : `setEquipmentView('list')`}" class="md:flex-none px-5 py-2.5 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
               <button type="submit" class="flex-1 bg-navy hover:bg-navy-700 text-white px-5 py-2.5 rounded-lg text-sm font-semibold">
@@ -6103,11 +6179,24 @@
             <div id="form-error" class="hide bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-3"></div>
           </form>
         `;
+        // Buffer nilai spec_data dari record existing — jadi state lokal yg di-edit user
+        window.__specDataBuffer = (data.spec_data && typeof data.spec_data === 'object') ? { ...data.spec_data } : {};
         setTimeout(() => {
           $('#eq-form').addEventListener('submit', (e) => { e.preventDefault(); submitEquipmentForm(isEdit); });
           // Populate parent equipment dropdown awal & kategori dropdown
           populateParentEquipmentDropdown(data.assigned_unit_id, data.parent_equipment_id, state.currentEquipmentId);
           populateCategoryDropdown(data.assigned_unit_id, data.kategori_id);
+          // Render spec section sesuai kategori awal
+          renderSpecSection(data.kategori_id);
+          // Listen ke perubahan kategori → re-render spec section
+          const catSelect = $('#eq-form select[name="kategori_id"]');
+          if (catSelect) {
+            catSelect.addEventListener('change', () => {
+              // simpan buffer dulu sebelum re-render
+              persistSpecBuffer();
+              renderSpecSection(Number(catSelect.value) || null);
+            });
+          }
           // Listen ke perubahan parent_unit — refresh dua dropdown
           const unitSelect = $('#eq-form select[name="assigned_unit_id"]');
           if (unitSelect) {
@@ -6115,10 +6204,63 @@
               const newUnitId = Number(unitSelect.value) || null;
               populateParentEquipmentDropdown(newUnitId, null, state.currentEquipmentId);
               populateCategoryDropdown(newUnitId, null); // reset kategori karena unit berubah
+              // Reset spec section karena kategori dikosongkan
+              persistSpecBuffer();
+              renderSpecSection(null);
             });
           }
         }, 0);
       };
+
+      // Render section "Spesifikasi Genset" dinamis berdasarkan kategori
+      function renderSpecSection(kategoriId) {
+        const host = document.getElementById('spec-section-host');
+        if (!host) return;
+        const tpl = getSpecTemplate(kategoriId);
+        if (!tpl) { host.innerHTML = ''; return; }
+        const buf = window.__specDataBuffer || {};
+        const inputs = tpl.fields.map(f => {
+          const v = buf[f.key] != null ? buf[f.key] : '';
+          const baseCls = 'w-full px-3 py-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-navy text-sm';
+          const unitChip = f.unit ? `<span class="text-xs text-slate-400 mt-0.5">${escapeHtml(f.unit)}</span>` : '';
+          let input;
+          if (f.type === 'select') {
+            input = `<select data-spec-key="${f.key}" class="${baseCls} bg-white">
+              <option value="">—</option>
+              ${f.options.map(o => `<option value="${o}" ${v == o ? 'selected' : ''}>${o}</option>`).join('')}
+            </select>`;
+          } else {
+            const step = f.step ? ` step="${f.step}"` : '';
+            const ph = f.placeholder ? ` placeholder="${escapeHtml(f.placeholder)}"` : '';
+            input = `<input type="${f.type}" data-spec-key="${f.key}" value="${escapeHtml(String(v))}"${step}${ph} class="${baseCls}">`;
+          }
+          return `<div>
+            <label class="block text-xs font-medium text-slate-700 mb-1">${escapeHtml(f.label)} ${f.unit ? `<span class="text-slate-400">(${escapeHtml(f.unit)})</span>` : ''}</label>
+            ${input}
+          </div>`;
+        }).join('');
+        host.innerHTML = `
+          <div class="bg-white rounded-xl border border-slate-200 shadow-sm">
+            <h4 class="px-5 py-3 font-bold text-navy border-b border-slate-200 bg-slate-50">${tpl.icon} ${escapeHtml(tpl.label)}</h4>
+            <div class="p-5 grid grid-cols-1 md:grid-cols-2 gap-4">${inputs}</div>
+            <div class="px-5 py-2 text-[11px] text-slate-400 border-t border-slate-100">Data nameplate. Kosongkan field yg tidak tersedia di nameplate.</div>
+          </div>`;
+      }
+
+      // Sync nilai input spec → buffer (dipanggil sebelum re-render & sebelum submit)
+      function persistSpecBuffer() {
+        const buf = window.__specDataBuffer || {};
+        document.querySelectorAll('#spec-section-host [data-spec-key]').forEach(el => {
+          const k = el.dataset.specKey;
+          const v = el.value;
+          if (v === '' || v == null) { delete buf[k]; return; }
+          // Jenis numeric vs text auto-detect: kalau input type=number, convert
+          const isNum = el.tagName === 'INPUT' && el.type === 'number';
+          buf[k] = isNum ? Number(v) : v;
+        });
+        window.__specDataBuffer = buf;
+      }
+      window.__persistSpecBuffer = persistSpecBuffer;
 
       if (isEdit) {
         fetchEquipment(state.currentEquipmentId).then(setup).catch(err => {
@@ -6196,6 +6338,9 @@
         // select-parent-equipment stays as UUID string (no conversion)
         payload[f.name] = v;
       }));
+      // Sync spec_data buffer dari section "Spesifikasi <Kategori>"
+      if (typeof window.__persistSpecBuffer === 'function') window.__persistSpecBuffer();
+      payload.spec_data = window.__specDataBuffer || {};
 
       const submitBtn = form.querySelector('button[type=submit]');
       submitBtn.disabled = true;
