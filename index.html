@@ -316,7 +316,7 @@
       { id: 'equipment',   label: 'Equipment',    icon: '🔧', group: 'Operasional',  bottomNav: true },
       { id: 'inspections', label: 'Inspeksi',     icon: '🔍', group: 'Operasional',  bottomNav: true },
       { id: 'alerts',      label: 'Alert',        icon: '🔔', group: 'Operasional',  bottomNav: true },
-      { id: 'reliability', label: 'RAM',          icon: '📈', group: 'Analisa',      srOnly: true },
+      { id: 'reliability', label: 'RAM',          icon: '📈', group: 'Analisa',      srOnly: true, bottomNav: true },
       { id: 'categories',  label: 'Kategori',     icon: '🏷️', group: 'Administrasi', adminOnly: true },
       { id: 'users',       label: 'User',         icon: '👥', group: 'Administrasi', adminOnly: true },
       { id: 'activity',    label: 'Activity Log', icon: '📜', group: 'Administrasi', adminOnly: true },
@@ -6042,12 +6042,32 @@
     async function renderHistoryTab(eq, container) {
       historyFilter = 'all';   // reset filter tiap buka equipment baru
       try {
-        const [muts, loans, dt] = await Promise.all([
+        // Fetch children (kalau eq ini punya children, agregat mutasi mereka juga)
+        const children = await fetchChildren(eq.id).catch(() => []);
+        const childIds = children.map(c => c.id);
+        const childById = Object.fromEntries(children.map(c => [c.id, c]));
+
+        const [muts, loans, dt, childMuts] = await Promise.all([
           fetchMutationLog(eq.id),
           fetchLoanHistory(eq.id).catch(() => []),
           state.supabase.from('downtime_events').select('*').eq('equipment_id', eq.id)
             .then(r => r.data || []).catch(() => []),
+          // Mutasi children — sekali query semua sekaligus
+          childIds.length
+            ? state.supabase.from('mutation_log').select('*').in('equipment_id', childIds)
+                .then(r => r.data || []).catch(() => [])
+            : Promise.resolve([]),
         ]);
+        // Push child mutations ke events dgn label child-mutasi (warna beda)
+        childMuts.forEach(m => {
+          const c = childById[m.equipment_id];
+          muts.push({
+            ...m,
+            __isChild: true,
+            __childTag: c?.tag_number || '?',
+            __childName: c?.nama_equipment || '',
+          });
+        });
         // Fetch photos utk semua downtime event sekaligus (1 query)
         const dtIds = dt.map(d => d.id);
         const photosByEvent = {};
@@ -6063,11 +6083,13 @@
         // Gabung events ke timeline yg sama, sort by date desc
         const events = [];
         muts.forEach(m => events.push({
-          group: 'mutasi', kind: 'mutasi',
+          group: 'mutasi', kind: m.__isChild ? 'mutasi-child' : 'mutasi',
           date: m.mutation_date,
-          title: `${getParentUnitName(m.from_unit_id)} → ${getParentUnitName(m.to_unit_id)}`,
+          title: m.__isChild
+            ? `🧩 ${m.__childTag} (komponen): ${getParentUnitName(m.from_unit_id)} → ${getParentUnitName(m.to_unit_id)}`
+            : `${getParentUnitName(m.from_unit_id)} → ${getParentUnitName(m.to_unit_id)}`,
           detail: m.reason,
-          color: 'bg-safety',
+          color: m.__isChild ? 'bg-amber-400' : 'bg-safety',
         }));
         loans.forEach(l => {
           const isLender = l.lender_equipment_id === eq.id;
