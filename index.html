@@ -5612,8 +5612,19 @@
           </div>
         `).join('');
 
+        // Catatan Persiapan Maintenance dari spec_data
+        const prepNotes = eq.spec_data?.maintenance_prep_notes;
+        const prepHtml = prepNotes ? `
+          <div class="mb-4">
+            <h4 class="font-bold text-navy text-base uppercase tracking-wider mb-2">📋 Persiapan Maintenance ke Depan</h4>
+            <div class="bg-amber-50 border border-amber-200 rounded-lg p-4">
+              <pre class="text-sm text-slate-800 whitespace-pre-wrap font-sans leading-relaxed">${escapeHtml(prepNotes)}</pre>
+            </div>
+          </div>` : '';
+
         container.innerHTML = `
           ${summaryHtml}
+          ${prepHtml}
           <div class="flex items-center justify-between mb-3 mt-5">
             <h4 class="font-bold text-slate-800">🛠️ Riwayat Maintenance (${logs.length})</h4>
             <button onclick="openMaintenanceModal('${eq.id}')" class="bg-safety hover:bg-safety-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium">+ Tambah</button>
@@ -6362,8 +6373,21 @@
           nama_equipment: nameEl?.value || data.nama_equipment || '',
         };
         const tpl = getSpecTemplate(kategoriId, eqHint);
-        if (!tpl) { host.innerHTML = ''; return; }
         const buf = window.__specDataBuffer || {};
+        // Maintenance Prep section — TAMPIL UNTUK SEMUA EQUIPMENT (tidak conditional ke kategori)
+        const prepValue = buf.maintenance_prep_notes || '';
+        const prepSectionHtml = `
+          <div class="bg-white rounded-xl border border-slate-200 shadow-sm ${tpl ? 'mt-4' : ''}">
+            <h4 class="px-5 py-3 font-bold text-navy border-b border-slate-200 bg-slate-50">📋 Persiapan Maintenance ke Depan</h4>
+            <div class="p-5">
+              <textarea data-spec-key="maintenance_prep_notes" rows="12" placeholder="Catatan apa yg perlu disiapkan tiap milestone maintenance.&#10;&#10;Contoh format:&#10;🟢 PM (tiap 4000 jam):&#10;  - Fluid ATF 36 quart&#10;  - Filter set&#10;  - Lead time: 1 minggu&#10;  - Vendor: PT Diselindo Utama Nusa&#10;&#10;🟡 TOH (tiap 12000 jam):&#10;  - ...&#10;&#10;🔴 GOH (tiap 24000 jam):&#10;  - ..." class="w-full px-3 py-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-navy text-sm font-mono">${escapeHtml(String(prepValue))}</textarea>
+              <div class="text-[11px] text-slate-400 mt-2">Catatan persiapan parts, lead time, vendor PIC, manpower, dll. Tidak perlu cost (cost berubah-ubah). Akan tampil di tab Maintenance.</div>
+            </div>
+          </div>`;
+        if (!tpl) {
+          host.innerHTML = prepSectionHtml;
+          return;
+        }
         const inputs = tpl.fields.map(f => {
           const v = buf[f.key] != null ? buf[f.key] : '';
           const baseCls = 'w-full px-3 py-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-navy text-sm';
@@ -6394,7 +6418,8 @@
             <h4 class="px-5 py-3 font-bold text-navy border-b border-slate-200 bg-slate-50">${tpl.icon} ${escapeHtml(tpl.label)}</h4>
             <div class="p-5 grid grid-cols-1 md:grid-cols-2 gap-4">${inputs}</div>
             <div class="px-5 py-2 text-[11px] text-slate-400 border-t border-slate-100">Data nameplate. Kosongkan field yg tidak tersedia di nameplate.</div>
-          </div>`;
+          </div>
+          ${prepSectionHtml}`;
       }
 
       // Sync nilai input spec → buffer (dipanggil sebelum re-render & sebelum submit)
