@@ -8676,7 +8676,7 @@
     async function renderKelayakanPage(host) {
       let eqHm = [], eqKm = [], dtAll = [];
       try {
-        const fields = 'id, tag_number, nama_equipment, assigned_unit_id, running_hours, pm_interval_hours, last_pm_hours, last_pm_date, toh_interval_hours, goh_interval_hours, economic_life_hours, last_toh_hours, last_toh_date, last_goh_hours, last_goh_date, pm_type';
+        const fields = 'id, tag_number, nama_equipment, assigned_unit_id, running_hours, pm_interval_hours, last_pm_hours, last_pm_date, toh_interval_hours, goh_interval_hours, economic_life_hours, last_toh_hours, last_goh_hours, last_goh_date, pm_type';
         const [hm, km, dt] = await Promise.all([
           state.supabase.from('equipment').select(fields).gt('running_hours', 0).neq('pm_type', 'km'),
           state.supabase.from('equipment').select(fields).gt('running_hours', 0).eq('pm_type', 'km'),
@@ -8706,7 +8706,7 @@
           const base = Number(x.last_toh_hours ?? x.last_goh_hours ?? 0) || 0;
           const sisa = tohInt - (rh - base);
           if (sisa < tohInt)
-            dueAll.push({ x, u, kind: 'TOH', sisa, interval: tohInt, lastDate: x.last_toh_date });
+            dueAll.push({ x, u, kind: 'TOH', sisa, interval: tohInt, lastDate: x.last_goh_date });
         }
         // GOH (sisa = interval - (rh - last_goh))
         const gohInt = Number(x.goh_interval_hours) || 0;
