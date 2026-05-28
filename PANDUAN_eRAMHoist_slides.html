@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Panduan eRAMHoist — Slides</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@4.5.0/dist/reveal.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@4.5.0/dist/theme/white.css">
+<style>
+  :root { --navy:#11335d; --safety:#f97316; --green:#16a34a; --red:#dc2626; --amber:#d97706; --blue:#0ea5e9; --purple:#7c3aed; }
+  .reveal h1, .reveal h2, .reveal h3 { color: var(--navy); font-family: 'Helvetica Neue', Arial, sans-serif; text-transform: none; }
+  .reveal h1 { font-size: 2.4em; }
+  .reveal h2 { font-size: 1.8em; border-bottom: 3px solid var(--safety); padding-bottom: 0.2em; }
+  .reveal h3 { font-size: 1.3em; color: var(--navy); }
+  .reveal .brand-ram { color: var(--safety); font-weight: 800; }
+  .reveal p, .reveal li { font-size: 0.7em; line-height: 1.5; }
+  .reveal table { font-size: 0.5em; margin: 0.5em auto; border-collapse: collapse; width: auto; }
+  .reveal table th { background: #f1f5f9; padding: 6px 10px; border: 1px solid #cbd5e1; }
+  .reveal table td { padding: 5px 10px; border: 1px solid #e2e8f0; }
+  .reveal .small { font-size: 0.55em; }
+  .reveal .smaller { font-size: 0.45em; color: #64748b; }
+  .reveal .pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 0.5em; font-weight: 700; margin: 2px; }
+  .reveal .pill-green { background: #dcfce7; color: #15803d; }
+  .reveal .pill-amber { background: #fef3c7; color: #b45309; }
+  .reveal .pill-red { background: #fee2e2; color: #b91c1c; }
+  .reveal .pill-blue { background: #dbeafe; color: #1e40af; }
+  .reveal .pill-navy { background: #11335d; color: white; }
+  .reveal .card-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin: 1em 0; font-size: 0.7em; }
+  .reveal .card { border: 2px solid #e2e8f0; border-radius: 10px; padding: 14px; text-align: left; }
+  .reveal .card.green { border-color: var(--green); }
+  .reveal .card.red { border-color: var(--red); }
+  .reveal .card.amber { border-color: var(--amber); }
+  .reveal .card.blue { border-color: var(--blue); }
+  .reveal .tree { font-family: 'Courier New', monospace; font-size: 0.55em; text-align: left; background: #f8fafc; padding: 1em; border-radius: 8px; white-space: pre; line-height: 1.6; }
+  .reveal .ttl-row { font-size: 0.6em; margin: 0.3em 0; text-align: left; }
+  .reveal .footer { position: absolute; bottom: 10px; right: 20px; font-size: 0.4em; color: #94a3b8; }
+  .reveal section { text-align: left; }
+  .reveal section.center { text-align: center; }
+  .reveal blockquote { background: #fef3c7; border-left: 4px solid var(--amber); padding: 10px 16px; font-size: 0.65em; font-style: normal; border-radius: 4px; }
+  .reveal a { color: var(--navy); text-decoration: underline; }
+  .reveal .kop { display: flex; align-items: center; gap: 16px; border-bottom: 3px solid var(--navy); padding-bottom: 10px; margin-bottom: 20px; position: relative; }
+  .reveal .kop::after { content:""; position:absolute; left:0; right:0; bottom:-3px; height:2px; background:var(--safety); }
+  .reveal .kop .logo { width: 60px; height: 60px; background: var(--navy); color: white; display: flex; align-items: center; justify-content: center; border-radius: 8px; font-size: 1.6em; }
+  .reveal .kop .brand-text { font-size: 1.4em; font-weight: 800; color: var(--navy); }
+</style>
+</head>
+<body>
+<div class="reveal">
+<div class="slides">
+
+<!-- ====== Slide 1: Title ====== -->
+<section class="center">
+  <div class="kop" style="justify-content:center;">
+    <div class="logo">🛢️</div>
+    <div>
+      <div class="brand-text">e<span class="brand-ram">RAM</span>Hoist</div>
+      <div class="small" style="color:#64748b;">Reliability · Availability · Maintainability</div>
+    </div>
+  </div>
+  <h1>Panduan e<span class="brand-ram">RAM</span>Hoist</h1>
+  <p class="small">User manual operasional untuk fleet Hoist &amp; Heavy Equipment<br>Pertamina EP — Sr Mekanik &amp; up</p>
+  <p class="smaller" style="margin-top:2em;">Versi 1.0 · 2026-05-27 · pasca-restruktur hierarki &amp; Fase 6 photo upload</p>
+</section>
+
+<!-- ====== Slide 2: Apa itu RAM ====== -->
+<section>
+  <h2>1. Apa itu RAM?</h2>
+  <p><b>RAM</b> = <b style="color:var(--navy);">R</b>eliability · <b style="color:var(--navy);">A</b>vailability · <b style="color:var(--navy);">M</b>aintainability — 3 pilar analisa kelayakan operasional equipment.</p>
+  <table>
+    <thead><tr><th>Pilar</th><th>Pertanyaan utama</th><th>Tab di app</th></tr></thead>
+    <tbody>
+      <tr><td><b>Reliability</b><br><span class="smaller">Keandalan</span></td><td>"Seberapa sering rusak?" → MTBF</td><td>RAM → Reliability</td></tr>
+      <tr><td><b>Availability</b><br><span class="smaller">Ketersediaan</span></td><td>"Berapa % waktu siap pakai?"</td><td>RAM → Availability</td></tr>
+      <tr><td><b>Maintainability</b><br><span class="smaller">Kemudahan dirawat</span></td><td>"Kapan PM/TOH/GOH? Sisa berapa jam?"</td><td>RAM → Maintenance</td></tr>
+      <tr><td><b>Kelayakan</b><br><span class="smaller">verdict gabungan</span></td><td>"Layak dirawat atau ganti?"</td><td>RAM → Kelayakan</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ====== Slide 3: 5 Armada ====== -->
+<section>
+  <h2>2. Struktur Data — 5 Armada</h2>
+  <p>Dept Hoist &amp; Heavy Equipment terbagi 5 armada di app:</p>
+  <div class="card-grid" style="grid-template-columns: repeat(3, 1fr);">
+    <div class="card"><b>🛢️ Rig</b><br><span class="small">5 unit: BW-100A, H35KD, KB150.A/B/C</span></div>
+    <div class="card"><b>🔧 Standalone</b><br><span class="small">3 unit: MTU, Slickline, Independent</span></div>
+    <div class="card amber"><b>🚜 Alat Berat</b><br><span class="small">9 unit civil (grader, dozer, exca, dll)</span></div>
+    <div class="card blue"><b>🛻 Kendaraan</b><br><span class="small">10 unit (truk, manlift, skimmer)</span><br><span class="pill pill-blue">basis KM</span></div>
+    <div class="card red"><b>🚒 Fire &amp; Safety</b><br><span class="small">31 unit (29 fire pump portable + 2 damkar)</span></div>
+    <div class="card" style="background:#f8fafc;"><b>Total</b><br><span class="small">252 equipment dalam 1 sistem</span></div>
+  </div>
+  <p class="smaller">Tag konsisten dgn armada. Lokasi fisik aktual disimpan di field <code>lokasi_fisik</code>.</p>
+</section>
+
+<!-- ====== Slide 4: Hierarki ====== -->
+<section>
+  <h2>3. Canonical Hierarchy per Rig</h2>
+  <div class="tree">🛢️  Mobile Rig (MR-*)  ← container utama
+├── 📦 Carrier (CARRIER-*)
+│   ├── Drilling Console (DC-*)
+│   ├── Drawwork (DW-*)
+│   ├── Hydraulic Jack (HJ-*)
+│   └── Mounting Axle (MA-*)
+├── 🗼 Mast (MAST-*)
+│   ├── Travelling Block (TB-*)
+│   ├── Escape Chair (EC-*)
+│   └── Locking Pawl (LP-*)
+├── ⚙️ Engine Rig (MOBENG-*)
+│   └── Transmisi Rig (TRANS-*)
+├── 🛞 Mudpump (MP-*)
+│   ├── Engine Mudpump (ENGINE-MP-*)
+│   ├── Pump body (PUMP-*)
+│   └── Transmisi Mudpump (TRANS-MP-*)
+└── ⚡ Genset, BOP, BPM, MGS, Blower, Compressor,
+    Stand Lamp, Tower Light, Fire Pump, Portacamp,
+    Handling Tools (semua sibling-sibling di bawah MR)</div>
+  <p class="smaller">Setiap rig punya struktur identik untuk konsistensi analisa.</p>
+</section>
+
+<!-- ====== Slide 5: Reliability ====== -->
+<section>
+  <h2>4. Reliability — Keandalan</h2>
+  <p>Mengukur seberapa sering equipment mengalami kerusakan.</p>
+  <h3 style="color:var(--blue)">MTBF (Mean Time Between Failures)</h3>
+  <p class="small"><code>MTBF = jam_jalan ÷ jumlah_kerusakan</code></p>
+  <p class="small"><b>Kategori dihitung sebagai event:</b> <span class="pill pill-red">breakdown</span> <span class="pill pill-amber">troubleshoot</span></p>
+  <p class="small"><b>Bukan event (durasi saja):</b> <span class="pill" style="background:#f1f5f9; color:#475569;">tunggu_spare</span></p>
+  <table style="margin-top:0.8em;">
+    <thead><tr><th>MTBF (jam)</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td>&lt; ½ siklus TOH</td><td><span class="pill pill-red">🔴 Keandalan rendah</span></td></tr>
+      <tr><td>½ – 1 siklus TOH</td><td><span class="pill pill-amber">🟡 Pantau</span></td></tr>
+      <tr><td>≥ 1 siklus TOH</td><td><span class="pill pill-green">🟢 Sehat</span></td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ====== Slide 6: Availability KPI ====== -->
+<section>
+  <h2>5. Availability — Kesiapan Equipment</h2>
+  <p><code>Availability % = (Jam periode − Jam down) ÷ Jam periode × 100</code></p>
+  <h3 style="color:var(--green);">KPI Dashboard (kartu atas)</h3>
+  <table>
+    <thead><tr><th>Metric</th><th>Definisi</th></tr></thead>
+    <tbody>
+      <tr><td><b>Availability rata-rata</b></td><td>% uptime fleet dalam periode</td></tr>
+      <tr><td><b>Sedang Down</b></td><td>Count event yang end_at masih NULL</td></tr>
+      <tr><td><b>MTTR</b></td><td>Mean Time To Repair — rata² lama perbaikan</td></tr>
+      <tr><td><b>MTBF (kalender)</b></td><td>Rata² jarak antar kerusakan</td></tr>
+    </tbody>
+  </table>
+  <p class="small" style="margin-top:0.8em;"><b>Kategori Availability:</b>
+    <span class="pill pill-green">🟢 ≥95%</span>
+    <span class="pill pill-amber">🟡 ≥85%</span>
+    <span class="pill pill-red">🔴 &lt;85%</span></p>
+</section>
+
+<!-- ====== Slide 7: Workflow Hari 1 ====== -->
+<section>
+  <h2>6. Workflow Catat Downtime — Hari 1 🔴</h2>
+  <p><b>Skenario:</b> equipment rusak, mekanik lapor segera</p>
+  <h3 style="color:var(--red);">Aksi di app</h3>
+  <ol style="font-size:0.65em;">
+    <li>RAM → <b>Availability</b> → klik <b>+ Catat Downtime</b></li>
+    <li>Isi: Equipment, Mulai Down (sekarang), <b>Selesai (kosongkan — masih down)</b></li>
+    <li>Penyebab: Breakdown / Troubleshoot</li>
+    <li><b>Catatan:</b> deskripsi singkat ("Engine knocking, dugaan turbo bocor")</li>
+    <li>Section 📸 FOTO PENDUKUNG:<br>
+      &nbsp;&nbsp;• Fase: <span class="pill pill-red">Sebelum / Bukti Kerusakan</span><br>
+      &nbsp;&nbsp;• Tgl kejadian foto: hari ini (default)<br>
+      &nbsp;&nbsp;• Caption: "Oli netes seal turbo"<br>
+      &nbsp;&nbsp;• Upload 1-5 foto kondisi rusak
+    </li>
+    <li><b>Simpan</b> → toast "Upload N foto sukses"</li>
+  </ol>
+</section>
+
+<!-- ====== Slide 8: Workflow Hari 3 ====== -->
+<section>
+  <h2>7. Workflow Catat Downtime — Hari 3 📦</h2>
+  <p><b>Skenario:</b> part baru datang dari warehouse</p>
+  <h3 style="color:var(--blue);">Aksi di app</h3>
+  <ol style="font-size:0.65em;">
+    <li>RAM → Availability → list <b>"🔴 Sedang Down"</b> → klik <b>Edit</b> record</li>
+    <li>Jangan ubah Mulai/Selesai (masih down)</li>
+    <li>Section 📸 FOTO PENDUKUNG:<br>
+      &nbsp;&nbsp;• Fase: <span class="pill pill-blue">Part / Spare Part</span><br>
+      &nbsp;&nbsp;• <b>Tgl kejadian foto: 29/05/2026</b> (manual, tanggal part datang)<br>
+      &nbsp;&nbsp;• Caption: "Turbo baru P/N HX35 dari gudang"<br>
+      &nbsp;&nbsp;• Upload foto part
+    </li>
+    <li><b>Simpan</b> → foto ke-2 ditambah ke event yg sama, status tetap 🔴 Sedang Down</li>
+  </ol>
+  <blockquote><b>Kunci:</b> Tgl kejadian foto bisa beda dari tgl upload → audit trail jujur kalau upload telat.</blockquote>
+</section>
+
+<!-- ====== Slide 9: Workflow Hari 5 ====== -->
+<section>
+  <h2>8. Workflow Catat Downtime — Hari 5 🟢</h2>
+  <p><b>Skenario:</b> perbaikan selesai, equipment kembali siap</p>
+  <h3 style="color:var(--green);">Aksi di app</h3>
+  <ol style="font-size:0.65em;">
+    <li>Edit record yang sama lagi</li>
+    <li><b>Isi Selesai = 31 Mei 2026, 17:00</b></li>
+    <li>Section 📸 FOTO PENDUKUNG:<br>
+      &nbsp;&nbsp;• Fase: <span class="pill pill-green">Sesudah / Bukti Perbaikan</span><br>
+      &nbsp;&nbsp;• Tgl kejadian: hari ini<br>
+      &nbsp;&nbsp;• Caption: "Pemasangan + test run OK"<br>
+      &nbsp;&nbsp;• Upload foto after
+    </li>
+    <li><b>Simpan</b> → record <b>closed</b>, durasi auto-terhitung <b>4 hari 3 jam</b></li>
+  </ol>
+  <h3 style="color:var(--navy); margin-top:1em;">Tampilan di History tab</h3>
+  <p class="smaller">3 baris timeline terpisah:<br>
+    🟢 31 Mei • SELESAI PERBAIKAN (lama 4.1 hari) — Diselesaikan oleh: David — [foto after]<br>
+    📦 29 Mei • Part datang / dipasang — Oleh: David — [foto part]<br>
+    🔴 27 Mei • Penyebab: Breakdown — Dilaporkan oleh: M. Yusuf — [foto before]</p>
+</section>
+
+<!-- ====== Slide 10: Maintenance + Tier ====== -->
+<section>
+  <h2>9. Maintainability — PM, TOH, GOH</h2>
+  <p>Sistem perawatan berbasis <b>jam (HM)</b> untuk engine/genset/pompa, atau <b>km</b> untuk kendaraan.</p>
+  <h3>4 Tier OEM (industry-typical)</h3>
+  <table>
+    <thead><tr><th>Tier</th><th>Engine class</th><th>PM</th><th>TOH</th><th>GOH</th><th>Eco life</th></tr></thead>
+    <tbody>
+      <tr><td><b>A</b></td><td>Small &lt;80kW (Perkins 1103A, Cummins 4BTA)</td><td>500</td><td>6.000</td><td>12.000</td><td>30.000</td></tr>
+      <tr><td><b>B</b></td><td>Medium 80-150kW (CAT C4.4, Deutz 1013)</td><td>500</td><td>8.000</td><td>16.000</td><td>35.000</td></tr>
+      <tr><td><b>C</b></td><td>Large 150kW+ (FG Wilson P220, CAT DE165ED)</td><td>500</td><td>10.000</td><td>20.000</td><td>40.000</td></tr>
+      <tr><td><b>D</b></td><td>Heavy-Duty Rig (CAT D3406/C13/C15)</td><td>500</td><td>10.000</td><td>20.000</td><td>45.000</td></tr>
+    </tbody>
+  </table>
+  <p class="small">Semua dalam <b>jam jalan</b>. <code>Sisa PM = (last_pm_hours + interval) − running_hours</code></p>
+</section>
+
+<!-- ====== Slide 11: Kelayakan ====== -->
+<section>
+  <h2>10. Kelayakan Armada — Maintain vs Ganti</h2>
+  <p>Gabungan <b>2 sumbu</b>: umur (TOH/GOH/eco_life) + keandalan (MTBF).</p>
+  <table>
+    <thead><tr><th>Verdict</th><th>Aturan</th></tr></thead>
+    <tbody>
+      <tr><td><span class="pill pill-green">🟢 Sehat</span></td><td>Umur &lt;80% <b>AND</b> keandalan ≥1 siklus TOH</td></tr>
+      <tr><td><span class="pill pill-amber">🟡 Pantau</span></td><td>Salah satu sumbu bermasalah</td></tr>
+      <tr><td><span class="pill pill-red">🔴 Kandidat ganti</span></td><td>Umur ≥100% <b>AND</b> keandalan &lt;½ TOH</td></tr>
+    </tbody>
+  </table>
+  <h3 style="color:var(--red); margin-top:1em;">Contoh nyata (kondisi sekarang)</h3>
+  <p class="small"><b>GS-MTU-PERKINS</b>: running_hours <b>36.679 jam</b>, eco_life <b>30.000 jam</b><br>
+    → UMUR <b>122%</b> → <span class="pill pill-red">🔴 Kandidat ganti</span> ✋ direkomendasikan evaluasi penggantian</p>
+</section>
+
+<!-- ====== Slide 12: SOP Harian ====== -->
+<section>
+  <h2>11. SOP Harian Mekanik</h2>
+  <h3>Morning check</h3>
+  <ol style="font-size:0.6em;">
+    <li>Cek <b>dashboard</b> eRAMHoist</li>
+    <li>Lihat kartu <b>PM Berbasis Jam/KM</b> — ada unit hampir lewat?</li>
+    <li>Lihat <b>Sedang Down</b> — perlu follow up?</li>
+    <li>Update HM/KM unit yg baru jalan (Logbook "Isi HM" / Edit form)</li>
+  </ol>
+  <h3>Saat equipment rusak</h3>
+  <ol style="font-size:0.6em;">
+    <li><b>Catat Downtime baru</b> segera (real-time) + foto kondisi rusak</li>
+    <li>Multi-day repair: edit &amp; update foto tiap milestone (part datang, dst)</li>
+    <li>Setelah selesai: isi tanggal Selesai + foto after</li>
+  </ol>
+  <h3>Weekly review (Sr Mekanik)</h3>
+  <p class="small">Kelayakan: cek unit 🔴/🟡 watchlist · Availability: trend MTTR/MTBF · Reliability: pattern kerusakan</p>
+</section>
+
+<!-- ====== Slide 13: Pitfalls ====== -->
+<section>
+  <h2>12. Common Pitfalls (jangan terjebak)</h2>
+  <div class="card amber" style="margin-bottom:0.8em;">
+    <b>⚠️ Edit equipment butuh login admin</b><br>
+    <span class="small">RLS equipment: write admin only. Edit via Logbook <b>gagal diam-diam tanpa error</b> kalau bukan admin. Selalu login admin saat seed/edit data master.</span>
+  </div>
+  <div class="card blue" style="margin-bottom:0.8em;">
+    <b>📊 HM Sekarang vs HM PM Terakhir</b><br>
+    <span class="small"><b>HM Sekarang</b> = running_hours = odometer kumulatif (bukan jam harian)<br><b>HM PM Terakhir</b> = last_pm_hours = baseline waktu PM terakhir<br><b>Sisa PM</b> = (last_pm + interval) − running_hours</span>
+  </div>
+  <div class="card red">
+    <b>📸 Catatan vs Caption foto</b><br>
+    <span class="small"><b>Catatan downtime</b> = deskripsi awal kerusakan (1× per event, di Catat Downtime form)<br><b>Caption foto</b> = mini-log per upload (multiple foto, beda phase/tanggal)</span>
+  </div>
+</section>
+
+<!-- ====== Slide 14: Reference + Closing ====== -->
+<section class="center">
+  <h2 style="border:none;">Referensi &amp; Akhir</h2>
+  <table style="font-size:0.45em;">
+    <thead><tr><th>Dokumen</th><th>Konten</th></tr></thead>
+    <tbody>
+      <tr><td>PANDUAN_<b>RAM</b>_eRAMHoist.md</td><td>User manual operasional lengkap (SOP, workflow, pitfalls)</td></tr>
+      <tr><td>PANDUAN_INTERVAL_HM.md</td><td>Angka OEM tier per merek + audit trail rename</td></tr>
+      <tr><td>RIGBASE_INSPECTION_PROMPT.md</td><td>Flow Inspeksi Cat3 / Cat4</td></tr>
+      <tr><td>SETUP.md</td><td>Setup teknis &amp; database</td></tr>
+    </tbody>
+  </table>
+  <p class="small" style="margin-top:1.5em;">Semua tersimpan di repo GitHub<br>
+    <a href="https://github.com/maman0807-rgb/rigbase-station">maman0807-rgb/rigbase-station</a></p>
+  <p class="smaller" style="margin-top:2em;">Plus aplikasi live:<br><a href="https://eramhoist.vercel.app">eramhoist.vercel.app</a></p>
+  <div style="margin-top:2em; font-size:0.8em; color:var(--navy); font-weight:800;">
+    e<span class="brand-ram">RAM</span>Hoist · Dept Hoist &amp; Heavy Equipment Pertamina EP
+  </div>
+</section>
+
+</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@4.5.0/dist/reveal.js"></script>
+<script>
+  Reveal.initialize({
+    hash: true,
+    slideNumber: 'c/t',
+    controlsTutorial: false,
+    transition: 'slide',
+    width: 1280,
+    height: 720,
+    margin: 0.06,
+    pdfSeparateFragments: false,
+  });
+</script>
+</body>
+</html>

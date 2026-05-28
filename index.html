@@ -321,6 +321,7 @@
       { id: 'users',       label: 'User',         icon: '👥', group: 'Administrasi', adminOnly: true },
       { id: 'activity',    label: 'Activity Log', icon: '📜', group: 'Administrasi', adminOnly: true },
       { id: 'panduan',     label: 'Panduan e<span class="text-safety">RAM</span>Hoist',  icon: '📖', group: 'Administrasi', srOnly: true },
+      { id: 'slides',      label: 'Slide Presentasi',  icon: '🎞️', group: 'Administrasi', srOnly: true, externalUrl: '/PANDUAN_eRAMHoist_slides.html' },
       { id: 'settings',    label: 'Pengaturan',   icon: '⚙️', bottomNav: true },
     ];
 
@@ -1465,6 +1466,11 @@
       }
       if (item.srOnly && !isSrMekanikOrAbove()) {
         toast('Halaman ini khusus Sr Mekanik ke atas.', 'warn');
+        return;
+      }
+      // External URL handler — buka di tab baru, tidak ganti halaman
+      if (item.externalUrl) {
+        window.open(item.externalUrl, '_blank', 'noopener');
         return;
       }
       state.currentPage = pageId;
