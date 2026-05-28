@@ -5870,6 +5870,7 @@
           const titleNotes = (originalNotes || '-').slice(0, 80);
           events.push({
             group: 'downtime', kind: isGejala ? 'gejala' : 'down',
+            subgroup: isGejala ? 'gejala' : 'downtime',  // utk pisah di print
             date: d.start_at,
             title: isGejala ? `🟡 Gejala terdeteksi: ${titleNotes}` : `🔴 Penyebab: ${cat}`,
             detail: downDetailLines.join('<br>'),
@@ -5895,6 +5896,7 @@
             if (captions.length) partDetail.push(`📝 ${escapeHtml(captions.join(' · '))}`);
             events.push({
               group: 'downtime', kind: 'part',
+              subgroup: isGejala ? 'gejala' : 'downtime',
               date: dateK + 'T08:00:00',
               title: isPart ? '📦 Part datang / dipasang' : '📝 Update perbaikan',
               detail: partDetail.join('<br>') || null,
@@ -5920,6 +5922,7 @@
             if (afterCaptions) doneDetail.push(`📝 ${escapeHtml(afterCaptions)}`);
             events.push({
               group: 'downtime', kind: 'repaired',
+              subgroup: isGejala ? 'gejala' : 'downtime',
               date: d.end_at,
               title: isGejala ? `🟢 Gejala selesai diinvestigasi (durasi ${fmtH(dur)})` : `🟢 SELESAI PERBAIKAN (lama ${fmtH(dur)})`,
               detail: doneDetail.join('<br>') || null,
@@ -6004,9 +6007,17 @@
       const eq = h.eq;
       const all = h.events;
       const ev = historyFilter === 'all' ? all : all.filter(e => e.group === historyFilter);
-      const cnt = { mutasi: 0, pinjam: 0, downtime: 0 };
-      all.forEach(e => { cnt[e.group] = (cnt[e.group] || 0) + 1; });
-      const grpLabel = { mutasi: 'Mutasi', pinjam: 'Pinjaman', downtime: 'Downtime' };
+      // Pisahkan downtime real vs gejala (early warning) — bukan kelas yg sama
+      const cnt = { mutasi: 0, pinjam: 0, downtime: 0, gejala: 0 };
+      all.forEach(e => {
+        if (e.group === 'downtime') {
+          if (e.subgroup === 'gejala') cnt.gejala++;
+          else cnt.downtime++;
+        } else {
+          cnt[e.group] = (cnt[e.group] || 0) + 1;
+        }
+      });
+      const grpLabel = { mutasi: 'Mutasi', pinjam: 'Pinjaman', downtime: 'Downtime', gejala: 'Gejala' };
       const filterLabel = historyFilter === 'all' ? 'Semua Kejadian' : grpLabel[historyFilter];
 
       const summary = `<div class="cards">
@@ -6014,20 +6025,29 @@
         <div class="card navy"><div class="num">${cnt.mutasi}</div><div class="lbl">Mutasi</div></div>
         <div class="card amber"><div class="num">${cnt.pinjam}</div><div class="lbl">Pinjaman</div></div>
         <div class="card red"><div class="num">${cnt.downtime}</div><div class="lbl">Downtime</div></div>
+        <div class="card amber"><div class="num">${cnt.gejala}</div><div class="lbl">Gejala (early warning)</div></div>
       </div>`;
       const intro = `<p><b>Equipment:</b> ${escapeHtml(eq.tag_number || '-')} — ${escapeHtml(eq.nama_equipment || '')}<br>
         <b>Filter:</b> ${filterLabel} &nbsp;|&nbsp; <b>Jumlah baris:</b> ${ev.length}<br>
-        Dokumen ini merupakan rekaman pergerakan (mutasi/pinjaman) &amp; downtime equipment untuk keperluan penelusuran (traceability).</p>`;
+        Dokumen ini merupakan rekaman pergerakan (mutasi/pinjaman), downtime, &amp; gejala (early warning) equipment untuk keperluan penelusuran (traceability).<br>
+        <span style="color:#92400e"><b>Catatan:</b> <i>Gejala</i> = tanda awal kelainan; alat masih jalan, TIDAK menurunkan availability. Dipisah dari Downtime real (alat berhenti).</span></p>`;
       const rows = ev.slice(0, 500).map((e, i) => {
-        const title = e.title.replace(/[🔴🟢🤝↩️]/g, '').trim();
-        return `<tr><td style="text-align:center">${i + 1}</td><td style="text-align:center">${escapeHtml(fmtDate(e.date))}</td><td style="text-align:center">${escapeHtml(grpLabel[e.group] || '-')}</td><td>${escapeHtml(title)}</td><td>${escapeHtml(e.detail || '-')}</td></tr>`;
+        const title = e.title.replace(/[🔴🟢🤝↩️🟡📦📝]/g, '').trim();
+        // Tentukan label Jenis: untuk group downtime, lihat subgroup
+        const jenis = e.group === 'downtime'
+          ? (e.subgroup === 'gejala' ? 'Gejala' : 'Downtime')
+          : (grpLabel[e.group] || '-');
+        // Beri warna baris kalau gejala (amber soft)
+        const rowStyle = e.subgroup === 'gejala' ? ' style="background:#fffbeb"' : '';
+        return `<tr${rowStyle}><td style="text-align:center">${i + 1}</td><td style="text-align:center">${escapeHtml(fmtDate(e.date))}</td><td style="text-align:center">${escapeHtml(jenis)}</td><td>${escapeHtml(title)}</td><td>${escapeHtml(e.detail || '-')}</td></tr>`;
       }).join('');
       const table = `<table><thead><tr><th>No</th><th>Tanggal</th><th>Jenis</th><th>Keterangan</th><th>Detail / Alasan</th></tr></thead><tbody>${rows || '<tr><td colspan="5" style="text-align:center">Tidak ada data</td></tr>'}</tbody></table>`;
-      const kesimpulan = `Rekaman riwayat di atas digunakan untuk pelacakan pergerakan aset, audit, dan dasar analisa keandalan (RAM). Total <b>${ev.length}</b> kejadian tercatat untuk equipment <b>${escapeHtml(eq.tag_number || '')}</b>.`;
+      const kesimpulan = `Rekaman riwayat di atas digunakan untuk pelacakan pergerakan aset, audit, dan dasar analisa keandalan (RAM). Total <b>${ev.length}</b> kejadian tercatat untuk equipment <b>${escapeHtml(eq.tag_number || '')}</b> — terdiri dari <b>${cnt.downtime}</b> downtime real, <b>${cnt.gejala}</b> gejala (early warning), <b>${cnt.mutasi}</b> mutasi, <b>${cnt.pinjam}</b> pinjaman.`;
       const chart = (typeof chartBars === 'function') ? chartBars('Jumlah Kejadian per Jenis', [
         { label: 'Mutasi', value: cnt.mutasi, color: '#11335d' },
-        { label: 'Pinjaman', value: cnt.pinjam, color: '#d97706' },
+        { label: 'Pinjaman', value: cnt.pinjam, color: '#0891b2' },
         { label: 'Downtime', value: cnt.downtime, color: '#dc2626' },
+        { label: 'Gejala', value: cnt.gejala, color: '#d97706' },
       ]) : '';
       openSignDialog({ title: `Riwayat Equipment — ${eq.tag_number || ''}`, type: 'HIST', summary, chart, intro, table, kesimpulan });
     }
