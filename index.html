@@ -6387,6 +6387,8 @@
         `;
         // Buffer nilai spec_data dari record existing — jadi state lokal yg di-edit user
         window.__specDataBuffer = (data.spec_data && typeof data.spec_data === 'object') ? { ...data.spec_data } : {};
+        // Expose initial data ke window agar renderSpecSection (yg di scope luar setup) bisa akses tag/nama awal
+        window.__formInitialData = { tag_number: data.tag_number || '', nama_equipment: data.nama_equipment || '' };
         setTimeout(() => {
           $('#eq-form').addEventListener('submit', (e) => { e.preventDefault(); submitEquipmentForm(isEdit); });
           // Populate parent equipment dropdown awal & kategori dropdown
@@ -6426,15 +6428,17 @@
       };
 
       // Render section "Spesifikasi <Kategori>" dinamis berdasarkan kategori + tag/nama (smart route untuk Primover)
+      // CATATAN: function ini di-define di scope LUAR setup() — jangan reference `data` (yg hanya di setup() closure).
+      // Ambil tag & nama langsung dari DOM atau dari window.__formInitialData (fallback initial state).
       function renderSpecSection(kategoriId) {
         const host = document.getElementById('spec-section-host');
         if (!host) return;
-        // Ambil tag & nama dari form (kalau user lagi ngetik) atau dari data awal
         const tagEl = document.querySelector('#eq-form input[name="tag_number"]');
         const nameEl = document.querySelector('#eq-form input[name="nama_equipment"]');
+        const initial = window.__formInitialData || {};
         const eqHint = {
-          tag_number:    tagEl?.value || data.tag_number || '',
-          nama_equipment: nameEl?.value || data.nama_equipment || '',
+          tag_number:    tagEl?.value || initial.tag_number || '',
+          nama_equipment: nameEl?.value || initial.nama_equipment || '',
         };
         const tpl = getSpecTemplate(kategoriId, eqHint);
         const buf = window.__specDataBuffer || {};
