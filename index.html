@@ -6403,17 +6403,24 @@
               renderSpecSection(Number(catSelect.value) || null);
             });
           }
-          // Listen ke perubahan parent_unit — refresh dua dropdown
+          // Listen ke perubahan parent_unit — refresh dua dropdown.
+          // Pakai dual event (change + input) supaya pasti detect di semua browser.
           const unitSelect = $('#eq-form select[name="assigned_unit_id"]');
-          if (unitSelect) {
-            unitSelect.addEventListener('change', () => {
+          const handleUnitChange = () => {
+            try {
               const newUnitId = Number(unitSelect.value) || null;
               populateParentEquipmentDropdown(newUnitId, null, state.currentEquipmentId);
-              populateCategoryDropdown(newUnitId, null); // reset kategori karena unit berubah
-              // Reset spec section karena kategori dikosongkan
+              populateCategoryDropdown(newUnitId, null);
               persistSpecBuffer();
               renderSpecSection(null);
-            });
+            } catch (err) {
+              console.error('Unit change handler error:', err);
+              toast('Error refresh dropdown: ' + err.message, 'error');
+            }
+          };
+          if (unitSelect) {
+            unitSelect.addEventListener('change', handleUnitChange);
+            unitSelect.addEventListener('input',  handleUnitChange);
           }
         }, 0);
       };
