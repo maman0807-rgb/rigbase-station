@@ -320,6 +320,7 @@
       { id: 'categories',  label: 'Kategori',     icon: '🏷️', group: 'Administrasi', adminOnly: true },
       { id: 'users',       label: 'User',         icon: '👥', group: 'Administrasi', adminOnly: true },
       { id: 'activity',    label: 'Activity Log', icon: '📜', group: 'Administrasi', adminOnly: true },
+      { id: 'alert-config', label: 'Alert Settings', icon: '🔔', group: 'Administrasi', adminOnly: true },
       { id: 'panduan',     label: 'Panduan e<span class="text-safety">RAM</span>Hoist',  icon: '📖', group: 'Administrasi', srOnly: true },
       { id: 'slides',      label: 'Slide Presentasi',  icon: '🎞️', group: 'Administrasi', srOnly: true, externalUrl: '/PANDUAN_eRAMHoist_slides.html' },
       { id: 'settings',    label: 'Pengaturan',   icon: '⚙️', bottomNav: true },
@@ -2151,6 +2152,25 @@
           }
         })();
         setTimeout(() => reloadActivityLog(), 0); // tunda sampai elemen masuk DOM
+        return div;
+      },
+
+      // -----------------------------------------------------
+      // ALERT SETTINGS (admin) — config Telegram alerts ON/OFF
+      // -----------------------------------------------------
+      'alert-config': () => {
+        const div = document.createElement('div');
+        div.className = 'page max-w-3xl mx-auto space-y-4';
+        div.innerHTML = `
+          <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+            <h3 class="text-xl font-bold text-slate-900 mb-1">🔔 Alert Settings</h3>
+            <p class="text-sm text-slate-500">Konfigurasi Telegram alert: ON/OFF, jadwal, threshold. Berlaku untuk seluruh fleet.</p>
+          </div>
+          <div id="alert-config-host" class="space-y-3">
+            <div class="text-slate-400 text-sm">Memuat…</div>
+          </div>
+        `;
+        setTimeout(() => loadAlertSettings(), 0);
         return div;
       },
 
@@ -9395,6 +9415,108 @@
       }
     }
     window.submitSnooze = submitSnooze;
+
+    // ============================================================
+    // FASE 6 — ALERT SETTINGS PAGE (admin)
+    // ============================================================
+    async function loadAlertSettings() {
+      const host = document.getElementById('alert-config-host');
+      if (!host) return;
+      try {
+        const { data: settings, error } = await state.supabase.from('alert_settings').select('*').order('id');
+        if (error) throw error;
+        const labels = {
+          realtime_gejala:    { icon: '🟡', name: 'Gejala Real-time',      desc: 'Alert kirim saat gejala baru tercatat di field' },
+          realtime_downtime:  { icon: '💥', name: 'Downtime Real-time',    desc: 'Alert kirim saat breakdown/troubleshoot baru' },
+          realtime_eskalasi:  { icon: '⚠️', name: 'Eskalasi Gejala',       desc: 'Alert kirim saat gejala dieskalasi jadi breakdown' },
+          morning_briefing:   { icon: '☀️', name: 'Briefing Pagi 06:30',  desc: 'Critical only: OVERDUE maintenance + downtime aktif' },
+          daily_digest:       { icon: '📅', name: 'Daily Digest 08:00',   desc: 'PERLU PLAN + NEAR EOL + sertifikat expire' },
+          weekly_recap:       { icon: '📊', name: 'Weekly Recap Senin 07:00', desc: 'Recap minggu lalu + plan minggu ini (strategic)' },
+          quiet_hours:        { icon: '🌙', name: 'Quiet Hours',           desc: 'Skip real-time alerts antara jam 22:00 - 06:00 WIB' },
+        };
+        host.innerHTML = (settings || []).map(s => {
+          const meta = labels[s.setting_key] || { icon: '⚙️', name: s.setting_key, desc: s.description || '' };
+          const enabled = s.setting_value?.enabled !== false;
+          return `<div class="bg-white border border-slate-200 rounded-xl p-4 flex items-start gap-3">
+            <div class="text-2xl shrink-0">${meta.icon}</div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center justify-between gap-3 flex-wrap">
+                <h4 class="font-bold text-slate-800">${escapeHtml(meta.name)}</h4>
+                <label class="inline-flex items-center cursor-pointer">
+                  <input type="checkbox" class="sr-only peer" ${enabled ? 'checked' : ''}
+                    onchange="toggleAlertSetting('${s.setting_key}', this.checked)">
+                  <div class="relative w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                </label>
+              </div>
+              <p class="text-xs text-slate-500 mt-0.5">${escapeHtml(meta.desc)}</p>
+              <div class="mt-2 flex flex-wrap gap-2">
+                <span class="text-[11px] px-2 py-0.5 rounded ${enabled ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}">${enabled ? '✓ Active' : '✕ Disabled'}</span>
+                ${s.setting_value?.hour_utc != null ? `<span class="text-[11px] px-2 py-0.5 rounded bg-blue-50 text-blue-700">⏰ ${(((s.setting_value.hour_utc + 7) % 24)).toString().padStart(2,'0')}:${(s.setting_value.minute_utc || 0).toString().padStart(2,'0')} WIB</span>` : ''}
+                ${s.setting_value?.pm_threshold ? `<span class="text-[11px] px-2 py-0.5 rounded bg-slate-100 text-slate-600">PM threshold: ${s.setting_value.pm_threshold}j</span>` : ''}
+                ${s.setting_value?.overhaul_threshold ? `<span class="text-[11px] px-2 py-0.5 rounded bg-slate-100 text-slate-600">Overhaul threshold: ${s.setting_value.overhaul_threshold}j</span>` : ''}
+              </div>
+            </div>
+          </div>`;
+        }).join('') + `
+          <div class="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm">
+            <div class="font-semibold text-blue-900 mb-2">📝 Cara Kerja</div>
+            <ul class="text-xs text-blue-800 space-y-1 list-disc list-inside">
+              <li><b>Real-time alerts</b> firing langsung ke Telegram saat event terjadi di app</li>
+              <li><b>Scheduled alerts</b> dikirim via pg_cron Supabase pada jam yg ditentukan</li>
+              <li><b>Threshold</b> = filter equipment yg lewat berapa jam baru di-alert (anti-spam)</li>
+              <li>Toggle OFF: alert tertentu tidak akan kirim sampai diaktifkan lagi</li>
+              <li><b>Snooze per-equipment</b>: di tab Maintenance Detail Equipment (lebih granular)</li>
+            </ul>
+          </div>
+          <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm">
+            <div class="font-semibold text-amber-900 mb-1">🧪 Test Alert Manual</div>
+            <p class="text-xs text-amber-800 mb-2">Klik untuk trigger alert langsung (untuk testing):</p>
+            <div class="flex gap-2 flex-wrap">
+              <button onclick="testAlert('morning')" class="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded text-xs font-semibold">▶ Test Briefing Pagi</button>
+              <button onclick="testAlert('daily')" class="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded text-xs font-semibold">▶ Test Daily Digest</button>
+              <button onclick="testAlert('weekly')" class="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded text-xs font-semibold">▶ Test Weekly Recap</button>
+            </div>
+          </div>`;
+      } catch (e) {
+        host.innerHTML = `<div class="bg-red-50 text-red-700 p-4 rounded-xl text-sm">Gagal load: ${escapeHtml(e.message)}</div>
+          <div class="text-xs text-slate-500 mt-2">⚠️ Pastikan SQL <code>fase11_alert_settings.sql</code> sudah dijalankan di Supabase.</div>`;
+      }
+    }
+    window.loadAlertSettings = loadAlertSettings;
+
+    async function toggleAlertSetting(key, enabled) {
+      try {
+        const { data: current } = await state.supabase.from('alert_settings').select('setting_value').eq('setting_key', key).single();
+        const newValue = { ...(current?.setting_value || {}), enabled };
+        const { error } = await state.supabase.from('alert_settings').update({
+          setting_value: newValue, updated_by: state.user.id, updated_at: new Date().toISOString(),
+        }).eq('setting_key', key);
+        if (error) throw error;
+        toast(`Alert "${key}" ${enabled ? 'aktif' : 'nonaktif'}.`, 'success');
+      } catch (e) {
+        toast('Gagal update: ' + e.message, 'error');
+      }
+    }
+    window.toggleAlertSetting = toggleAlertSetting;
+
+    async function testAlert(kind) {
+      const fnMap = {
+        morning: 'morning-briefing-alert',
+        daily:   'daily-alert-check',
+        weekly:  'weekly-recap-alert',
+      };
+      const fn = fnMap[kind];
+      if (!fn) return;
+      try {
+        toast('Memanggil ' + fn + '…', 'info');
+        const { error } = await state.supabase.functions.invoke(fn, { body: {} });
+        if (error) throw error;
+        toast(`✓ ${fn} dipanggil. Cek Telegram dalam 10-30 detik.`, 'success');
+      } catch (e) {
+        toast('Gagal: ' + e.message, 'error');
+      }
+    }
+    window.testAlert = testAlert;
 
     // Tutup gejala (false alarm / sudah ditangani tanpa rusak). Modal dgn textarea + upload foto bukti.
     async function closeGejala(id) {
