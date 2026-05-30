@@ -9788,7 +9788,7 @@
             </div>
             <div class="ml-auto flex gap-2">
               <button onclick="exportCalendarExcel()" class="px-3 py-2 bg-navy hover:bg-navy-700 text-white rounded-lg text-sm font-medium">📥 Excel</button>
-              <button onclick="cetakCalendarReport()" class="px-3 py-2 bg-navy hover:bg-navy-700 text-white rounded-lg text-sm font-medium">🖨 Print PDF</button>
+              <button onclick="openPrintCalendarModal()" class="px-3 py-2 bg-navy hover:bg-navy-700 text-white rounded-lg text-sm font-medium">🖨 Print PDF</button>
             </div>
           </div>`;
 
@@ -10054,10 +10054,114 @@
     }
     window.exportCalendarExcel = exportCalendarExcel;
 
-    // Cetak Calendar — pakai openSignDialog (sama dgn report lain)
-    function cetakCalendarReport() {
+    // Modal scope picker untuk print Calendar — pilih bulan/tahun/semua
+    function openPrintCalendarModal() {
       const events = window.__calendarEvents || [];
       if (!events.length) { toast('Tidak ada event untuk dicetak.', 'warn'); return; }
+      const now = new Date();
+      const currentYM = (calFilter.startMonth || now.toISOString().slice(0, 7));
+      // Build list bulan unik dari events (sorted)
+      const ymSet = new Set();
+      events.forEach((e) => { if (e.date) ymSet.add(e.date.slice(0, 7)); });
+      // Plus 12 bulan dari sekarang
+      for (let i = 0; i < 12; i++) {
+        const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+        ymSet.add(d.toISOString().slice(0, 7));
+      }
+      const ymList = [...ymSet].sort();
+      // Build list tahun unik
+      const yearSet = new Set();
+      ymList.forEach((ym) => yearSet.add(ym.slice(0, 4)));
+      const yearList = [...yearSet].sort();
+
+      const monthOptions = ymList.map((ym) => {
+        const d = new Date(ym + '-01');
+        const lbl = d.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
+        const cnt = events.filter((e) => (e.date || '').startsWith(ym)).length;
+        return `<option value="${ym}" ${ym === currentYM ? 'selected' : ''}>${lbl} (${cnt} event)</option>`;
+      }).join('');
+
+      const yearOptions = yearList.map((y) => {
+        const cnt = events.filter((e) => (e.date || '').startsWith(y)).length;
+        return `<option value="${y}" ${y === String(now.getFullYear()) ? 'selected' : ''}>Tahun ${y} (${cnt} event)</option>`;
+      }).join('');
+
+      const body = `
+        <div class="space-y-3">
+          <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-800">
+            🖨 Pilih cakupan laporan yg akan dicetak. PDF akan berisi rencana action lengkap untuk periode yg dipilih.
+          </div>
+          <div class="space-y-2">
+            <label class="flex items-start gap-3 p-3 border-2 border-slate-200 rounded-lg hover:bg-slate-50 cursor-pointer has-[:checked]:border-navy has-[:checked]:bg-navy/5">
+              <input type="radio" name="print-scope" value="month" checked class="mt-1">
+              <div class="flex-1">
+                <div class="font-semibold text-slate-800">📅 Bulan tertentu saja</div>
+                <div class="text-xs text-slate-500 mt-0.5">Cetak 1 bulan — cocok untuk briefing bulanan / koordinasi tim mingguan</div>
+                <select id="ps-month" class="mt-2 w-full px-3 py-1.5 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-navy">
+                  ${monthOptions}
+                </select>
+              </div>
+            </label>
+
+            <label class="flex items-start gap-3 p-3 border-2 border-slate-200 rounded-lg hover:bg-slate-50 cursor-pointer has-[:checked]:border-navy has-[:checked]:bg-navy/5">
+              <input type="radio" name="print-scope" value="year" class="mt-1">
+              <div class="flex-1">
+                <div class="font-semibold text-slate-800">📆 Sepanjang tahun</div>
+                <div class="text-xs text-slate-500 mt-0.5">Cetak 12 bulan dlm tahun terpilih — cocok untuk planning tahunan / RKAP / CAPEX review</div>
+                <select id="ps-year" class="mt-2 w-full px-3 py-1.5 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-navy">
+                  ${yearOptions}
+                </select>
+              </div>
+            </label>
+
+            <label class="flex items-start gap-3 p-3 border-2 border-slate-200 rounded-lg hover:bg-slate-50 cursor-pointer has-[:checked]:border-navy has-[:checked]:bg-navy/5">
+              <input type="radio" name="print-scope" value="all" class="mt-1">
+              <div class="flex-1">
+                <div class="font-semibold text-slate-800">🌐 Semua 12 bulan dari sekarang</div>
+                <div class="text-xs text-slate-500 mt-0.5">Cetak rolling 12 bulan ke depan dari hari ini — overview lengkap</div>
+              </div>
+            </label>
+          </div>
+        </div>`;
+      const footer = `
+        <button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
+        <button onclick="submitPrintCalendar()" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy-700 text-white text-sm font-semibold">🖨 Generate PDF</button>`;
+      openModal({ title: '🖨 Cetak Calendar — Pilih Scope', body, footer, maxWidth: 'max-w-md' });
+    }
+    window.openPrintCalendarModal = openPrintCalendarModal;
+
+    function submitPrintCalendar() {
+      const scope = document.querySelector('input[name="print-scope"]:checked')?.value || 'all';
+      let scopeData = null;
+      if (scope === 'month') scopeData = document.getElementById('ps-month')?.value;
+      else if (scope === 'year') scopeData = document.getElementById('ps-year')?.value;
+      closeModal();
+      cetakCalendarReport(scope, scopeData);
+    }
+    window.submitPrintCalendar = submitPrintCalendar;
+
+    // Cetak Calendar — pakai openSignDialog (sama dgn report lain)
+    // scope: 'month' (1 bulan), 'year' (12 bulan tahun X), 'all' (rolling 12 bulan)
+    function cetakCalendarReport(scope = 'all', scopeData = null) {
+      const allEvents = window.__calendarEvents || [];
+      if (!allEvents.length) { toast('Tidak ada event untuk dicetak.', 'warn'); return; }
+
+      // Filter events berdasarkan scope
+      let events = allEvents;
+      let scopeLabel = 'Rolling 12 bulan ke depan';
+      if (scope === 'month' && scopeData) {
+        events = allEvents.filter((e) => (e.date || '').startsWith(scopeData));
+        const d = new Date(scopeData + '-01');
+        scopeLabel = 'Bulan ' + d.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
+      } else if (scope === 'year' && scopeData) {
+        events = allEvents.filter((e) => (e.date || '').startsWith(scopeData));
+        scopeLabel = 'Tahun ' + scopeData;
+      }
+
+      if (!events.length) {
+        toast('Tidak ada event untuk periode terpilih.', 'warn');
+        return;
+      }
       const now = new Date();
       const todayMs = now.getTime();
 
@@ -10085,30 +10189,43 @@
         <div class="card navy"><div class="num">${events.length}</div><div class="lbl">📅 TOTAL</div></div>
       </div>`;
 
-      const intro = `<p>Laporan proyeksi maintenance 12 bulan ke depan dari eRAMHoist — gabungan PM/TOH/GOH (berbasis HM trend asumsi 8 jam/hari) + sertifikat SKPI/COC (calendar-based).</p>
-        <p><b>Filter aktif:</b> ${escapeHtml(filterRig)} · ${escapeHtml(filterKind)}<br>
+      const intro = `<p>Laporan proyeksi maintenance dari eRAMHoist — gabungan PM/TOH/GOH (berbasis HM trend asumsi 8 jam/hari) + sertifikat SKPI/COC (calendar-based).</p>
+        <p><b>Periode laporan:</b> ${escapeHtml(scopeLabel)}<br>
+        <b>Filter aktif:</b> ${escapeHtml(filterRig)} · ${escapeHtml(filterKind)}<br>
         <b>Dicetak:</b> ${now.toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })} oleh ${escapeHtml(state.profile?.full_name || state.profile?.email || '-')}</p>`;
 
-      // 1. Per-month summary table
-      const months = [];
-      for (let i = 0; i < 12; i++) {
-        const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
-        months.push({ ym: d.toISOString().slice(0, 7), date: d, events: [] });
+      // 1. Per-month summary table — bulan sesuai scope
+      let months = [];
+      if (scope === 'month' && scopeData) {
+        const d = new Date(scopeData + '-01');
+        months = [{ ym: scopeData, date: d, events: [] }];
+      } else if (scope === 'year' && scopeData) {
+        for (let m = 0; m < 12; m++) {
+          const d = new Date(Number(scopeData), m, 1);
+          months.push({ ym: d.toISOString().slice(0, 7), date: d, events: [] });
+        }
+      } else {
+        for (let i = 0; i < 12; i++) {
+          const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+          months.push({ ym: d.toISOString().slice(0, 7), date: d, events: [] });
+        }
       }
       events.forEach((e) => {
         const ym = (e.date || '').slice(0, 7);
         const m = months.find((mm) => mm.ym === ym);
         if (m) m.events.push(e);
       });
-      // Past overdue
+      // Past overdue — hanya kalau scope 'all' (selain itu sudah di-filter strict)
       const overdueByYM = {};
-      events.forEach((e) => {
-        if (e.overdue && !months.find((m) => m.ym === (e.date || '').slice(0, 7))) {
-          const ym = (e.date || '').slice(0, 7);
-          if (!overdueByYM[ym]) overdueByYM[ym] = { ym, date: new Date(ym + '-01'), events: [] };
-          overdueByYM[ym].events.push(e);
-        }
-      });
+      if (scope === 'all') {
+        events.forEach((e) => {
+          if (e.overdue && !months.find((m) => m.ym === (e.date || '').slice(0, 7))) {
+            const ym = (e.date || '').slice(0, 7);
+            if (!overdueByYM[ym]) overdueByYM[ym] = { ym, date: new Date(ym + '-01'), events: [] };
+            overdueByYM[ym].events.push(e);
+          }
+        });
+      }
       const allMonths = [...Object.values(overdueByYM).sort((a, b) => a.ym.localeCompare(b.ym)), ...months];
 
       // Action hint generic per milestone — kasih sneak preview supaya mekanik tahu apa yg disiapkan
@@ -10249,8 +10366,9 @@
         { label: 'Plan',    value: totalPlan,    color: '#16a34a' },
       ]) : '';
 
+      const titleScope = scope === 'month' ? scopeLabel : scope === 'year' ? `Tahun ${scopeData}` : '12 Bulan ke Depan';
       openSignDialog({
-        title: `Annual Maintenance Calendar — ${filterRig}`,
+        title: `Maintenance Plan ${titleScope} — ${filterRig}`,
         type: 'CALENDAR',
         summary, chart, intro, table, kesimpulan,
       });
