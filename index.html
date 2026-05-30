@@ -9752,7 +9752,8 @@
           if (e.kind === 'SKPI' || e.kind === 'COC') {
             return e.sisa < 0 ? `lewat <b>${-e.sisa}</b> hari` : `<b>${e.sisa}</b> hari`;
           }
-          return e.sisa < 0 ? `lewat <b>${Math.round(-e.sisa)}</b> ${u}` : `<b>${Math.round(e.sisa)}</b> ${u}`;
+          const unit = (e.eq.pm_type === 'km') ? 'km' : 'jam';
+          return e.sisa < 0 ? `lewat <b>${Math.round(-e.sisa)}</b> ${unit}` : `<b>${Math.round(e.sisa)}</b> ${unit}`;
         };
         const hariSampai = (e) => {
           if (!e.date) return '—';
