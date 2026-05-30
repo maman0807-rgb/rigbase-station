@@ -5745,7 +5745,8 @@
           ${snoozeBadge}
           <div class="flex items-center justify-between mb-3 mt-5 flex-wrap gap-2">
             <h4 class="font-bold text-slate-800">🛠️ Riwayat Maintenance (${logs.length})</h4>
-            <div class="flex gap-2">
+            <div class="flex gap-2 flex-wrap">
+              <button onclick="generateWorkOrderPDF('${eq.id}')" class="bg-purple-100 hover:bg-purple-200 text-purple-700 px-3 py-1.5 rounded-lg text-sm font-medium" title="Generate Work Order PDF utk dibawa ke lapangan">📋 Work Order PDF</button>
               ${isSrMekanikOrAbove() ? `<button onclick="openSnoozeModal('${eq.id}','${escapeHtml(eq.tag_number).replace(/'/g,"&#39;")}')" class="bg-blue-100 hover:bg-blue-200 text-blue-700 px-3 py-1.5 rounded-lg text-sm font-medium" title="Snooze alert sampai action selesai">🔕 Snooze Alert</button>` : ''}
               <button onclick="openMaintenanceModal('${eq.id}')" class="bg-safety hover:bg-safety-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium">+ Tambah</button>
             </div>
@@ -9890,6 +9891,147 @@
       toast('Excel/CSV ter-download.', 'success');
     }
     window.exportCalendarExcel = exportCalendarExcel;
+
+    // ============================================================
+    // PILIHAN B — GENERATE WORK ORDER PDF
+    // ============================================================
+    // Build printable Work Order document, gunakan openSignDialog
+    // supaya pakai format laporan yg sudah ada (auto-print to PDF).
+    async function generateWorkOrderPDF(equipmentId) {
+      try {
+        const { data: eq, error } = await state.supabase.from('equipment').select('*').eq('id', equipmentId).single();
+        if (error) throw error;
+        const u = (eq.pm_type === 'km') ? 'km' : 'jam';
+        const U = u.toUpperCase();
+        const rh = Number(eq.running_hours) || 0;
+        const lc = computeLifecycle(eq);
+
+        // Hitung sisa milestone
+        const sisaPM = (eq.pm_interval_hours) ? eq.pm_interval_hours - (rh - (Number(eq.last_pm_hours) || 0)) : null;
+        const sisaTOH = lc?.toh?.remaining;
+        const sisaGOH = lc?.goh?.remaining;
+        const ecoPct = lc?.eco?.pct;
+
+        // Tentukan milestone yg paling urgent (untuk title WO)
+        let primaryMilestone = 'PM';
+        let primaryUrgency = 'Routine';
+        let primaryColor = '#16a34a';
+        if (sisaTOH != null && sisaTOH < 0) { primaryMilestone = 'TOH'; primaryUrgency = 'OVERDUE'; primaryColor = '#dc2626'; }
+        else if (sisaGOH != null && sisaGOH < 0) { primaryMilestone = 'GOH'; primaryUrgency = 'OVERDUE'; primaryColor = '#dc2626'; }
+        else if (sisaPM != null && sisaPM < 0) { primaryMilestone = 'PM'; primaryUrgency = 'OVERDUE'; primaryColor = '#dc2626'; }
+        else if (sisaTOH != null && sisaTOH < 500) { primaryMilestone = 'TOH'; primaryUrgency = 'URGENT'; primaryColor = '#d97706'; }
+        else if (sisaPM != null && sisaPM < 100) { primaryMilestone = 'PM'; primaryUrgency = 'URGENT'; primaryColor = '#d97706'; }
+
+        // Identitas
+        const identitas = `
+          <table style="width:100%;border-collapse:collapse;border:1px solid #cbd5e1;font-size:12px">
+            <tr><td style="padding:6px 10px;background:#f1f5f9;font-weight:600;width:30%">Tag Number</td><td style="padding:6px 10px"><b>${escapeHtml(eq.tag_number || '-')}</b></td></tr>
+            <tr><td style="padding:6px 10px;background:#f1f5f9;font-weight:600">Nama Equipment</td><td style="padding:6px 10px">${escapeHtml(eq.nama_equipment || '-')}</td></tr>
+            <tr><td style="padding:6px 10px;background:#f1f5f9;font-weight:600">Lokasi</td><td style="padding:6px 10px">${escapeHtml(getParentUnitName(eq.assigned_unit_id))}</td></tr>
+            <tr><td style="padding:6px 10px;background:#f1f5f9;font-weight:600">Kategori</td><td style="padding:6px 10px">${escapeHtml(getCategoryName(eq.kategori_id))}</td></tr>
+            <tr><td style="padding:6px 10px;background:#f1f5f9;font-weight:600">Brand / Model</td><td style="padding:6px 10px">${escapeHtml(eq.brand || '-')} / ${escapeHtml(eq.model || '-')}</td></tr>
+            <tr><td style="padding:6px 10px;background:#f1f5f9;font-weight:600">Serial Number</td><td style="padding:6px 10px">${escapeHtml(eq.serial_number || '-')}</td></tr>
+            <tr><td style="padding:6px 10px;background:#f1f5f9;font-weight:600">Counter (${U}) sekarang</td><td style="padding:6px 10px"><b>${fmtNumber(rh, ' ' + u)}</b></td></tr>
+            <tr><td style="padding:6px 10px;background:#f1f5f9;font-weight:600">Status</td><td style="padding:6px 10px">${escapeHtml(eq.status_operasi || '-')} · ${escapeHtml(eq.kondisi_fisik || '-')}</td></tr>
+          </table>`;
+
+        // Maintenance status
+        const fmtSisa = (v) => v == null ? '—' : (v < 0 ? `<span style="color:#dc2626;font-weight:700">⚠ LEWAT ${fmtNumber(-v, ' ' + u)}</span>` : fmtNumber(v, ' ' + u));
+        const maintStatus = `
+          <table style="width:100%;border-collapse:collapse;border:1px solid #cbd5e1;font-size:12px;margin-top:10px">
+            <tr style="background:#f1f5f9"><th style="padding:8px 10px;text-align:left">Milestone</th><th style="padding:8px 10px;text-align:right">Interval</th><th style="padding:8px 10px;text-align:right">Counter saat last</th><th style="padding:8px 10px;text-align:right">Sisa</th></tr>
+            <tr><td style="padding:6px 10px">PM (Preventive Maintenance)</td><td style="padding:6px 10px;text-align:right">${eq.pm_interval_hours != null ? fmtNumber(eq.pm_interval_hours, ' ' + u) : '—'}</td><td style="padding:6px 10px;text-align:right">${eq.last_pm_hours != null ? fmtNumber(eq.last_pm_hours, ' ' + u) : '—'}</td><td style="padding:6px 10px;text-align:right">${fmtSisa(sisaPM)}</td></tr>
+            <tr><td style="padding:6px 10px">TOH (Top Overhaul)</td><td style="padding:6px 10px;text-align:right">${eq.toh_interval_hours != null ? fmtNumber(eq.toh_interval_hours, ' ' + u) : '—'}</td><td style="padding:6px 10px;text-align:right">${eq.last_toh_hours != null ? fmtNumber(eq.last_toh_hours, ' ' + u) : '—'}</td><td style="padding:6px 10px;text-align:right">${fmtSisa(sisaTOH)}</td></tr>
+            <tr><td style="padding:6px 10px">GOH (General Overhaul)</td><td style="padding:6px 10px;text-align:right">${eq.goh_interval_hours != null ? fmtNumber(eq.goh_interval_hours, ' ' + u) : '—'}</td><td style="padding:6px 10px;text-align:right">${eq.last_goh_hours != null ? fmtNumber(eq.last_goh_hours, ' ' + u) : '—'}</td><td style="padding:6px 10px;text-align:right">${fmtSisa(sisaGOH)}</td></tr>
+            <tr><td style="padding:6px 10px">Umur Ekonomis</td><td style="padding:6px 10px;text-align:right">${eq.economic_life_hours != null ? fmtNumber(eq.economic_life_hours, ' ' + u) : '—'}</td><td style="padding:6px 10px;text-align:right">—</td><td style="padding:6px 10px;text-align:right">${ecoPct != null ? `${ecoPct.toFixed(0)}% terpakai` : '—'}</td></tr>
+          </table>`;
+
+        // Persiapan Maintenance dari spec_data.maintenance_prep_notes
+        const prepRaw = eq.spec_data?.maintenance_prep_notes || '';
+        const prepHtml = prepRaw
+          ? `<pre style="font-family:'Courier New',monospace;font-size:11px;white-space:pre-wrap;background:#fff7ed;border:1px solid #fed7aa;padding:12px;border-radius:6px;margin:0;line-height:1.4">${escapeHtml(prepRaw)}</pre>`
+          : `<div style="background:#fef2f2;border:1px solid #fecaca;padding:12px;border-radius:6px;color:#991b1b;font-size:12px"><b>⚠ Belum ada Persiapan Maintenance ke Depan.</b><br>Lengkapi dulu di form Edit Equipment → section "📋 Persiapan Maintenance ke Depan".</div>`;
+
+        // Spek nameplate (kalau ada template)
+        const tpl = getSpecTemplate(eq.kategori_id, eq);
+        const sd = eq.spec_data || {};
+        const nameplateRows = tpl ? tpl.fields.filter(f => sd[f.key] != null && sd[f.key] !== '').map(f => {
+          const v = sd[f.key];
+          const display = f.type === 'textarea' ? String(v).slice(0, 100) + '...' : String(v);
+          return `<tr><td style="padding:5px 10px;background:#f1f5f9;font-weight:600">${escapeHtml(f.label)}</td><td style="padding:5px 10px">${escapeHtml(display)}${f.unit ? ` <span style="color:#64748b">${escapeHtml(f.unit)}</span>` : ''}</td></tr>`;
+        }).join('') : '';
+        const nameplateBlock = tpl && nameplateRows ? `
+          <h3 style="margin-top:16px">${tpl.icon} ${escapeHtml(tpl.label)}</h3>
+          <table style="width:100%;border-collapse:collapse;border:1px solid #cbd5e1;font-size:11px">
+            ${nameplateRows}
+          </table>` : '';
+
+        // Sign-off section
+        const signOff = `
+          <h3 style="margin-top:16px">📝 Sign-off Pelaksanaan</h3>
+          <table style="width:100%;border-collapse:collapse;border:1px solid #cbd5e1;font-size:12px">
+            <tr style="background:#f1f5f9"><th style="padding:8px;text-align:left;width:30%">Tahap</th><th style="padding:8px;text-align:left;width:35%">Nama Pelaksana</th><th style="padding:8px;text-align:center;width:20%">Tanggal & Jam</th><th style="padding:8px;text-align:center;width:15%">Tanda Tangan</th></tr>
+            <tr><td style="padding:18px 10px;font-weight:600">Persiapan parts<br>(Procurement)</td><td style="padding:18px 10px">.............................</td><td style="padding:18px 10px;text-align:center">.............................</td><td style="padding:18px 10px"></td></tr>
+            <tr><td style="padding:18px 10px;font-weight:600">Eksekusi maintenance<br>(PIC Mekanik)</td><td style="padding:18px 10px">.............................</td><td style="padding:18px 10px;text-align:center">.............................</td><td style="padding:18px 10px"></td></tr>
+            <tr><td style="padding:18px 10px;font-weight:600">Verifikasi<br>(Sr Mekanik)</td><td style="padding:18px 10px">.............................</td><td style="padding:18px 10px;text-align:center">.............................</td><td style="padding:18px 10px"></td></tr>
+            <tr><td style="padding:18px 10px;font-weight:600">Approval Final<br>(SPV / Astmen)</td><td style="padding:18px 10px">.............................</td><td style="padding:18px 10px;text-align:center">.............................</td><td style="padding:18px 10px"></td></tr>
+          </table>
+          <p style="font-size:11px;color:#64748b;margin-top:10px"><b>Catatan pelaksanaan:</b></p>
+          <div style="border:1px solid #cbd5e1;height:60px;border-radius:4px;background:#fff"></div>`;
+
+        // Counter saat selesai (untuk update last_pm_hours/last_toh_hours/last_goh_hours)
+        const counterSelesai = `
+          <h3 style="margin-top:16px">📊 Counter saat Selesai (untuk update di sistem)</h3>
+          <table style="width:100%;border-collapse:collapse;border:1px solid #cbd5e1;font-size:12px">
+            <tr><td style="padding:8px;background:#f1f5f9;width:40%;font-weight:600">Counter HM/KM saat selesai</td><td style="padding:14px">..........................................................................</td></tr>
+            <tr><td style="padding:8px;background:#f1f5f9;font-weight:600">Tanggal selesai</td><td style="padding:14px">..........................................................................</td></tr>
+            <tr><td style="padding:8px;background:#f1f5f9;font-weight:600">Milestone yg di-update</td><td style="padding:14px">☐ PM &nbsp;&nbsp; ☐ TOH &nbsp;&nbsp; ☐ GOH &nbsp;&nbsp; ☐ Service 2000</td></tr>
+          </table>`;
+
+        // Combine — pakai openSignDialog dgn type "WORK ORDER"
+        const summary = `<div class="cards">
+          <div class="card" style="background:${primaryColor}"><div class="num" style="color:white">${primaryMilestone}</div><div class="lbl" style="color:white">Milestone</div></div>
+          <div class="card navy"><div class="num">${primaryUrgency}</div><div class="lbl">Urgency</div></div>
+          <div class="card navy"><div class="num">${fmtNumber(rh, ' ' + u)}</div><div class="lbl">Counter sekarang</div></div>
+          <div class="card amber"><div class="num">${new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })}</div><div class="lbl">Tanggal terbit</div></div>
+        </div>`;
+
+        const intro = `<p>Work Order ini diterbitkan dari eRAMHoist berdasarkan analisa kondisi equipment & jadwal maintenance. Mohon dilaksanakan & ditandatangani oleh tiap PIC, kemudian discan/upload kembali ke sistem untuk audit trail.</p>
+          <p><b>Equipment:</b> ${escapeHtml(eq.tag_number || '-')} — ${escapeHtml(eq.nama_equipment || '')}<br>
+          <b>Tanggal terbit:</b> ${new Date().toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}<br>
+          <b>Diterbitkan oleh:</b> ${escapeHtml(state.profile?.full_name || state.profile?.email || '-')}</p>`;
+
+        // Custom table content untuk WO — gabungkan semua section
+        const table = `
+          <h3>📋 Identitas Equipment</h3>
+          ${identitas}
+          <h3 style="margin-top:16px">⏱️ Status Maintenance Lifecycle</h3>
+          ${maintStatus}
+          ${nameplateBlock}
+          <h3 style="margin-top:16px">🛠️ Checklist Persiapan & Pelaksanaan</h3>
+          ${prepHtml}
+          ${counterSelesai}
+          ${signOff}`;
+
+        const kesimpulan = `<b>Setelah pelaksanaan selesai:</b><br>
+          1. Scan/foto Work Order yg sudah tertanda tangan → upload ke tab Dokumen equipment ini.<br>
+          2. Update Counter HM/KM equipment + field <code>last_${primaryMilestone.toLowerCase()}_hours</code> & <code>last_${primaryMilestone.toLowerCase()}_date</code> di sistem.<br>
+          3. Status Kelayakan akan otomatis recalculate.<br><br>
+          <b>Status urgency:</b> <span style="color:${primaryColor};font-weight:700">${primaryUrgency} — ${primaryMilestone}</span>`;
+
+        openSignDialog({
+          title: `Work Order ${primaryMilestone} — ${eq.tag_number || ''}`,
+          type: `WO-${primaryMilestone}`,
+          summary,
+          intro,
+          table,
+          kesimpulan,
+        });
+      } catch (err) {
+        toast('Gagal generate WO: ' + err.message, 'error');
+      }
+    }
+    window.generateWorkOrderPDF = generateWorkOrderPDF;
 
     // Tutup gejala (false alarm / sudah ditangani tanpa rusak). Modal dgn textarea + upload foto bukti.
     async function closeGejala(id) {
