@@ -317,6 +317,7 @@
       { id: 'inspections', label: 'Inspeksi',     icon: '🔍', group: 'Operasional',  bottomNav: true },
       { id: 'alerts',      label: 'Alert',        icon: '🔔', group: 'Operasional',  bottomNav: true },
       { id: 'reliability', label: 'RAM',          icon: '📈', group: 'Analisa',      srOnly: true, bottomNav: true },
+      { id: 'calendar',    label: 'Kalender',    icon: '📅', group: 'Analisa',      srOnly: true },
       { id: 'categories',  label: 'Kategori',     icon: '🏷️', group: 'Administrasi', adminOnly: true },
       { id: 'users',       label: 'User',         icon: '👥', group: 'Administrasi', adminOnly: true },
       { id: 'activity',    label: 'Activity Log', icon: '📜', group: 'Administrasi', adminOnly: true },
@@ -2177,6 +2178,25 @@
           }
         })();
         setTimeout(() => reloadActivityLog(), 0); // tunda sampai elemen masuk DOM
+        return div;
+      },
+
+      // -----------------------------------------------------
+      // CALENDAR — Annual Maintenance Calendar (Pilihan A)
+      // -----------------------------------------------------
+      calendar: () => {
+        const div = document.createElement('div');
+        div.className = 'page space-y-4';
+        div.innerHTML = `
+          <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+            <h3 class="text-xl font-bold text-slate-900 mb-1">📅 Annual Maintenance Calendar</h3>
+            <p class="text-sm text-slate-500">Proyeksi 12 bulan ke depan: PM/TOH/GOH dari HM trend + sertifikat expire (calendar-based).</p>
+          </div>
+          <div id="calendar-host" class="space-y-4">
+            <div class="text-slate-400 text-sm">Menghitung proyeksi…</div>
+          </div>
+        `;
+        setTimeout(() => renderMaintenanceCalendar(), 0);
         return div;
       },
 
@@ -9542,6 +9562,334 @@
       }
     }
     window.testAlert = testAlert;
+
+    // ============================================================
+    // PILIHAN A — ANNUAL MAINTENANCE CALENDAR
+    // ============================================================
+    // State filter calendar
+    let calFilter = { unit_id: '', kind: '', startMonth: null };
+
+    // Estimate HM rate per hari (jam/hari) per equipment.
+    // Strategy: ambil HM trend dari 30 hari terakhir kalau ada, fallback ke default.
+    async function estimateHmRatePerDay(eqId, currentRH) {
+      // Default rate per equipment type (kalau tidak ada data trend)
+      // 8 jam/hari standar untuk genset/engine continuous, 4 untuk intermittent
+      const DEFAULT_RATE = 8;
+      try {
+        // Cari HM entries dari daily_logs atau equipment_hm_history
+        // Simple version: lihat HM 30 hari lalu dari downtime / activity log
+        // (sementara pakai default rate, nanti bisa improve)
+        return DEFAULT_RATE;
+      } catch (e) {
+        return DEFAULT_RATE;
+      }
+    }
+
+    async function renderMaintenanceCalendar() {
+      const host = document.getElementById('calendar-host');
+      if (!host) return;
+      try {
+        // 1. Fetch semua equipment dgn HM/intervals + sertifikat
+        const { data: eqs, error } = await state.supabase.from('equipment').select(
+          'id, tag_number, nama_equipment, assigned_unit_id, kategori_id, ' +
+          'running_hours, pm_type, pm_interval_hours, last_pm_hours, ' +
+          'toh_interval_hours, last_toh_hours, goh_interval_hours, last_goh_hours, ' +
+          'economic_life_hours, ' +
+          'skpi_end_date, tgl_expired_sertifikat, next_maintenance_date'
+        );
+        if (error) throw error;
+
+        // 2. Compute forward projection events
+        const now = new Date();
+        const todayMs = now.getTime();
+        const events = [];
+
+        (eqs || []).forEach((eq) => {
+          const unitName = getParentUnitName(eq.assigned_unit_id);
+          const rate = 8; // jam per hari (default)
+          const rh = Number(eq.running_hours) || 0;
+
+          // Helper: convert "jam lagi" → ISO date
+          const projectDate = (jamLagi) => {
+            if (jamLagi == null || jamLagi < 0) return null;
+            const days = Math.round(jamLagi / rate);
+            return new Date(todayMs + days * 86400000).toISOString().slice(0, 10);
+          };
+
+          // PM
+          const pmInt = Number(eq.pm_interval_hours) || 0;
+          if (pmInt > 0 && rh > 0) {
+            const sisa = pmInt - (rh - (Number(eq.last_pm_hours) || 0));
+            if (sisa < pmInt * 1.2) { // sampai 20% over limit
+              events.push({
+                eq, unitName, kind: 'PM',
+                date: projectDate(sisa) || now.toISOString().slice(0, 10),
+                sisa, overdue: sisa < 0,
+                color: sisa < 0 ? 'bg-red-500' : sisa < 200 ? 'bg-amber-500' : 'bg-green-500',
+                icon: '🟢',
+              });
+            }
+          }
+
+          // TOH
+          const tohInt = Number(eq.toh_interval_hours) || 0;
+          if (tohInt > 0 && rh > 0) {
+            const baseT = Number(eq.last_toh_hours ?? eq.last_goh_hours ?? 0) || 0;
+            const sisa = tohInt - (rh - baseT);
+            if (sisa < tohInt * 1.2) {
+              events.push({
+                eq, unitName, kind: 'TOH',
+                date: projectDate(sisa) || now.toISOString().slice(0, 10),
+                sisa, overdue: sisa < 0,
+                color: sisa < 0 ? 'bg-red-600' : sisa < 1000 ? 'bg-amber-600' : 'bg-blue-500',
+                icon: '🟡',
+              });
+            }
+          }
+
+          // GOH
+          const gohInt = Number(eq.goh_interval_hours) || 0;
+          if (gohInt > 0 && rh > 0) {
+            const baseG = Number(eq.last_goh_hours) || 0;
+            const sisa = gohInt - (rh - baseG);
+            if (sisa < gohInt * 1.2) {
+              events.push({
+                eq, unitName, kind: 'GOH',
+                date: projectDate(sisa) || now.toISOString().slice(0, 10),
+                sisa, overdue: sisa < 0,
+                color: sisa < 0 ? 'bg-red-700' : sisa < 2000 ? 'bg-amber-700' : 'bg-purple-500',
+                icon: '🔴',
+              });
+            }
+          }
+
+          // SKPI expire
+          if (eq.skpi_end_date) {
+            const dt = new Date(eq.skpi_end_date);
+            const days = Math.round((dt.getTime() - todayMs) / 86400000);
+            if (days <= 365 && days >= -30) {
+              events.push({
+                eq, unitName, kind: 'SKPI',
+                date: eq.skpi_end_date,
+                sisa: days,
+                overdue: days < 0,
+                color: days < 0 ? 'bg-red-600' : days < 60 ? 'bg-amber-500' : 'bg-slate-400',
+                icon: '📜',
+              });
+            }
+          }
+
+          // Sertifikat expire
+          if (eq.tgl_expired_sertifikat) {
+            const dt = new Date(eq.tgl_expired_sertifikat);
+            const days = Math.round((dt.getTime() - todayMs) / 86400000);
+            if (days <= 365 && days >= -30) {
+              events.push({
+                eq, unitName, kind: 'COC',
+                date: eq.tgl_expired_sertifikat,
+                sisa: days,
+                overdue: days < 0,
+                color: days < 0 ? 'bg-red-600' : days < 60 ? 'bg-amber-500' : 'bg-slate-400',
+                icon: '📋',
+              });
+            }
+          }
+        });
+
+        // 3. Apply filter
+        const filtered = events.filter((e) => {
+          if (calFilter.unit_id && String(e.eq.assigned_unit_id) !== String(calFilter.unit_id)) return false;
+          if (calFilter.kind && e.kind !== calFilter.kind) return false;
+          return true;
+        });
+
+        // 4. Group by year-month
+        const byMonth = {};
+        filtered.forEach((e) => {
+          const ym = (e.date || '').slice(0, 7);
+          if (!byMonth[ym]) byMonth[ym] = [];
+          byMonth[ym].push(e);
+        });
+
+        // 5. Build 12 bulan ke depan dari now
+        const months = [];
+        for (let i = 0; i < 12; i++) {
+          const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+          const ym = d.toISOString().slice(0, 7);
+          months.push({ ym, date: d, events: byMonth[ym] || [] });
+        }
+
+        // 6. Tambah bulan-bulan past dgn overdue events
+        const overdueByYM = {};
+        filtered.forEach((e) => {
+          if (e.overdue) {
+            const ym = (e.date || '').slice(0, 7);
+            if (!months.find((m) => m.ym === ym)) {
+              if (!overdueByYM[ym]) overdueByYM[ym] = [];
+              overdueByYM[ym].push(e);
+            }
+          }
+        });
+        Object.keys(overdueByYM).sort().forEach((ym) => {
+          months.unshift({
+            ym, date: new Date(ym + '-01'),
+            events: overdueByYM[ym], overdue: true,
+          });
+        });
+
+        // 7. Render filter bar + grid
+        const filterBar = `
+          <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex flex-wrap gap-3 items-center">
+            <span class="text-sm font-medium text-slate-600 mr-2">Filter:</span>
+            <select onchange="setCalFilter('unit_id', this.value)" class="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-navy">
+              <option value="">Semua Rig</option>
+              ${state.parentUnits.map((u) => `<option value="${u.id}" ${calFilter.unit_id == u.id ? 'selected' : ''}>${escapeHtml(u.name)} (${u.type})</option>`).join('')}
+            </select>
+            <select onchange="setCalFilter('kind', this.value)" class="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-navy">
+              <option value="">Semua Milestone</option>
+              <option value="PM" ${calFilter.kind === 'PM' ? 'selected' : ''}>PM (Preventive)</option>
+              <option value="TOH" ${calFilter.kind === 'TOH' ? 'selected' : ''}>TOH (Top Overhaul)</option>
+              <option value="GOH" ${calFilter.kind === 'GOH' ? 'selected' : ''}>GOH (General Overhaul)</option>
+              <option value="SKPI" ${calFilter.kind === 'SKPI' ? 'selected' : ''}>SKPI (sertifikat)</option>
+              <option value="COC" ${calFilter.kind === 'COC' ? 'selected' : ''}>COC (sertifikat)</option>
+            </select>
+            <button onclick="exportCalendarExcel()" class="ml-auto px-3 py-2 bg-navy hover:bg-navy-700 text-white rounded-lg text-sm font-medium">📥 Export Excel</button>
+            <button onclick="window.print()" class="px-3 py-2 border border-slate-300 hover:bg-slate-50 rounded-lg text-sm font-medium">🖨 Print</button>
+          </div>`;
+
+        const monthCard = (m) => {
+          const lbl = m.date.toLocaleDateString('id-ID', { month: 'short', year: 'numeric' });
+          const isCurrent = m.ym === now.toISOString().slice(0, 7);
+          const overdueCount = m.events.filter((e) => e.overdue).length;
+          const planCount = m.events.filter((e) => !e.overdue && (e.kind === 'PM' || e.kind === 'TOH' || e.kind === 'GOH')).length;
+          const certCount = m.events.filter((e) => e.kind === 'SKPI' || e.kind === 'COC').length;
+          return `<button onclick="selectCalMonth('${m.ym}')" class="bg-white rounded-xl border ${isCurrent ? 'border-navy ring-2 ring-navy/20' : 'border-slate-200'} p-3 text-left hover:shadow-md transition w-full">
+            <div class="font-bold text-sm ${isCurrent ? 'text-navy' : 'text-slate-700'}">${escapeHtml(lbl)}${isCurrent ? ' (sekarang)' : ''}</div>
+            <div class="text-2xl font-extrabold text-slate-900 mt-1">${m.events.length}</div>
+            <div class="text-[10px] text-slate-500">event</div>
+            <div class="mt-2 space-y-0.5 text-[11px]">
+              ${overdueCount ? `<div class="text-red-600">🔴 ${overdueCount} overdue</div>` : ''}
+              ${planCount ? `<div class="text-amber-700">🟡 ${planCount} maintenance</div>` : ''}
+              ${certCount ? `<div class="text-slate-500">📋 ${certCount} sertifikat</div>` : ''}
+              ${m.events.length === 0 ? `<div class="text-slate-400">— kosong</div>` : ''}
+            </div>
+          </button>`;
+        };
+
+        const monthsGrid = `
+          <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+            ${months.map(monthCard).join('')}
+          </div>`;
+
+        // 8. Detail bulan terpilih (default: bulan ini)
+        const selectedYM = calFilter.startMonth || now.toISOString().slice(0, 7);
+        const selected = months.find((m) => m.ym === selectedYM) || months[0];
+        const monthLabel = selected ? selected.date.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }) : '';
+        const sortedEvents = (selected?.events || []).slice().sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+        const detailRows = sortedEvents.map((e, i) => {
+          const tagLink = `<button onclick="setEquipmentView('detail','${e.eq.id}'); navigate('equipment')" class="font-mono font-bold text-navy hover:underline">${escapeHtml(e.eq.tag_number)}</button>`;
+          const statusBadge = e.overdue
+            ? `<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700">🔴 OVERDUE</span>`
+            : e.kind === 'PM' && e.sisa < 200 ? `<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700">⚠ URGENT</span>`
+            : e.kind === 'TOH' && e.sisa < 500 ? `<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700">⚠ URGENT</span>`
+            : e.kind === 'GOH' && e.sisa < 1000 ? `<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700">⚠ URGENT</span>`
+            : `<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700">PLAN</span>`;
+          const sisaTxt = (e.kind === 'SKPI' || e.kind === 'COC')
+            ? (e.sisa < 0 ? `lewat ${-e.sisa} hari` : `${e.sisa} hari lagi`)
+            : (e.sisa < 0 ? `lewat ${Math.round(-e.sisa)} jam` : `sisa ${Math.round(e.sisa)} jam`);
+          return `<tr class="border-b border-slate-100 hover:bg-slate-50">
+            <td class="px-3 py-2 text-sm text-slate-500">${i + 1}</td>
+            <td class="px-3 py-2 text-sm">${tagLink}<div class="text-xs text-slate-500">${escapeHtml(e.eq.nama_equipment || '')}</div></td>
+            <td class="px-3 py-2 text-sm text-slate-600 whitespace-nowrap">${escapeHtml(e.unitName)}</td>
+            <td class="px-3 py-2 text-sm text-center font-bold whitespace-nowrap">${e.icon} ${e.kind}</td>
+            <td class="px-3 py-2 text-sm text-center whitespace-nowrap">${fmtDate(e.date)}</td>
+            <td class="px-3 py-2 text-sm text-right whitespace-nowrap">${sisaTxt}</td>
+            <td class="px-3 py-2 text-center">${statusBadge}</td>
+          </tr>`;
+        }).join('');
+
+        const detail = `
+          <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+            <div class="px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between flex-wrap gap-2">
+              <h4 class="font-bold text-slate-800">📋 Detail bulan: <span class="text-navy">${escapeHtml(monthLabel)}</span> (${sortedEvents.length} event)</h4>
+              <span class="text-xs text-slate-500">Klik bulan di atas untuk ganti</span>
+            </div>
+            ${sortedEvents.length ? `
+              <div class="overflow-x-auto"><table class="w-full">
+                <thead><tr class="bg-slate-50 text-left text-xs font-bold text-slate-600 border-b border-slate-200">
+                  <th class="px-3 py-2">#</th><th class="px-3 py-2">Equipment</th><th class="px-3 py-2">Lokasi</th>
+                  <th class="px-3 py-2 text-center">Milestone</th><th class="px-3 py-2 text-center">Tgl Est</th>
+                  <th class="px-3 py-2 text-right">Sisa</th><th class="px-3 py-2 text-center">Status</th>
+                </tr></thead>
+                <tbody>${detailRows}</tbody>
+              </table></div>
+            ` : `<div class="p-8 text-center text-slate-400 text-sm">Tidak ada event di bulan ini.</div>`}
+          </div>`;
+
+        // 9. Note tentang HM rate
+        const note = `
+          <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800">
+            💡 <b>Catatan proyeksi:</b> Tgl estimasi dihitung dgn asumsi <b>8 jam/hari operasi</b>. Equipment dgn HM rate berbeda → tgl bisa shift. Aktual rate akan ditampilkan kalau Logbook HM trend sudah cukup banyak (~30 hari data).
+          </div>`;
+
+        host.innerHTML = filterBar + monthsGrid + detail + note;
+
+        // Cache events untuk export
+        window.__calendarEvents = filtered;
+
+      } catch (err) {
+        host.innerHTML = `<div class="bg-red-50 text-red-700 p-4 rounded-xl text-sm">Gagal memuat calendar: ${escapeHtml(err.message)}</div>`;
+      }
+    }
+    window.renderMaintenanceCalendar = renderMaintenanceCalendar;
+
+    function setCalFilter(field, value) {
+      calFilter[field] = value;
+      renderMaintenanceCalendar();
+    }
+    window.setCalFilter = setCalFilter;
+
+    function selectCalMonth(ym) {
+      calFilter.startMonth = ym;
+      renderMaintenanceCalendar();
+    }
+    window.selectCalMonth = selectCalMonth;
+
+    function exportCalendarExcel() {
+      const events = window.__calendarEvents || [];
+      if (!events.length) { toast('Tidak ada event untuk di-export.', 'warn'); return; }
+      // Group by month
+      const byMonth = {};
+      events.forEach((e) => {
+        const ym = (e.date || '').slice(0, 7);
+        if (!byMonth[ym]) byMonth[ym] = [];
+        byMonth[ym].push(e);
+      });
+      // CSV header
+      const headers = ['Bulan', 'Tag', 'Nama Equipment', 'Lokasi', 'Milestone', 'Tgl Est', 'Sisa', 'Status'];
+      const rows = [headers];
+      Object.keys(byMonth).sort().forEach((ym) => {
+        byMonth[ym].sort((a, b) => (a.date || '').localeCompare(b.date || '')).forEach((e) => {
+          const monthLbl = new Date(ym + '-01').toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
+          const sisaTxt = (e.kind === 'SKPI' || e.kind === 'COC')
+            ? (e.sisa < 0 ? `lewat ${-e.sisa} hari` : `${e.sisa} hari lagi`)
+            : (e.sisa < 0 ? `lewat ${Math.round(-e.sisa)} jam` : `sisa ${Math.round(e.sisa)} jam`);
+          const status = e.overdue ? 'OVERDUE' : 'PLAN';
+          rows.push([monthLbl, e.eq.tag_number, e.eq.nama_equipment || '', e.unitName, e.kind, e.date, sisaTxt, status]);
+        });
+      });
+      // CSV
+      const csv = rows.map((r) => r.map((c) => `"${String(c || '').replace(/"/g, '""')}"`).join(',')).join('\n');
+      const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `maintenance-calendar-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast('Excel/CSV ter-download.', 'success');
+    }
+    window.exportCalendarExcel = exportCalendarExcel;
 
     // Tutup gejala (false alarm / sudah ditangani tanpa rusak). Modal dgn textarea + upload foto bukti.
     async function closeGejala(id) {
