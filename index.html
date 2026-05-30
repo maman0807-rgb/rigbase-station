@@ -5726,15 +5726,22 @@
         let snoozeBadge = '';
         try {
           const { data: snz } = await state.supabase.from('alert_snooze')
-            .select('alert_kind, snooze_until, reason, created_by_name')
+            .select('id, alert_kind, snooze_until, reason, created_by_name')
             .eq('equipment_id', eq.id)
             .gt('snooze_until', new Date().toISOString());
           if (snz && snz.length) {
             snoozeBadge = `<div class="bg-blue-50 border border-blue-200 rounded-lg p-3 mt-3 text-sm">
-              <div class="font-semibold text-blue-900 mb-1">🔕 Alert ter-snooze (${snz.length})</div>
-              ${snz.map(s => `<div class="text-xs text-blue-700">
-                • ${escapeHtml(s.alert_kind)} sampai ${fmtDate(s.snooze_until)} (${escapeHtml(s.reason || '-')})
+              <div class="font-semibold text-blue-900 mb-2">🔕 Alert ter-snooze (${snz.length})</div>
+              <div class="space-y-1.5">
+              ${snz.map(s => `<div class="flex items-center justify-between gap-2 bg-white rounded px-2 py-1.5 border border-blue-100">
+                <div class="text-xs text-blue-800 flex-1 min-w-0">
+                  <b>${escapeHtml(s.alert_kind)}</b> sampai <b>${fmtDate(s.snooze_until)}</b><br>
+                  <span class="text-blue-600">📋 ${escapeHtml(s.reason || '-')}</span>
+                  ${s.created_by_name ? `<span class="text-blue-400"> · oleh ${escapeHtml(s.created_by_name)}</span>` : ''}
+                </div>
+                ${isSrMekanikOrAbove() ? `<button onclick="cabutSnooze('${s.id}','${eq.id}')" class="px-2 py-1 rounded bg-amber-100 hover:bg-amber-200 text-amber-700 text-xs font-semibold whitespace-nowrap" title="Cabut snooze, alert aktif kembali">🔔 Cabut</button>` : ''}
               </div>`).join('')}
+              </div>
             </div>`;
           }
         } catch (e) { /* table mungkin belum ada — skip */ }
@@ -9442,6 +9449,8 @@
       const reason = (document.getElementById('snz-reason')?.value || '').trim();
       if (!reason) { toast('Alasan snooze wajib diisi.', 'warn'); return; }
       const snoozeUntil = new Date(Date.now() + days * 86400000).toISOString();
+      // Ambil tag utk Telegram alert
+      const { data: eqInfo } = await state.supabase.from('equipment').select('tag_number,nama_equipment,assigned_unit_id').eq('id', equipmentId).single();
       const { error } = await state.supabase.from('alert_snooze').insert({
         equipment_id: equipmentId,
         alert_kind: kind,
@@ -9453,6 +9462,20 @@
       if (error) { toast('Gagal snooze: ' + error.message, 'error'); return; }
       closeModal();
       toast(`Alert ${kind} di-snooze ${days} hari.`, 'success');
+      // 📲 Kirim Telegram alert (transparansi tim)
+      const tag = eqInfo?.tag_number || '?';
+      const unit = getParentUnitName(eqInfo?.assigned_unit_id) || '-';
+      const untilDate = new Date(snoozeUntil).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
+      const kindLabel = { PM: 'PM', TOH: 'TOH', GOH: 'GOH', EOL: 'EOL (Replacement)', all: 'SEMUA ALERT', gejala: 'Gejala', downtime: 'Downtime' }[kind] || kind;
+      sendTelegramAlert(
+        `🔕 <b>ALERT DI-SNOOZE</b>\n` +
+        `📍 <b>${escapeHtml(tag)}</b> · ${escapeHtml(unit)}\n` +
+        `🎚️ Kind: <b>${escapeHtml(kindLabel)}</b>\n` +
+        `⏰ Snooze sampai: <b>${escapeHtml(untilDate)}</b> (${days} hari)\n` +
+        `📋 ${escapeHtml(reason)}\n` +
+        `👷 oleh: ${escapeHtml(state.profile?.full_name || state.profile?.email || '-')}\n\n` +
+        `<i>Selama periode ini, alert ${escapeHtml(kindLabel)} utk equipment ini tidak akan muncul di briefing/digest.</i>`
+      );
       // refresh maintenance tab
       const eqId = state.currentEquipmentId;
       const host = document.getElementById('eq-tab-content');
@@ -9462,6 +9485,41 @@
       }
     }
     window.submitSnooze = submitSnooze;
+
+    // Cabut Snooze (unsnooze) — kalau action sudah selesai sebelum waktu habis
+    async function cabutSnooze(snoozeId, equipmentId) {
+      if (!isSrMekanikOrAbove()) { toast('Khusus Sr Mekanik ke atas.', 'warn'); return; }
+      if (!confirm('Cabut snooze ini? Alert untuk equipment ini akan aktif kembali mulai briefing berikutnya.')) return;
+      try {
+        // Ambil snooze info utk Telegram alert
+        const { data: snz } = await state.supabase.from('alert_snooze').select('alert_kind, reason').eq('id', snoozeId).single();
+        const { data: eqInfo } = await state.supabase.from('equipment').select('tag_number, assigned_unit_id').eq('id', equipmentId).single();
+        // Hapus snooze
+        const { error } = await state.supabase.from('alert_snooze').delete().eq('id', snoozeId);
+        if (error) throw error;
+        toast('Snooze dicabut. Alert aktif kembali.', 'success');
+        // Telegram alert
+        const tag = eqInfo?.tag_number || '?';
+        const unit = getParentUnitName(eqInfo?.assigned_unit_id) || '-';
+        const kindLabel = { PM: 'PM', TOH: 'TOH', GOH: 'GOH', EOL: 'EOL', all: 'SEMUA ALERT' }[snz?.alert_kind] || snz?.alert_kind;
+        sendTelegramAlert(
+          `🔔 <b>SNOOZE DICABUT</b>\n` +
+          `📍 <b>${escapeHtml(tag)}</b> · ${escapeHtml(unit)}\n` +
+          `🎚️ Kind: <b>${escapeHtml(kindLabel)}</b>\n` +
+          `👷 oleh: ${escapeHtml(state.profile?.full_name || state.profile?.email || '-')}\n\n` +
+          `<i>Alert ${escapeHtml(kindLabel)} aktif kembali mulai briefing berikutnya.</i>`
+        );
+        // Refresh maintenance tab
+        const host = document.getElementById('eq-tab-content');
+        if (host && equipmentId) {
+          const { data: eq } = await state.supabase.from('equipment').select('*').eq('id', equipmentId).single();
+          if (eq) renderMaintenanceTab(eq, host);
+        }
+      } catch (err) {
+        toast('Gagal cabut snooze: ' + err.message, 'error');
+      }
+    }
+    window.cabutSnooze = cabutSnooze;
 
     // ============================================================
     // FASE 6 — ALERT SETTINGS PAGE (admin)
