@@ -9183,14 +9183,45 @@
       };
       let savedId = id;
       try {
+        let isNewRecord = false;
         if (id) { const { error } = await state.supabase.from('downtime_events').update(payload).eq('id', id); if (error) throw error; }
         else { payload.created_by = state.user.id;  // tetap simpan user login utk audit "siapa input ke sistem"
           const { data, error } = await state.supabase.from('downtime_events').insert(payload).select('id').single(); if (error) throw error;
           savedId = data.id;
+          isNewRecord = true;
         }
         await uploadDowntimePhotos(savedId);
         toast('Downtime tersimpan.', 'success'); closeModal();
         renderAvailabilityPage(document.getElementById('ram-content'));
+        // 📲 FASE 1 — Real-time Telegram alert untuk event BARU (tidak edit)
+        if (isNewRecord) {
+          const cat = payload.category;
+          const tag = payload.equipment_tag || '?';
+          const unit = payload.unit_name || '?';
+          const notes = (payload.notes || '').slice(0, 100) || '-';
+          const reporter = reporterName || '-';
+          if (cat === GEJALA_CAT) {
+            sendTelegramAlert(
+              `🟡 <b>GEJALA BARU</b> · ${tag}\n` +
+              `📋 ${notes}\n` +
+              `👷 Dilaporkan: <b>${reporter}</b>\n` +
+              `📍 ${unit}\n` +
+              `🕐 baru saja\n\n` +
+              `→ Buka di eRAMHoist`
+            );
+          } else if (cat === 'breakdown' || cat === 'troubleshoot') {
+            const emoji = cat === 'breakdown' ? '💥' : '🔧';
+            const catLabel = DT_CAT[cat] || cat;
+            sendTelegramAlert(
+              `${emoji} <b>${catLabel.toUpperCase()} BARU</b> · ${tag}\n` +
+              `📋 ${notes}\n` +
+              `👷 Dilaporkan: <b>${reporter}</b>\n` +
+              `📍 ${unit}\n` +
+              `🕐 baru saja\n\n` +
+              `→ Buka di eRAMHoist`
+            );
+          }
+        }
       } catch (e) { toast('Gagal simpan: ' + e.message, 'error'); }
     }
     window.saveDowntime = saveDowntime;
@@ -9361,7 +9392,7 @@
       if (!newCat) { toast('Pilihan tidak valid.', 'warn'); return; }
       const note = prompt('Catatan eskalasi (opsional, mis. "asap makin tebal, alat berhenti jam 14:00"):') || '';
       // ambil row dulu utk gabung catatan lama
-      const { data: row } = await state.supabase.from('downtime_events').select('notes').eq('id', id).maybeSingle();
+      const { data: row } = await state.supabase.from('downtime_events').select('notes,equipment_tag,equipment_name,unit_name').eq('id', id).maybeSingle();
       const oldNotes = row?.notes || '';
       const stamp = new Date().toLocaleString('id-ID');
       const newNotes = [oldNotes, `[ESKALASI ${stamp}] ${note}`].filter(Boolean).join(' · ');
@@ -9373,6 +9404,17 @@
       if (error) { toast('Gagal eskalasi: ' + error.message, 'error'); return; }
       toast('Gejala dieskalasi ke ' + DT_CAT[newCat] + '.', 'success');
       renderAvailabilityPage(document.getElementById('ram-content'));
+      // 📲 FASE 1 — Real-time Telegram alert: GEJALA DIESKALASI
+      const emoji = newCat === 'breakdown' ? '💥' : '🔧';
+      sendTelegramAlert(
+        `⚠️ <b>ESKALASI GEJALA → ${DT_CAT[newCat].toUpperCase()}</b>\n` +
+        `${emoji} ${row?.equipment_tag || '?'} (${row?.equipment_name || '-'})\n` +
+        `📋 ${(note || 'Tanpa catatan eskalasi').slice(0, 100)}\n` +
+        `👷 Eskalasi oleh: <b>${state.profile?.full_name || state.profile?.email || '-'}</b>\n` +
+        `📍 ${row?.unit_name || '?'}\n` +
+        `🕐 baru saja\n\n` +
+        `→ Buka di eRAMHoist`
+      );
     }
     window.escalateGejala = escalateGejala;
 
