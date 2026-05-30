@@ -5657,12 +5657,33 @@
             </div>
           </div>` : '';
 
+        // Cek snooze aktif untuk equipment ini
+        let snoozeBadge = '';
+        try {
+          const { data: snz } = await state.supabase.from('alert_snooze')
+            .select('alert_kind, snooze_until, reason, created_by_name')
+            .eq('equipment_id', eq.id)
+            .gt('snooze_until', new Date().toISOString());
+          if (snz && snz.length) {
+            snoozeBadge = `<div class="bg-blue-50 border border-blue-200 rounded-lg p-3 mt-3 text-sm">
+              <div class="font-semibold text-blue-900 mb-1">🔕 Alert ter-snooze (${snz.length})</div>
+              ${snz.map(s => `<div class="text-xs text-blue-700">
+                • ${escapeHtml(s.alert_kind)} sampai ${fmtDate(s.snooze_until)} (${escapeHtml(s.reason || '-')})
+              </div>`).join('')}
+            </div>`;
+          }
+        } catch (e) { /* table mungkin belum ada — skip */ }
+
         container.innerHTML = `
           ${summaryHtml}
           ${prepHtml}
-          <div class="flex items-center justify-between mb-3 mt-5">
+          ${snoozeBadge}
+          <div class="flex items-center justify-between mb-3 mt-5 flex-wrap gap-2">
             <h4 class="font-bold text-slate-800">🛠️ Riwayat Maintenance (${logs.length})</h4>
-            <button onclick="openMaintenanceModal('${eq.id}')" class="bg-safety hover:bg-safety-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium">+ Tambah</button>
+            <div class="flex gap-2">
+              ${isSrMekanikOrAbove() ? `<button onclick="openSnoozeModal('${eq.id}','${escapeHtml(eq.tag_number).replace(/'/g,"&#39;")}')" class="bg-blue-100 hover:bg-blue-200 text-blue-700 px-3 py-1.5 rounded-lg text-sm font-medium" title="Snooze alert sampai action selesai">🔕 Snooze Alert</button>` : ''}
+              <button onclick="openMaintenanceModal('${eq.id}')" class="bg-safety hover:bg-safety-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium">+ Tambah</button>
+            </div>
           </div>
           ${logs.length === 0 ? '<div class="text-center py-6 text-slate-400 text-sm bg-slate-50 rounded-lg">Belum ada maintenance log.</div>' :
             `<div class="space-y-2">
@@ -9305,6 +9326,75 @@
       renderAvailabilityPage(document.getElementById('ram-content'));
     }
     window.markDowntimeDone = markDowntimeDone;
+
+    // ============================================================
+    // FASE 5 — ALERT SNOOZE (anti-mabok untuk Telegram alerts)
+    // ============================================================
+    async function openSnoozeModal(equipmentId, tagDisplay) {
+      if (!isSrMekanikOrAbove()) { toast('Khusus Sr Mekanik ke atas.', 'warn'); return; }
+      const body = `
+        <div class="space-y-3">
+          <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-800">
+            🔕 <b>Snooze alert</b> — hentikan Telegram alert sementara untuk equipment <b>${tagDisplay}</b>.
+            Gunakan setelah action sudah di-plan/scheduled, biar Maman tidak dapat alert berulang.
+          </div>
+          <div>
+            <label class="text-xs font-semibold text-slate-600 uppercase">Alert apa yg di-snooze?</label>
+            <select id="snz-kind" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-navy">
+              <option value="all">Semua alert untuk equipment ini</option>
+              <option value="PM">PM (Preventive Maintenance)</option>
+              <option value="TOH">TOH (Top Overhaul)</option>
+              <option value="GOH">GOH (General Overhaul)</option>
+              <option value="EOL">EOL (Economic Life / Replacement)</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-xs font-semibold text-slate-600 uppercase">Snooze berapa lama?</label>
+            <select id="snz-duration" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-navy">
+              <option value="3">3 hari (action akan diambil minggu ini)</option>
+              <option value="7" selected>7 hari (action plan minggu depan)</option>
+              <option value="14">14 hari (waiting parts)</option>
+              <option value="30">30 hari (planned maintenance jadwal jauh)</option>
+              <option value="90">90 hari (CAPEX planning replacement)</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-xs font-semibold text-slate-600 uppercase">Alasan snooze *</label>
+            <input id="snz-reason" placeholder="mis. PR sudah dibuat, jadwal Trakindo 5 Juni" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy">
+          </div>
+        </div>`;
+      const footer = `<button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
+        <button onclick="submitSnooze('${equipmentId}')" class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold">🔕 Snooze Alert</button>`;
+      openModal({ title: '🔕 Snooze Alert · ' + tagDisplay, body, footer, maxWidth: 'max-w-lg' });
+    }
+    window.openSnoozeModal = openSnoozeModal;
+
+    async function submitSnooze(equipmentId) {
+      const kind = document.getElementById('snz-kind')?.value || 'all';
+      const days = Number(document.getElementById('snz-duration')?.value) || 7;
+      const reason = (document.getElementById('snz-reason')?.value || '').trim();
+      if (!reason) { toast('Alasan snooze wajib diisi.', 'warn'); return; }
+      const snoozeUntil = new Date(Date.now() + days * 86400000).toISOString();
+      const { error } = await state.supabase.from('alert_snooze').insert({
+        equipment_id: equipmentId,
+        alert_kind: kind,
+        snooze_until: snoozeUntil,
+        reason,
+        created_by: state.user.id,
+        created_by_name: state.profile?.full_name || state.profile?.email || '',
+      });
+      if (error) { toast('Gagal snooze: ' + error.message, 'error'); return; }
+      closeModal();
+      toast(`Alert ${kind} di-snooze ${days} hari.`, 'success');
+      // refresh maintenance tab
+      const eqId = state.currentEquipmentId;
+      const host = document.getElementById('eq-tab-content');
+      if (host && eqId) {
+        const { data: eq } = await state.supabase.from('equipment').select('*').eq('id', eqId).single();
+        if (eq) renderMaintenanceTab(eq, host);
+      }
+    }
+    window.submitSnooze = submitSnooze;
 
     // Tutup gejala (false alarm / sudah ditangani tanpa rusak). Modal dgn textarea + upload foto bukti.
     async function closeGejala(id) {

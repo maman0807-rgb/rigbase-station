@@ -37,34 +37,48 @@ serve(async (_req) => {
     const unitName: Record<number, string> = {};
     (units || []).forEach((u) => unitName[u.id] = u.name);
 
+    // Fetch active snoozes (kalau ada equipment yg di-snooze, skip di alert)
+    const { data: snoozes } = await sb.from("alert_snooze")
+      .select("equipment_id, alert_kind")
+      .gt("snooze_until", new Date().toISOString());
+    const snoozeKey = (id: string | null, kind: string) => `${id || "*"}::${kind}`;
+    const snoozedSet = new Set<string>();
+    (snoozes || []).forEach((s) => {
+      snoozedSet.add(snoozeKey(s.equipment_id, s.alert_kind));
+      snoozedSet.add(snoozeKey(s.equipment_id, "all"));
+    });
+    const isSnoozed = (eqId: string, kind: string) =>
+      snoozedSet.has(snoozeKey(eqId, kind)) || snoozedSet.has(snoozeKey(eqId, "all"));
+
     // Fetch equipment dgn HM > 0 utk hitung overdue
     const { data: hmEq } = await sb.from("equipment")
-      .select("tag_number, nama_equipment, assigned_unit_id, running_hours, last_pm_hours, pm_interval_hours, toh_interval_hours, goh_interval_hours, last_toh_hours, last_goh_hours")
+      .select("id, tag_number, nama_equipment, assigned_unit_id, running_hours, last_pm_hours, pm_interval_hours, toh_interval_hours, goh_interval_hours, last_toh_hours, last_goh_hours")
       .gt("running_hours", 0);
 
-    // OVERDUE = sisa < 0 (sudah lewat threshold)
+    // OVERDUE = sisa < THRESHOLD (sudah lewat threshold significantly, bukan baru lewat 1 jam)
+    // Threshold filter biar tidak spam: OVERDUE diperhitungkan kalau lewat >50 jam (untuk PM) atau >100 jam (TOH/GOH)
     const overdue: any[] = [];
     (hmEq || []).forEach((e) => {
       const rh = Number(e.running_hours) || 0;
-      // PM overdue
+      // PM overdue (threshold: lewat >50 jam)
       const pmInt = Number(e.pm_interval_hours) || 0;
-      if (pmInt > 0) {
+      if (pmInt > 0 && !isSnoozed(e.id, "PM")) {
         const rem = pmInt - (rh - (Number(e.last_pm_hours) || 0));
-        if (rem < 0) overdue.push({ ...e, _kind: "PM", _rem: rem });
+        if (rem < -50) overdue.push({ ...e, _kind: "PM", _rem: rem });
       }
-      // TOH overdue
+      // TOH overdue (threshold: lewat >100 jam)
       const tohInt = Number(e.toh_interval_hours) || 0;
-      if (tohInt > 0) {
+      if (tohInt > 0 && !isSnoozed(e.id, "TOH")) {
         const base = Number(e.last_toh_hours ?? e.last_goh_hours ?? 0) || 0;
         const rem = tohInt - (rh - base);
-        if (rem < 0) overdue.push({ ...e, _kind: "TOH", _rem: rem });
+        if (rem < -100) overdue.push({ ...e, _kind: "TOH", _rem: rem });
       }
-      // GOH overdue
+      // GOH overdue (threshold: lewat >100 jam)
       const gohInt = Number(e.goh_interval_hours) || 0;
-      if (gohInt > 0) {
+      if (gohInt > 0 && !isSnoozed(e.id, "GOH")) {
         const base = Number(e.last_goh_hours) || 0;
         const rem = gohInt - (rh - base);
-        if (rem < 0) overdue.push({ ...e, _kind: "GOH", _rem: rem });
+        if (rem < -100) overdue.push({ ...e, _kind: "GOH", _rem: rem });
       }
     });
     overdue.sort((a, b) => a._rem - b._rem); // urutan: paling parah dulu
