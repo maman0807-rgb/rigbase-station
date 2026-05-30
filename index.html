@@ -318,6 +318,7 @@
       { id: 'alerts',      label: 'Alert',        icon: '🔔', group: 'Operasional',  bottomNav: true },
       { id: 'reliability', label: 'RAM',          icon: '📈', group: 'Analisa',      srOnly: true, bottomNav: true },
       { id: 'calendar',    label: 'Kalender',    icon: '📅', group: 'Analisa',      srOnly: true },
+      { id: 'recurring',   label: 'Temuan Berulang', icon: '🔁', group: 'Analisa',  srOnly: true },
       { id: 'categories',  label: 'Kategori',     icon: '🏷️', group: 'Administrasi', adminOnly: true },
       { id: 'users',       label: 'User',         icon: '👥', group: 'Administrasi', adminOnly: true },
       { id: 'activity',    label: 'Activity Log', icon: '📜', group: 'Administrasi', adminOnly: true },
@@ -2240,6 +2241,25 @@
           }
         })();
         setTimeout(() => reloadActivityLog(), 0); // tunda sampai elemen masuk DOM
+        return div;
+      },
+
+      // -----------------------------------------------------
+      // RECURRING FINDINGS — fleet-wide temuan berulang dashboard
+      // -----------------------------------------------------
+      recurring: () => {
+        const div = document.createElement('div');
+        div.className = 'page space-y-4';
+        div.innerHTML = `
+          <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+            <h3 class="text-xl font-bold text-slate-900 mb-1">🔁 Temuan Berulang — Fleet-Wide</h3>
+            <p class="text-sm text-slate-500">Equipment/bagian yang punya finding inspeksi <b>≥ 2× di siklus berbeda</b> — kandidat untuk overhaul atau replacement permanen.</p>
+          </div>
+          <div id="recurring-host" class="space-y-3">
+            <div class="text-slate-400 text-sm">Menghitung pola berulang…</div>
+          </div>
+        `;
+        setTimeout(() => renderRecurringDashboard(), 0);
         return div;
       },
 
@@ -9582,6 +9602,216 @@
       }
     }
     window.cabutSnooze = cabutSnooze;
+
+    // ============================================================
+    // RECURRING FINDINGS DASHBOARD — fleet-wide
+    // ============================================================
+    let recurringFilter = { unit_id: '', category: '' };
+
+    async function renderRecurringDashboard() {
+      const host = document.getElementById('recurring-host');
+      if (!host) return;
+      try {
+        // Fetch all findings (non-NA)
+        const { data: findings, error } = await state.supabase
+          .from('inspection_findings')
+          .select('id, equipment_id, equipment_name_snapshot, bagian, category, deskripsi, tgl_ditemukan, status, inspection_id')
+          .neq('category', 'N/A')
+          .order('tgl_ditemukan', { ascending: false })
+          .limit(5000);
+        if (error) throw error;
+        const fs = findings || [];
+
+        // Fetch inspections untuk dapat siklus name
+        const { data: inspections } = await state.supabase.from('inspections')
+          .select('id, inspection_code, tgl_inspeksi_start, parent_unit_id');
+        const inspectionMap = {};
+        (inspections || []).forEach(i => { inspectionMap[i.id] = i; });
+
+        // Fetch equipment untuk dapat assigned_unit_id
+        const { data: eqs } = await state.supabase.from('equipment')
+          .select('id, tag_number, nama_equipment, assigned_unit_id');
+        const eqMap = {};
+        (eqs || []).forEach(e => { eqMap[e.id] = e; });
+
+        // Group by equipment + bagian
+        const ALAT_KEY = '(seluruh alat)';
+        const groups = {};
+        fs.forEach(f => {
+          const eqKey = f.equipment_id || ('snapshot::' + f.equipment_name_snapshot);
+          const bagian = f.bagian || ALAT_KEY;
+          const key = eqKey + '::' + bagian;
+          if (!groups[key]) {
+            const eq = f.equipment_id ? eqMap[f.equipment_id] : null;
+            groups[key] = {
+              equipment_id: f.equipment_id,
+              equipment_name: f.equipment_name_snapshot,
+              equipment_tag: eq?.tag_number || null,
+              assigned_unit_id: eq?.assigned_unit_id || null,
+              bagian, items: [], siklusSet: new Set(),
+            };
+          }
+          groups[key].items.push(f);
+          if (f.inspection_id) groups[key].siklusSet.add(f.inspection_id);
+        });
+
+        // Filter recurring (≥2 temuan, dan kalau bagian = '(seluruh alat)' wajib di ≥2 siklus)
+        const recurring = Object.values(groups).filter(g => {
+          if (g.items.length < 2) return false;
+          if (g.bagian === ALAT_KEY) return g.siklusSet.size >= 2;
+          return true;
+        });
+
+        // Apply filter
+        const filtered = recurring.filter(g => {
+          if (recurringFilter.unit_id && String(g.assigned_unit_id) !== String(recurringFilter.unit_id)) return false;
+          if (recurringFilter.category) {
+            const hasCategory = g.items.some(i => i.category === recurringFilter.category);
+            if (!hasCategory) return false;
+          }
+          return true;
+        });
+
+        // Sort by severity: critical count desc → total count desc
+        filtered.sort((a, b) => {
+          const aC = a.items.filter(i => i.category === 'Critical').length;
+          const bC = b.items.filter(i => i.category === 'Critical').length;
+          if (aC !== bC) return bC - aC;
+          return b.items.length - a.items.length;
+        });
+
+        // KPI
+        const totalRecurring = filtered.length;
+        const totalCritical = filtered.reduce((sum, g) => sum + g.items.filter(i => i.category === 'Critical').length, 0);
+        const totalEquipment = new Set(filtered.map(g => g.equipment_id || g.equipment_name)).size;
+        const totalOpen = filtered.reduce((sum, g) => sum + g.items.filter(i => i.status === 'Open').length, 0);
+
+        // Filter bar
+        const filterBar = `
+          <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex flex-wrap gap-3 items-center">
+            <span class="text-sm font-medium text-slate-600 mr-2">Filter:</span>
+            <select onchange="setRecurringFilter('unit_id', this.value)" class="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-navy">
+              <option value="">Semua Rig</option>
+              ${state.parentUnits.map(u => `<option value="${u.id}" ${recurringFilter.unit_id == u.id ? 'selected' : ''}>${escapeHtml(u.name)} (${u.type})</option>`).join('')}
+            </select>
+            <select onchange="setRecurringFilter('category', this.value)" class="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-navy">
+              <option value="">Semua Severity</option>
+              <option value="Critical" ${recurringFilter.category === 'Critical' ? 'selected' : ''}>🔴 Critical (paling urgent)</option>
+              <option value="Major" ${recurringFilter.category === 'Major' ? 'selected' : ''}>🟠 Major</option>
+              <option value="Minor" ${recurringFilter.category === 'Minor' ? 'selected' : ''}>🟡 Minor</option>
+            </select>
+          </div>`;
+
+        // KPI cards
+        const kpi = `
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div class="bg-white rounded-xl border border-red-300 p-4 text-center">
+              <div class="text-3xl font-extrabold text-red-700">${totalRecurring}</div>
+              <div class="text-xs font-semibold text-red-700 mt-1">🔁 Grup Berulang</div>
+              <div class="text-[10px] text-slate-500">equipment × bagian</div>
+            </div>
+            <div class="bg-white rounded-xl border border-red-300 p-4 text-center">
+              <div class="text-3xl font-extrabold text-red-800">${totalCritical}</div>
+              <div class="text-xs font-semibold text-red-800 mt-1">🔴 Critical Berulang</div>
+              <div class="text-[10px] text-slate-500">temuan critical total</div>
+            </div>
+            <div class="bg-white rounded-xl border border-amber-300 p-4 text-center">
+              <div class="text-3xl font-extrabold text-amber-700">${totalEquipment}</div>
+              <div class="text-xs font-semibold text-amber-700 mt-1">🏭 Equipment Terdampak</div>
+              <div class="text-[10px] text-slate-500">unit unik</div>
+            </div>
+            <div class="bg-white rounded-xl border border-slate-300 p-4 text-center">
+              <div class="text-3xl font-extrabold text-slate-700">${totalOpen}</div>
+              <div class="text-xs font-semibold text-slate-700 mt-1">📋 Status Open</div>
+              <div class="text-[10px] text-slate-500">belum closed</div>
+            </div>
+          </div>`;
+
+        // Render groups
+        const cards = filtered.map((g, idx) => {
+          const siklus = g.siklusSet.size;
+          const cats = g.items.map(i => i.category);
+          const critN = cats.filter(c => c === 'Critical').length;
+          const majN = cats.filter(c => c === 'Major').length;
+          const minN = cats.filter(c => c === 'Minor').length;
+          const openN = g.items.filter(i => i.status === 'Open').length;
+          const closedN = g.items.length - openN;
+          const dates = g.items.map(i => i.tgl_ditemukan).filter(Boolean).sort();
+          const firstDate = dates[0] ? fmtDate(dates[0]) : '-';
+          const lastDate = dates[dates.length - 1] ? fmtDate(dates[dates.length - 1]) : '-';
+          const unitName = g.assigned_unit_id ? getParentUnitName(g.assigned_unit_id) : '—';
+          const isAlat = g.bagian === '(seluruh alat)';
+
+          // Recommendation logic
+          let recommendation = '';
+          let recColor = 'slate';
+          if (critN >= 3 || (critN >= 2 && g.items.length >= 5)) {
+            recommendation = '🚨 REPLACEMENT URGENT — sudah kandidat ganti permanen';
+            recColor = 'red';
+          } else if (critN >= 1 || g.items.length >= 5) {
+            recommendation = '⚠️ Overhaul direkomendasikan — root cause analysis + repair major';
+            recColor = 'amber';
+          } else {
+            recommendation = '💡 Monitor + preventive — schedule inspeksi lebih sering';
+            recColor = 'blue';
+          }
+
+          // Top finding examples (first 3 with descriptions)
+          const examples = g.items.slice(0, 3).map(i => `<li class="text-[11px] text-slate-600 leading-tight"><span class="font-semibold ${i.category === 'Critical' ? 'text-red-700' : i.category === 'Major' ? 'text-amber-700' : 'text-slate-600'}">${i.category}</span> · ${escapeHtml((i.deskripsi || '-').slice(0, 80))}${(i.deskripsi || '').length > 80 ? '…' : ''} <span class="text-slate-400">(${fmtDate(i.tgl_ditemukan)})</span></li>`).join('');
+
+          const eqClickable = g.equipment_id
+            ? `<button onclick="setEquipmentView('detail','${g.equipment_id}'); navigate('equipment')" class="text-navy hover:underline font-semibold">${escapeHtml(g.equipment_tag || g.equipment_name)}</button>`
+            : `<span class="text-slate-500">${escapeHtml(g.equipment_name)} <span class="text-xs">(equipment dihapus)</span></span>`;
+
+          return `<div class="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+            <div class="flex items-start justify-between gap-3 flex-wrap mb-2">
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 flex-wrap mb-1">
+                  <span class="text-2xl">${idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : '🔁'}</span>
+                  <h4 class="font-bold text-slate-900 text-base">${eqClickable}</h4>
+                  <span class="text-xs text-slate-400">·</span>
+                  <span class="text-sm font-semibold text-slate-700">📍 ${isAlat ? '⚙️ Seluruh alat' : escapeHtml(g.bagian)}</span>
+                </div>
+                <div class="text-xs text-slate-500">${escapeHtml(unitName)}</div>
+              </div>
+              <div class="text-right">
+                <div class="text-3xl font-extrabold text-slate-900">${g.items.length}<span class="text-sm font-normal text-slate-500">×</span></div>
+                <div class="text-[10px] text-slate-500">di ${siklus} siklus</div>
+              </div>
+            </div>
+            <div class="flex flex-wrap gap-2 text-xs mb-2">
+              ${critN ? `<span class="px-2 py-0.5 rounded bg-red-100 text-red-700 font-semibold">🔴 ${critN} Critical</span>` : ''}
+              ${majN ? `<span class="px-2 py-0.5 rounded bg-amber-100 text-amber-700 font-semibold">🟠 ${majN} Major</span>` : ''}
+              ${minN ? `<span class="px-2 py-0.5 rounded bg-yellow-100 text-yellow-700 font-semibold">🟡 ${minN} Minor</span>` : ''}
+              ${openN ? `<span class="px-2 py-0.5 rounded bg-slate-200 text-slate-700">📋 ${openN} Open</span>` : ''}
+              ${closedN ? `<span class="px-2 py-0.5 rounded bg-green-100 text-green-700">✓ ${closedN} Closed</span>` : ''}
+            </div>
+            <div class="text-xs text-slate-500 mb-2"><b>Periode:</b> ${firstDate} → ${lastDate}</div>
+            <ul class="space-y-0.5 mb-3 list-disc list-inside pl-1">${examples}</ul>
+            <div class="bg-${recColor}-50 border border-${recColor}-200 rounded-lg p-2 text-xs text-${recColor}-800">
+              <b>Rekomendasi:</b> ${recommendation}
+            </div>
+          </div>`;
+        }).join('');
+
+        host.innerHTML = filterBar + '<div class="mt-3"></div>' + kpi + '<div class="mt-3"></div>' +
+          (filtered.length ? `<div class="space-y-3">${cards}</div>` :
+            `<div class="bg-green-50 border border-green-200 rounded-xl p-8 text-center">
+              <div class="text-4xl mb-2">✅</div>
+              <div class="font-bold text-green-900">Tidak ada pola berulang!</div>
+              <div class="text-sm text-green-700 mt-1">Semua temuan unik per inspeksi — fleet dalam kondisi sehat.</div>
+            </div>`);
+      } catch (err) {
+        host.innerHTML = `<div class="bg-red-50 text-red-700 p-4 rounded-xl text-sm">Gagal load: ${escapeHtml(err.message)}</div>`;
+      }
+    }
+    window.renderRecurringDashboard = renderRecurringDashboard;
+
+    function setRecurringFilter(field, value) {
+      recurringFilter[field] = value;
+      renderRecurringDashboard();
+    }
+    window.setRecurringFilter = setRecurringFilter;
 
     // ============================================================
     // FASE 6 — ALERT SETTINGS PAGE (admin)
