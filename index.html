@@ -2011,31 +2011,56 @@
         div.innerHTML = `
           <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
             <h3 class="text-xl font-bold text-slate-900 mb-1">🔔 Alert Center</h3>
-            <p class="text-sm text-slate-500">Riwayat alert yang dikirim ke Telegram (akan aktif setelah Fase 5).</p>
+            <p class="text-sm text-slate-500">Riwayat alert yang dikirim ke Telegram. Atur ON/OFF di <a href="#" onclick="navigate('alert-config');return false;" class="text-navy hover:underline font-medium">🔔 Alert Settings</a>.</p>
           </div>
           <div id="alert-list" class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">Memuat…</div>
         `;
         (async () => {
+          // Render message Telegram-style: convert <b> → bold, <i> → italic, <br> → newline.
+          // Strip tag lain (mis. <a>, <code>) jadi text, tapi escape biar tidak XSS dari isi notes.
+          const renderTelegramMsg = (raw) => {
+            if (!raw) return '<span class="text-slate-400">—</span>';
+            // Escape dulu, lalu unescape tag aman tertentu (b, i, br)
+            let s = escapeHtml(String(raw));
+            s = s.replace(/&lt;b&gt;/gi, '<b>').replace(/&lt;\/b&gt;/gi, '</b>');
+            s = s.replace(/&lt;i&gt;/gi, '<i>').replace(/&lt;\/i&gt;/gi, '</i>');
+            s = s.replace(/&lt;br\s*\/?&gt;/gi, '<br>');
+            // tag lain dibiarkan ter-escape (mis. <a>, <code>)
+            // newline asli juga jadi <br>
+            s = s.replace(/\n/g, '<br>');
+            return s;
+          };
           try {
             const { data, error } = await state.supabase
               .from('alert_log').select('*').order('sent_at', { ascending: false }).limit(50);
             if (error) throw error;
             const rows = data || [];
             if (rows.length === 0) {
-              $('#alert-list').innerHTML = '<div class="p-8 text-center text-slate-500">Belum ada alert. Akan terisi setelah Telegram Bot di-setup di Fase 5.</div>';
+              $('#alert-list').innerHTML = '<div class="p-8 text-center text-slate-500">Belum ada alert tercatat.</div>';
               return;
             }
+            // Badge color per alert_type
+            const typeBadge = (t) => {
+              const map = {
+                'real-time':        'bg-orange-100 text-orange-800',
+                'daily-check':      'bg-blue-100 text-blue-800',
+                'morning-briefing': 'bg-amber-100 text-amber-800',
+                'weekly-recap':     'bg-purple-100 text-purple-800',
+                'critical':         'bg-red-100 text-red-800',
+              };
+              return map[t] || 'bg-slate-100 text-slate-700';
+            };
             $('#alert-list').innerHTML = rows.map(r => `
               <div class="p-4 border-b border-slate-100 last:border-b-0">
                 <div class="flex items-start justify-between gap-3">
                   <div class="flex-1 min-w-0">
-                    <div class="flex items-center gap-2 mb-1">
-                      <span class="px-2 py-0.5 bg-orange-100 text-orange-800 text-xs font-medium rounded">${escapeHtml(r.alert_type)}</span>
-                      <span class="text-xs text-slate-500">${fmtDate(r.sent_at)}</span>
+                    <div class="flex items-center gap-2 mb-1 flex-wrap">
+                      <span class="px-2 py-0.5 ${typeBadge(r.alert_type)} text-xs font-medium rounded">${escapeHtml(r.alert_type)}</span>
+                      <span class="text-xs text-slate-500">${fmtDate(r.sent_at)} ${new Date(r.sent_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</span>
                     </div>
-                    <div class="text-sm text-slate-700">${escapeHtml(r.message || '—')}</div>
+                    <div class="text-sm text-slate-700 leading-relaxed">${renderTelegramMsg(r.message)}</div>
                   </div>
-                  <div class="text-xs ${r.status === 'sent' ? 'text-green-600' : 'text-red-600'} font-semibold">${escapeHtml(r.status || '—')}</div>
+                  <div class="text-xs ${r.status === 'sent' ? 'text-green-600' : 'text-red-600'} font-semibold shrink-0">${escapeHtml(r.status || '—')}</div>
                 </div>
               </div>
             `).join('');
