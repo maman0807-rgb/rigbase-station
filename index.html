@@ -9788,7 +9788,7 @@
             </div>
             <div class="ml-auto flex gap-2">
               <button onclick="exportCalendarExcel()" class="px-3 py-2 bg-navy hover:bg-navy-700 text-white rounded-lg text-sm font-medium">📥 Excel</button>
-              <button onclick="window.print()" class="px-3 py-2 border border-slate-300 hover:bg-slate-50 rounded-lg text-sm font-medium">🖨 Print</button>
+              <button onclick="cetakCalendarReport()" class="px-3 py-2 bg-navy hover:bg-navy-700 text-white rounded-lg text-sm font-medium">🖨 Print PDF</button>
             </div>
           </div>`;
 
@@ -10053,6 +10053,175 @@
       toast('Excel/CSV ter-download.', 'success');
     }
     window.exportCalendarExcel = exportCalendarExcel;
+
+    // Cetak Calendar — pakai openSignDialog (sama dgn report lain)
+    function cetakCalendarReport() {
+      const events = window.__calendarEvents || [];
+      if (!events.length) { toast('Tidak ada event untuk dicetak.', 'warn'); return; }
+      const now = new Date();
+      const todayMs = now.getTime();
+
+      // Filter info
+      const filterRig = calFilter.unit_id ? (state.parentUnits.find(u => u.id == calFilter.unit_id)?.name || '-') : 'Semua Rig';
+      const filterKind = calFilter.kind || 'Semua Milestone';
+
+      // Aggregates
+      const totalOverdue = events.filter((e) => e.overdue).length;
+      const isUrgent = (e) => {
+        if (e.overdue) return false;
+        return ((e.kind === 'PM' && e.sisa < 200)
+          || (e.kind === 'TOH' && e.sisa < 500)
+          || (e.kind === 'GOH' && e.sisa < 1000)
+          || ((e.kind === 'SKPI' || e.kind === 'COC') && e.sisa < 30));
+      };
+      const totalUrgent = events.filter(isUrgent).length;
+      const totalPlan = events.length - totalOverdue - totalUrgent;
+
+      // Summary cards
+      const summary = `<div class="cards">
+        <div class="card red"><div class="num">${totalOverdue}</div><div class="lbl">🔴 OVERDUE</div></div>
+        <div class="card amber"><div class="num">${totalUrgent}</div><div class="lbl">🟡 URGENT</div></div>
+        <div class="card green"><div class="num">${totalPlan}</div><div class="lbl">🟢 PLAN</div></div>
+        <div class="card navy"><div class="num">${events.length}</div><div class="lbl">📅 TOTAL</div></div>
+      </div>`;
+
+      const intro = `<p>Laporan proyeksi maintenance 12 bulan ke depan dari eRAMHoist — gabungan PM/TOH/GOH (berbasis HM trend asumsi 8 jam/hari) + sertifikat SKPI/COC (calendar-based).</p>
+        <p><b>Filter aktif:</b> ${escapeHtml(filterRig)} · ${escapeHtml(filterKind)}<br>
+        <b>Dicetak:</b> ${now.toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })} oleh ${escapeHtml(state.profile?.full_name || state.profile?.email || '-')}</p>`;
+
+      // 1. Per-month summary table
+      const months = [];
+      for (let i = 0; i < 12; i++) {
+        const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+        months.push({ ym: d.toISOString().slice(0, 7), date: d, events: [] });
+      }
+      events.forEach((e) => {
+        const ym = (e.date || '').slice(0, 7);
+        const m = months.find((mm) => mm.ym === ym);
+        if (m) m.events.push(e);
+      });
+      // Past overdue
+      const overdueByYM = {};
+      events.forEach((e) => {
+        if (e.overdue && !months.find((m) => m.ym === (e.date || '').slice(0, 7))) {
+          const ym = (e.date || '').slice(0, 7);
+          if (!overdueByYM[ym]) overdueByYM[ym] = { ym, date: new Date(ym + '-01'), events: [] };
+          overdueByYM[ym].events.push(e);
+        }
+      });
+      const allMonths = [...Object.values(overdueByYM).sort((a, b) => a.ym.localeCompare(b.ym)), ...months];
+
+      const monthSummaryRows = allMonths.map((m, i) => {
+        const lbl = m.date.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
+        const od = m.events.filter((e) => e.overdue).length;
+        const ur = m.events.filter(isUrgent).length;
+        const pl = m.events.length - od - ur;
+        if (!m.events.length) return '';
+        return `<tr>
+          <td style="text-align:center">${i + 1}</td>
+          <td><b>${escapeHtml(lbl)}</b></td>
+          <td style="text-align:center;font-weight:bold">${m.events.length}</td>
+          <td style="text-align:center;color:${od > 0 ? '#dc2626' : '#94a3b8'}">${od || '—'}</td>
+          <td style="text-align:center;color:${ur > 0 ? '#d97706' : '#94a3b8'}">${ur || '—'}</td>
+          <td style="text-align:center;color:${pl > 0 ? '#16a34a' : '#94a3b8'}">${pl || '—'}</td>
+        </tr>`;
+      }).filter(Boolean).join('');
+      const monthSummaryTable = `
+        <h3>📅 Distribusi Event per Bulan</h3>
+        <table>
+          <thead><tr>
+            <th>No</th><th>Bulan</th><th>Total</th><th>🔴 Overdue</th><th>🟡 Urgent</th><th>🟢 Plan</th>
+          </tr></thead>
+          <tbody>${monthSummaryRows || '<tr><td colspan="6" style="text-align:center">Tidak ada event</td></tr>'}</tbody>
+        </table>`;
+
+      // 2. Detail OVERDUE & URGENT (prioritized table)
+      const priorityEvents = events.filter((e) => e.overdue || isUrgent(e))
+        .sort((a, b) => (a.overdue && !b.overdue ? -1 : !a.overdue && b.overdue ? 1 : 0) || (a.date || '').localeCompare(b.date || ''));
+      const priorityRows = priorityEvents.slice(0, 50).map((e, i) => {
+        const days = Math.round((new Date(e.date).getTime() - todayMs) / 86400000);
+        const daysTxt = days < 0 ? `${-days}h lalu` : days === 0 ? `Hari ini` : `${days}h lagi`;
+        const unit = (e.eq.pm_type === 'km') ? 'km' : 'jam';
+        const sisaTxt = (e.kind === 'SKPI' || e.kind === 'COC')
+          ? (e.sisa < 0 ? `lewat ${-e.sisa} hari` : `${e.sisa} hari`)
+          : (e.sisa < 0 ? `lewat ${Math.round(-e.sisa)} ${unit}` : `${Math.round(e.sisa)} ${unit}`);
+        const status = e.overdue ? '🔴 OVERDUE' : '🟡 URGENT';
+        const rowStyle = e.overdue ? ' style="background:#fef2f2"' : ' style="background:#fffbeb"';
+        return `<tr${rowStyle}>
+          <td style="text-align:center">${i + 1}</td>
+          <td><b>${escapeHtml(e.eq.tag_number)}</b><br><span style="color:#64748b;font-size:11px">${escapeHtml(e.eq.nama_equipment || '')}</span></td>
+          <td>${escapeHtml(e.unitName)}</td>
+          <td style="text-align:center;font-weight:bold">${e.kind}</td>
+          <td style="text-align:center">${fmtDate(e.date)}</td>
+          <td style="text-align:center">${daysTxt}</td>
+          <td style="text-align:center;font-weight:bold">${sisaTxt}</td>
+          <td style="text-align:center">${status}</td>
+        </tr>`;
+      }).join('');
+      const priorityTable = `
+        <h3 style="color:#dc2626;margin-top:20px">⚠️ PRIORITAS ACTION — OVERDUE & URGENT (${priorityEvents.length})</h3>
+        <table>
+          <thead><tr>
+            <th>No</th><th>Equipment</th><th>Rig</th><th>Milestone</th><th>Tgl Est</th><th>Berapa lama</th><th>Sisa</th><th>Status</th>
+          </tr></thead>
+          <tbody>${priorityRows || '<tr><td colspan="8" style="text-align:center;background:#dcfce7;color:#16a34a;font-weight:bold">✅ Tidak ada yg overdue / urgent! Semua aman.</td></tr>'}</tbody>
+        </table>
+        ${priorityEvents.length > 50 ? `<p style="font-size:11px;color:#64748b;margin-top:5px"><i>Menampilkan 50 teratas dari ${priorityEvents.length} total. Sisanya bisa di-export via Excel.</i></p>` : ''}`;
+
+      // 3. Per-rig breakdown
+      const byRig = {};
+      events.forEach((e) => {
+        const key = e.unitName || '(tanpa rig)';
+        if (!byRig[key]) byRig[key] = { name: key, items: [] };
+        byRig[key].items.push(e);
+      });
+      const rigSortedKeys = Object.keys(byRig).sort((a, b) => byRig[b].items.length - byRig[a].items.length);
+      const rigRows = rigSortedKeys.map((k, i) => {
+        const g = byRig[k];
+        const od = g.items.filter((e) => e.overdue).length;
+        const ur = g.items.filter(isUrgent).length;
+        const pl = g.items.length - od - ur;
+        return `<tr>
+          <td style="text-align:center">${i + 1}</td>
+          <td><b>${escapeHtml(g.name)}</b></td>
+          <td style="text-align:center;font-weight:bold">${g.items.length}</td>
+          <td style="text-align:center;color:${od > 0 ? '#dc2626' : '#94a3b8'}">${od || '—'}</td>
+          <td style="text-align:center;color:${ur > 0 ? '#d97706' : '#94a3b8'}">${ur || '—'}</td>
+          <td style="text-align:center;color:${pl > 0 ? '#16a34a' : '#94a3b8'}">${pl || '—'}</td>
+        </tr>`;
+      }).join('');
+      const rigTable = `
+        <h3 style="margin-top:20px">🏭 Distribusi Event per Rig</h3>
+        <table>
+          <thead><tr>
+            <th>No</th><th>Rig / Unit</th><th>Total Event</th><th>🔴 Overdue</th><th>🟡 Urgent</th><th>🟢 Plan</th>
+          </tr></thead>
+          <tbody>${rigRows}</tbody>
+        </table>`;
+
+      const table = monthSummaryTable + priorityTable + rigTable;
+
+      const kesimpulan = `<b>Action Recommended:</b>
+        <ul style="margin:8px 0 0 18px;padding:0">
+          ${totalOverdue > 0 ? `<li><b style="color:#dc2626">${totalOverdue} unit OVERDUE</b> — segera schedule maintenance & kontak vendor</li>` : ''}
+          ${totalUrgent > 0 ? `<li><b style="color:#d97706">${totalUrgent} unit URGENT</b> — siapkan parts & jadwal dalam 1-30 hari ke depan</li>` : ''}
+          ${totalPlan > 0 ? `<li><b style="color:#16a34a">${totalPlan} unit PLAN</b> — masuk planning rutin</li>` : ''}
+        </ul>
+        <p style="margin-top:10px"><i>Catatan: Tgl estimasi menggunakan asumsi 8 jam/hari operasi. Sesuaikan dgn HM rate aktual rig.</i></p>`;
+
+      const chart = (typeof chartBars === 'function') ? chartBars('Distribusi per Status', [
+        { label: 'Overdue', value: totalOverdue, color: '#dc2626' },
+        { label: 'Urgent',  value: totalUrgent,  color: '#d97706' },
+        { label: 'Plan',    value: totalPlan,    color: '#16a34a' },
+      ]) : '';
+
+      openSignDialog({
+        title: `Annual Maintenance Calendar — ${filterRig}`,
+        type: 'CALENDAR',
+        summary, chart, intro, table, kesimpulan,
+      });
+    }
+    window.cetakCalendarReport = cetakCalendarReport;
 
     // ============================================================
     // PILIHAN B — GENERATE WORK ORDER PDF
