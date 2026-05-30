@@ -21,7 +21,9 @@ CREATE TABLE IF NOT EXISTS alert_snooze (
 );
 CREATE INDEX IF NOT EXISTS idx_snooze_until ON alert_snooze(snooze_until);
 CREATE INDEX IF NOT EXISTS idx_snooze_equipment ON alert_snooze(equipment_id);
-CREATE INDEX IF NOT EXISTS idx_snooze_active ON alert_snooze(equipment_id, alert_kind) WHERE snooze_until > NOW();
+-- Composite index utk lookup snooze aktif per (equipment, kind, snooze_until)
+-- Tidak pakai partial index "WHERE snooze_until > NOW()" karena NOW() bukan IMMUTABLE.
+CREATE INDEX IF NOT EXISTS idx_snooze_active ON alert_snooze(equipment_id, alert_kind, snooze_until);
 
 -- RLS — Sr Mekanik+ bisa CRUD snooze
 ALTER TABLE alert_snooze ENABLE ROW LEVEL SECURITY;
