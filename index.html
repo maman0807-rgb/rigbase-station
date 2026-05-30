@@ -10111,6 +10111,19 @@
       });
       const allMonths = [...Object.values(overdueByYM).sort((a, b) => a.ym.localeCompare(b.ym)), ...months];
 
+      // Action hint generic per milestone — kasih sneak preview supaya mekanik tahu apa yg disiapkan
+      const actionHint = (kind, eq) => {
+        const brand = (eq.brand || '').toLowerCase();
+        const isEngine = /engine|genset|mobeng|primover|mp-/i.test((eq.tag_number || '') + (eq.nama_equipment || ''));
+        if (kind === 'PM')   return 'Engine oil + filter (oil/fuel/air), check belt, coolant, battery, fastener. Sample oil utk lab analysis.';
+        if (kind === 'TOH')  return 'Cylinder head rebuild kit (gasket, valve, valve seat), injector, head bolt, turbo kit, fluid refill.';
+        if (kind === 'GOH')  return 'Full engine rebuild: pistons, rings, liner, bearings, crankshaft inspection, alternator rebuild.';
+        if (kind === 'SKPI') return 'Coordinate dgn lembaga sertifikasi SKPI utk renewal. Siapkan dokumen + hasil inspeksi.';
+        if (kind === 'COC')  return 'Coordinate dgn lembaga COC utk renewal. Siapkan dokumen + pressure test (kalau perlu).';
+        return '—';
+      };
+
+      // 1. Summary distribusi bulan (compact)
       const monthSummaryRows = allMonths.map((m, i) => {
         const lbl = m.date.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
         const od = m.events.filter((e) => e.overdue).length;
@@ -10127,7 +10140,7 @@
         </tr>`;
       }).filter(Boolean).join('');
       const monthSummaryTable = `
-        <h3>📅 Distribusi Event per Bulan</h3>
+        <h3>📅 Ringkasan Distribusi Event per Bulan</h3>
         <table>
           <thead><tr>
             <th>No</th><th>Bulan</th><th>Total</th><th>🔴 Overdue</th><th>🟡 Urgent</th><th>🟢 Plan</th>
@@ -10135,38 +10148,59 @@
           <tbody>${monthSummaryRows || '<tr><td colspan="6" style="text-align:center">Tidak ada event</td></tr>'}</tbody>
         </table>`;
 
-      // 2. Detail OVERDUE & URGENT (prioritized table)
-      const priorityEvents = events.filter((e) => e.overdue || isUrgent(e))
-        .sort((a, b) => (a.overdue && !b.overdue ? -1 : !a.overdue && b.overdue ? 1 : 0) || (a.date || '').localeCompare(b.date || ''));
-      const priorityRows = priorityEvents.slice(0, 50).map((e, i) => {
-        const days = Math.round((new Date(e.date).getTime() - todayMs) / 86400000);
-        const daysTxt = days < 0 ? `${-days}h lalu` : days === 0 ? `Hari ini` : `${days}h lagi`;
-        const unit = (e.eq.pm_type === 'km') ? 'km' : 'jam';
-        const sisaTxt = (e.kind === 'SKPI' || e.kind === 'COC')
-          ? (e.sisa < 0 ? `lewat ${-e.sisa} hari` : `${e.sisa} hari`)
-          : (e.sisa < 0 ? `lewat ${Math.round(-e.sisa)} ${unit}` : `${Math.round(e.sisa)} ${unit}`);
-        const status = e.overdue ? '🔴 OVERDUE' : '🟡 URGENT';
-        const rowStyle = e.overdue ? ' style="background:#fef2f2"' : ' style="background:#fffbeb"';
-        return `<tr${rowStyle}>
-          <td style="text-align:center">${i + 1}</td>
-          <td><b>${escapeHtml(e.eq.tag_number)}</b><br><span style="color:#64748b;font-size:11px">${escapeHtml(e.eq.nama_equipment || '')}</span></td>
-          <td>${escapeHtml(e.unitName)}</td>
-          <td style="text-align:center;font-weight:bold">${e.kind}</td>
-          <td style="text-align:center">${fmtDate(e.date)}</td>
-          <td style="text-align:center">${daysTxt}</td>
-          <td style="text-align:center;font-weight:bold">${sisaTxt}</td>
-          <td style="text-align:center">${status}</td>
-        </tr>`;
+      // 2. NEW: PER-BULAN DETAIL — equipment list + action per bulan
+      const monthsWithEvents = allMonths.filter((m) => m.events.length > 0);
+      const perBulanDetail = monthsWithEvents.map((m) => {
+        const lbl = m.date.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
+        const sortedItems = m.events.slice().sort((a, b) => {
+          const ra = a.overdue ? 0 : isUrgent(a) ? 1 : 2;
+          const rb = b.overdue ? 0 : isUrgent(b) ? 1 : 2;
+          return ra - rb || (a.date || '').localeCompare(b.date || '');
+        });
+        const headerColor = m.events.some((e) => e.overdue) ? '#dc2626' : m.events.some(isUrgent) ? '#d97706' : '#11335d';
+        const rows = sortedItems.map((e, i) => {
+          const days = Math.round((new Date(e.date).getTime() - todayMs) / 86400000);
+          const daysTxt = days < 0 ? `${-days}h lalu` : days === 0 ? 'Hari ini' : `${days}h lagi`;
+          const unit = (e.eq.pm_type === 'km') ? 'km' : 'jam';
+          const sisaTxt = (e.kind === 'SKPI' || e.kind === 'COC')
+            ? (e.sisa < 0 ? `lewat ${-e.sisa} hari` : `${e.sisa} hari`)
+            : (e.sisa < 0 ? `lewat ${Math.round(-e.sisa)} ${unit}` : `${Math.round(e.sisa)} ${unit}`);
+          const status = e.overdue ? '🔴 OVERDUE' : isUrgent(e) ? '🟡 URGENT' : '🟢 PLAN';
+          const rowStyle = e.overdue ? ' style="background:#fef2f2"' : isUrgent(e) ? ' style="background:#fffbeb"' : '';
+          return `<tr${rowStyle}>
+            <td style="text-align:center">${i + 1}</td>
+            <td><b>${escapeHtml(e.eq.tag_number)}</b><br><span style="color:#64748b;font-size:10px">${escapeHtml(e.eq.nama_equipment || '')}</span></td>
+            <td style="text-align:center;font-size:11px">${escapeHtml(e.unitName)}</td>
+            <td style="text-align:center;font-weight:bold">${e.kind}</td>
+            <td style="text-align:center;font-size:11px;white-space:nowrap">${fmtDate(e.date)}<br><span style="color:#64748b;font-size:10px">${daysTxt}</span></td>
+            <td style="text-align:center;font-weight:bold;white-space:nowrap">${sisaTxt}</td>
+            <td style="font-size:11px;line-height:1.4">${escapeHtml(actionHint(e.kind, e.eq))}</td>
+            <td style="text-align:center;font-size:10px;white-space:nowrap">${status}</td>
+            <td style="text-align:center"></td>
+          </tr>`;
+        }).join('');
+        return `
+          <h3 style="color:${headerColor};margin-top:18px;margin-bottom:8px;page-break-after:avoid">📅 ${escapeHtml(lbl)} — ${m.events.length} event</h3>
+          <table style="page-break-inside:avoid">
+            <thead><tr>
+              <th style="width:3%">No</th>
+              <th style="width:16%">Equipment</th>
+              <th style="width:10%">Rig</th>
+              <th style="width:6%">Milestone</th>
+              <th style="width:11%">Tgl Est</th>
+              <th style="width:10%">Sisa</th>
+              <th>Yang Disiapkan / Action</th>
+              <th style="width:8%">Status</th>
+              <th style="width:10%">✓ Done?</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>`;
       }).join('');
-      const priorityTable = `
-        <h3 style="color:#dc2626;margin-top:20px">⚠️ PRIORITAS ACTION — OVERDUE & URGENT (${priorityEvents.length})</h3>
-        <table>
-          <thead><tr>
-            <th>No</th><th>Equipment</th><th>Rig</th><th>Milestone</th><th>Tgl Est</th><th>Berapa lama</th><th>Sisa</th><th>Status</th>
-          </tr></thead>
-          <tbody>${priorityRows || '<tr><td colspan="8" style="text-align:center;background:#dcfce7;color:#16a34a;font-weight:bold">✅ Tidak ada yg overdue / urgent! Semua aman.</td></tr>'}</tbody>
-        </table>
-        ${priorityEvents.length > 50 ? `<p style="font-size:11px;color:#64748b;margin-top:5px"><i>Menampilkan 50 teratas dari ${priorityEvents.length} total. Sisanya bisa di-export via Excel.</i></p>` : ''}`;
+      const perBulanSection = monthsWithEvents.length
+        ? `<h2 style="margin-top:24px;color:#11335d;border-top:2px solid #11335d;padding-top:10px">📋 RENCANA MAINTENANCE PER BULAN</h2>
+           <p style="font-size:11px;color:#64748b;margin:4px 0 12px">Detail equipment + action item siapan parts/koordinasi vendor per bulan. Centang kolom kanan setelah selesai dieksekusi.</p>
+           ${perBulanDetail}`
+        : '';
 
       // 3. Per-rig breakdown
       const byRig = {};
@@ -10199,7 +10233,7 @@
           <tbody>${rigRows}</tbody>
         </table>`;
 
-      const table = monthSummaryTable + priorityTable + rigTable;
+      const table = monthSummaryTable + rigTable + perBulanSection;
 
       const kesimpulan = `<b>Action Recommended:</b>
         <ul style="margin:8px 0 0 18px;padding:0">
