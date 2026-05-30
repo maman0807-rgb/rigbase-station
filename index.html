@@ -5804,6 +5804,29 @@
             </div>
           </div>` : '';
 
+        // 🔗 Cascade HM badge — kalau equipment punya parent + flag follow_parent_hm
+        let cascadeBadge = '';
+        if (eq.parent_equipment_id) {
+          let parentInfo = '';
+          try {
+            const { data: pe } = await state.supabase.from('equipment')
+              .select('tag_number, running_hours').eq('id', eq.parent_equipment_id).maybeSingle();
+            if (pe) parentInfo = pe.tag_number + ` (HM ${fmtNumber(pe.running_hours || 0, ' ' + u)})`;
+          } catch (e) {}
+          const isFollow = eq.follow_parent_hm === true;
+          cascadeBadge = `<div class="bg-${isFollow ? 'green' : 'slate'}-50 border border-${isFollow ? 'green' : 'slate'}-200 rounded-lg p-3 mb-3 flex items-center justify-between flex-wrap gap-2">
+            <div class="flex items-start gap-2 flex-1 min-w-0">
+              <span class="text-xl shrink-0">${isFollow ? '🔗' : '🔓'}</span>
+              <div class="text-sm">
+                <div class="font-semibold ${isFollow ? 'text-green-900' : 'text-slate-700'}">${isFollow ? 'Auto-sync HM dari parent: AKTIF' : 'Auto-sync HM dari parent: NONAKTIF'}</div>
+                <div class="text-xs ${isFollow ? 'text-green-700' : 'text-slate-500'}">Parent: <b>${escapeHtml(parentInfo || '-')}</b><br>
+                ${isFollow ? '✓ Saat parent HM update → equipment ini auto-sync' : '⚠ HM harus di-update terpisah (manual atau via Logbook)'}</div>
+              </div>
+            </div>
+            ${isSrMekanikOrAbove() ? `<button onclick="toggleFollowParentHM('${eq.id}',${isFollow})" class="px-3 py-1.5 rounded-lg text-xs font-semibold ${isFollow ? 'bg-slate-100 hover:bg-slate-200 text-slate-700' : 'bg-green-600 hover:bg-green-700 text-white'}">${isFollow ? '🔓 Lepas Auto-sync' : '🔗 Aktifkan Auto-sync'}</button>` : ''}
+          </div>`;
+        }
+
         // Cek snooze aktif untuk equipment ini
         let snoozeBadge = '';
         try {
@@ -5829,6 +5852,7 @@
         } catch (e) { /* table mungkin belum ada — skip */ }
 
         container.innerHTML = `
+          ${cascadeBadge}
           ${summaryHtml}
           ${prepHtml}
           ${snoozeBadge}
@@ -10817,6 +10841,33 @@
       }
     }
     window.submitHMRevise = submitHMRevise;
+
+    // ============================================================
+    // CASCADE HM — toggle follow_parent_hm
+    // ============================================================
+    async function toggleFollowParentHM(equipmentId, currentValue) {
+      if (!isSrMekanikOrAbove()) { toast('Khusus Sr Mekanik ke atas.', 'warn'); return; }
+      const newValue = !currentValue;
+      const confirmMsg = newValue
+        ? '🔗 Aktifkan auto-sync HM dari parent?\n\nSetiap kali parent equipment HM update (via Logbook atau Revisi HM), equipment ini AKAN otomatis ikut update ke HM yg sama.\n\nCocok untuk TRANS/DW yg jalan bareng engine.'
+        : '🔓 Lepas auto-sync HM?\n\nEquipment ini TIDAK akan otomatis follow HM parent lagi. HM harus di-update terpisah (via Logbook atau Revisi HM manual).';
+      if (!confirm(confirmMsg)) return;
+      try {
+        const { error } = await state.supabase.from('equipment').update({
+          follow_parent_hm: newValue,
+          updated_by: state.user.id,
+          updated_at: new Date().toISOString(),
+        }).eq('id', equipmentId);
+        if (error) throw error;
+        toast(newValue ? '🔗 Auto-sync HM aktif.' : '🔓 Auto-sync HM dilepas.', 'success');
+        // Refresh
+        setEquipmentView('detail', equipmentId);
+        navigate('equipment');
+      } catch (err) {
+        toast('Gagal: ' + err.message, 'error');
+      }
+    }
+    window.toggleFollowParentHM = toggleFollowParentHM;
 
     // ============================================================
     // PILIHAN B — GENERATE WORK ORDER PDF
