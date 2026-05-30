@@ -9639,7 +9639,7 @@
         // Fetch all findings (non-NA)
         const { data: findings, error } = await state.supabase
           .from('inspection_findings')
-          .select('id, equipment_id, equipment_name_snapshot, bagian, category, deskripsi, tgl_ditemukan, status, inspection_id')
+          .select('id, equipment_id, equipment_name_snapshot, bagian, category, finding, recommendation, tgl_ditemukan, status, inspection_id')
           .neq('category', 'N/A')
           .order('tgl_ditemukan', { ascending: false })
           .limit(5000);
@@ -9781,7 +9781,7 @@
           }
 
           // Top finding examples (first 3 with descriptions)
-          const examples = g.items.slice(0, 3).map(i => `<li class="text-[11px] text-slate-600 leading-tight"><span class="font-semibold ${i.category === 'Critical' ? 'text-red-700' : i.category === 'Major' ? 'text-amber-700' : 'text-slate-600'}">${i.category}</span> · ${escapeHtml((i.deskripsi || '-').slice(0, 80))}${(i.deskripsi || '').length > 80 ? '…' : ''} <span class="text-slate-400">(${fmtDate(i.tgl_ditemukan)})</span></li>`).join('');
+          const examples = g.items.slice(0, 3).map(i => `<li class="text-[11px] text-slate-600 leading-tight"><span class="font-semibold ${i.category === 'Critical' ? 'text-red-700' : i.category === 'Major' ? 'text-amber-700' : 'text-slate-600'}">${i.category}</span> · ${escapeHtml((i.finding || '-').slice(0, 80))}${(i.finding || '').length > 80 ? '…' : ''} <span class="text-slate-400">(${fmtDate(i.tgl_ditemukan)})</span></li>`).join('');
 
           const eqClickable = g.equipment_id
             ? `<button onclick="setEquipmentView('detail','${g.equipment_id}'); navigate('equipment')" class="text-navy hover:underline font-semibold">${escapeHtml(g.equipment_tag || g.equipment_name)}</button>`
