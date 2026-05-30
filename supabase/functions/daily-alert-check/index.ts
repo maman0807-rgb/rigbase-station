@@ -70,17 +70,19 @@ serve(async (_req) => {
 
     // PM & Overhaul berbasis JAM (HM) — hanya unit ber-HM
     const { data: hmEq } = await sb.from("equipment")
-      .select("tag_number, nama_equipment, assigned_unit_id, running_hours, last_pm_hours, pm_interval_hours, toh_interval_hours, goh_interval_hours, last_toh_hours, last_goh_hours")
+      .select("tag_number, nama_equipment, assigned_unit_id, running_hours, last_pm_hours, pm_interval_hours, toh_interval_hours, goh_interval_hours, last_toh_hours, last_goh_hours, economic_life_hours")
       .gt("running_hours", 0);
 
-    const pmHoursDue: any[] = [];
-    const overhaulDue: any[] = [];
+    // FASE 3: kategorisasi lebih granular sesuai panel Maintenance Due Soon
+    const pmHoursDue: any[] = [];      // PM: sisa 0-500 jam
+    const overhaulDue: any[] = [];     // TOH/GOH: sisa 0-2000 jam (PERLU PLAN)
+    const nearEOL: any[] = [];         // Umur ekonomis >= 80%
     (hmEq || []).forEach((e) => {
       const rh = Number(e.running_hours) || 0;
       const pmInt = Number(e.pm_interval_hours) || 0;
       if (pmInt > 0) {
         const rem = pmInt - (rh - (Number(e.last_pm_hours) || 0));
-        if (rem <= 50) pmHoursDue.push({ ...e, _rem: rem });
+        if (rem >= 0 && rem <= 500) pmHoursDue.push({ ...e, _rem: rem });
       }
       const tohInt = Number(e.toh_interval_hours) || 0;
       const gohInt = Number(e.goh_interval_hours) || 0;
@@ -89,10 +91,19 @@ serve(async (_req) => {
       let bestRem = Infinity, kind = "";
       if (tohInt > 0) { const r = tohInt - (rh - baseTOH); if (r < bestRem) { bestRem = r; kind = "TOH"; } }
       if (gohInt > 0) { const r = gohInt - (rh - baseGOH); if (r < bestRem) { bestRem = r; kind = "GOH"; } }
-      if (kind && bestRem <= 500) overhaulDue.push({ ...e, _rem: bestRem, _kind: kind });
+      // PERLU PLAN: 0-1000j ke TOH, 0-2000j ke GOH (positive remaining)
+      const threshold = kind === "GOH" ? 2000 : 1000;
+      if (kind && bestRem >= 0 && bestRem <= threshold) overhaulDue.push({ ...e, _rem: bestRem, _kind: kind });
+      // NEAR EOL: pakai economic_life_hours (kalau ada)
+      const ecoLife = Number(e.economic_life_hours) || 0;
+      if (ecoLife > 0) {
+        const pct = (rh / ecoLife) * 100;
+        if (pct >= 80) nearEOL.push({ ...e, _pct: pct, _sisaEco: ecoLife - rh });
+      }
     });
     pmHoursDue.sort((a, b) => a._rem - b._rem);
     overhaulDue.sort((a, b) => a._rem - b._rem);
+    nearEOL.sort((a, b) => b._pct - a._pct);
 
     // Build message
     const lines: string[] = [`🛢️ <b>eRAMHoist Daily Alert</b>\n<i>${now.toLocaleDateString("id-ID", { weekday: "long", day: "2-digit", month: "long", year: "numeric" })}</i>`];
@@ -127,25 +138,32 @@ serve(async (_req) => {
     }
 
     if (pmHoursDue.length > 0) {
-      lines.push(`\n⏱️ <b>PM Berbasis Jam (${pmHoursDue.length})</b>`);
+      lines.push(`\n🟡 <b>PERLU PLAN — PM Berbasis Jam (${pmHoursDue.length})</b>`);
       pmHoursDue.slice(0, 10).forEach((e) => {
-        const t = e._rem < 0 ? `⚠️ lewat ${Math.round(-e._rem)} jam` : `🟡 sisa ${Math.round(e._rem)} jam`;
-        lines.push(`• <b>${e.tag_number}</b> @ ${unitName[e.assigned_unit_id] || "—"} — ${t}`);
+        lines.push(`• <b>${e.tag_number}</b> @ ${unitName[e.assigned_unit_id] || "—"} — sisa ${Math.round(e._rem)} jam`);
       });
       if (pmHoursDue.length > 10) lines.push(`<i>...dan ${pmHoursDue.length - 10} lainnya</i>`);
     }
 
     if (overhaulDue.length > 0) {
-      lines.push(`\n🔧 <b>Overhaul Jatuh Tempo — jam (${overhaulDue.length})</b>`);
+      lines.push(`\n🟡 <b>PERLU PLAN — Overhaul (${overhaulDue.length})</b>`);
       overhaulDue.slice(0, 10).forEach((e) => {
-        const t = e._rem < 0 ? `⚠️ ${e._kind} lewat ${Math.round(-e._rem)} jam` : `🟡 ${e._kind} sisa ${Math.round(e._rem)} jam`;
-        lines.push(`• <b>${e.tag_number}</b> @ ${unitName[e.assigned_unit_id] || "—"} — ${t}`);
+        lines.push(`• <b>${e.tag_number}</b> @ ${unitName[e.assigned_unit_id] || "—"} — ${e._kind} sisa ${Math.round(e._rem)} jam`);
       });
       if (overhaulDue.length > 10) lines.push(`<i>...dan ${overhaulDue.length - 10} lainnya</i>`);
     }
 
-    if ((skpi?.length || 0) + (maint?.length || 0) + (down?.length || 0) + pmHoursDue.length + overhaulDue.length === 0) {
-      lines.push(`\n✅ <b>Semua aman.</b> Tidak ada SKPI expired, maintenance due (tanggal/jam), overhaul, atau equipment Down hari ini.`);
+    if (nearEOL.length > 0) {
+      lines.push(`\n⚫ <b>NEAR ECONOMIC LIFE — Review Replacement (${nearEOL.length})</b>`);
+      nearEOL.slice(0, 5).forEach((e) => {
+        lines.push(`• <b>${e.tag_number}</b> @ ${unitName[e.assigned_unit_id] || "—"} — umur ${e._pct.toFixed(0)}% (sisa ${Math.round(e._sisaEco)}j)`);
+      });
+      if (nearEOL.length > 5) lines.push(`<i>...dan ${nearEOL.length - 5} lainnya</i>`);
+      lines.push(`<i>💡 Masuk CAPEX planning kalau >85% umur.</i>`);
+    }
+
+    if ((skpi?.length || 0) + (maint?.length || 0) + (down?.length || 0) + pmHoursDue.length + overhaulDue.length + nearEOL.length === 0) {
+      lines.push(`\n✅ <b>Semua aman.</b> Tidak ada SKPI expired, maintenance due, overhaul, atau equipment Down hari ini.`);
     }
 
     lines.push(`\n🔗 <a href="${APP_URL}">Buka eRAMHoist</a>`);
@@ -155,14 +173,14 @@ serve(async (_req) => {
     // Log ke alert_log
     await sb.from("alert_log").insert({
       alert_type: "daily-check",
-      message: `Daily alert: ${skpi?.length || 0} SKPI, ${maint?.length || 0} maintenance, ${down?.length || 0} down, ${pmHoursDue.length} PM-jam, ${overhaulDue.length} overhaul`,
+      message: `Daily alert: ${skpi?.length || 0} SKPI, ${maint?.length || 0} maintenance, ${down?.length || 0} down, ${pmHoursDue.length} PM-jam, ${overhaulDue.length} overhaul, ${nearEOL.length} near-EOL`,
       sent_to: CHAT_ID,
       status: "sent",
     });
 
     return new Response(JSON.stringify({
       ok: true,
-      counts: { skpi: skpi?.length || 0, maintenance: maint?.length || 0, down: down?.length || 0, pmHours: pmHoursDue.length, overhaul: overhaulDue.length }
+      counts: { skpi: skpi?.length || 0, maintenance: maint?.length || 0, down: down?.length || 0, pmHours: pmHoursDue.length, overhaul: overhaulDue.length, nearEOL: nearEOL.length }
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
     return new Response(JSON.stringify({ ok: false, error: String(err) }), {
