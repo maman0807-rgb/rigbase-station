@@ -11073,12 +11073,18 @@
     };
 
     // SVG sparkline trend chart (overlay beberapa param)
-    function renderSosTrendChart(orderedSamples, paramSpecs) {
-      // paramSpecs: [{grp, key, label, color}]
+    function renderSosTrendChart(orderedSamples, paramSpecs, baselineDate) {
+      // paramSpecs: [{grp, key, label, color}]; baselineDate = tanggal GOH/TOH (opsional)
       if (orderedSamples.length < 2) return '';
       const W = 600, H = 140, padX = 40, padY = 16;
       const n = orderedSamples.length;
       const xStep = (W - padX * 2) / Math.max(1, n - 1);
+      // Index sample pertama yg PASCA baseline (>= baselineDate)
+      const firstPostIdx = baselineDate
+        ? orderedSamples.findIndex(s => (s.sampled_date || '') >= baselineDate)
+        : -1;
+      const hasBoundary = baselineDate && firstPostIdx > 0; // ada sample pra & pasca
+      const isPre = i => hasBoundary && i < firstPostIdx;
       const lines = paramSpecs.map(spec => {
         const vals = orderedSamples.map(s => {
           const d = s.data || {};
@@ -11089,16 +11095,31 @@
         if (present.length < 2) return null;
         const min = Math.min(...present), max = Math.max(...present);
         const range = max - min || 1;
-        const pts = vals.map((v, i) => v == null ? null : { x: padX + i * xStep, y: padY + (H - padY * 2) * (1 - (v - min) / range), v });
-        const path = pts.filter(Boolean).map((p, i) => (i === 0 ? 'M' : 'L') + p.x.toFixed(1) + ',' + p.y.toFixed(1)).join(' ');
-        const dots = pts.filter(Boolean).map(p => `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="2.5" fill="${spec.color}"/>`).join('');
-        return { path, dots, color: spec.color, label: spec.label, min, max };
+        const pts = vals.map((v, i) => v == null ? null : { x: padX + i * xStep, y: padY + (H - padY * 2) * (1 - (v - min) / range), v, pre: isPre(i) });
+        // Path dipisah: pra-baseline (putus-putus, muted) vs pasca (solid). Sengaja TIDAK disambung di boundary (efek reset GOH).
+        const buildPath = filterFn => {
+          const seg = pts.filter(p => p && filterFn(p));
+          return seg.map((p, i) => (i === 0 ? 'M' : 'L') + p.x.toFixed(1) + ',' + p.y.toFixed(1)).join(' ');
+        };
+        const prePath = hasBoundary ? buildPath(p => p.pre) : '';
+        const postPath = buildPath(p => !p.pre);
+        const dots = pts.filter(Boolean).map(p => `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="2.5" fill="${p.pre ? '#cbd5e1' : spec.color}"/>`).join('');
+        return { prePath, postPath, dots, color: spec.color, label: spec.label, min, max };
       }).filter(Boolean);
       if (!lines.length) return '<div class="text-xs text-slate-400 text-center py-4">Belum cukup data untuk grafik.</div>';
-      const xLabels = orderedSamples.map((s, i) => `<text x="${(padX + i * xStep).toFixed(1)}" y="${H - 2}" font-size="8" fill="#94a3b8" text-anchor="middle">${(s.sampled_date || '').slice(2, 7)}</text>`).join('');
-      const legend = lines.map(l => `<span class="inline-flex items-center gap-1 text-[10px] mr-2"><span style="width:10px;height:3px;background:${l.color};display:inline-block"></span>${escapeHtml(l.label)} (${l.min}–${l.max})</span>`).join('');
+      const xLabels = orderedSamples.map((s, i) => `<text x="${(padX + i * xStep).toFixed(1)}" y="${H - 2}" font-size="8" fill="${isPre(i) ? '#cbd5e1' : '#94a3b8'}" text-anchor="middle">${(s.sampled_date || '').slice(2, 7)}</text>`).join('');
+      // Garis vertikal penanda GOH/TOH di antara sample pra & pasca
+      let boundaryMark = '';
+      if (hasBoundary) {
+        const bx = (padX + firstPostIdx * xStep - xStep / 2).toFixed(1);
+        boundaryMark = `<line x1="${bx}" y1="${padY}" x2="${bx}" y2="${H - padY}" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="3,2"/>
+          <text x="${bx}" y="${padY - 4}" font-size="8" fill="#d97706" text-anchor="middle" font-weight="bold">🔧 reset</text>`;
+      }
+      const legend = lines.map(l => `<span class="inline-flex items-center gap-1 text-[10px] mr-2"><span style="width:10px;height:3px;background:${l.color};display:inline-block"></span>${escapeHtml(l.label)} (${l.min}–${l.max})</span>`).join('')
+        + (hasBoundary ? `<span class="inline-flex items-center gap-1 text-[10px] mr-2 text-slate-400"><span style="width:10px;height:3px;background:#cbd5e1;display:inline-block"></span>pra-overhaul (arsip)</span>` : '');
       return `<div class="overflow-x-auto"><svg viewBox="0 0 ${W} ${H}" class="w-full" style="min-width:400px;max-height:160px">
-        ${lines.map(l => `<path d="${l.path}" fill="none" stroke="${l.color}" stroke-width="1.5"/>${l.dots}`).join('')}
+        ${boundaryMark}
+        ${lines.map(l => `${l.prePath ? `<path d="${l.prePath}" fill="none" stroke="#cbd5e1" stroke-width="1.2" stroke-dasharray="3,2"/>` : ''}<path d="${l.postPath}" fill="none" stroke="${l.color}" stroke-width="1.5"/>${l.dots}`).join('')}
         ${xLabels}
       </svg></div><div class="mt-1">${legend}</div>`;
     }
@@ -11140,6 +11161,11 @@
         const compCards = comps.map(c => {
           const sl = samplesByComp[c.id] || [];
           const latest = sl[0];
+          // ===== BASELINE RESET (GOH/TOH) — sample pra-overhaul tidak dipakai analisa =====
+          const baselineDate = c.baseline_reset_date || null;
+          const slActive = baselineDate ? sl.filter(s => (s.sampled_date || '') >= baselineDate) : sl; // newest-first
+          const preCount = sl.length - slActive.length;
+          const resetTypeLabel = { GOH: 'GOH (General Overhaul)', TOH: 'TOH (Top Overhaul)', OTHER: 'Ganti komponen mayor' }[c.baseline_reset_type] || (c.baseline_reset_type || 'Reset');
           const verdict = latest?.lab_status || '(belum ada sample)';
           const verdictColor = !latest ? 'bg-slate-100 text-slate-600' :
             /no action|normal/i.test(verdict) ? 'bg-green-100 text-green-700' :
@@ -11164,9 +11190,9 @@
                 <div class="text-[10px]">${cls.label}</div>
               </div>`;
             }).join('');
-            // Trend dari semua sample untuk param kunci
+            // Trend dari sample PASCA-baseline untuk param kunci (pra-overhaul diabaikan)
             trendHtml = keyParams.map(([lbl, grp, key]) => {
-              const values = sl.map(s => {
+              const values = slActive.map(s => {
                 const d = s.data || {};
                 return grp ? d[grp]?.[key] : d[key];
               });
@@ -11178,10 +11204,10 @@
             }).join('');
           }
 
-          // ===== MODUL 2 — Decision Engine per component =====
-          const dec = computeSosDecision(sl, c.component_type, signatures);
+          // ===== MODUL 2 — Decision Engine per component (hanya sample PASCA-baseline) =====
+          const dec = computeSosDecision(slActive, c.component_type, signatures);
           const meta = SOS_DECISION_META[dec.decision] || SOS_DECISION_META.MONITOR;
-          const ordered = sl.slice().sort((a, b) => (a.sampled_date || '').localeCompare(b.sampled_date || ''));
+          const ordered = sl.slice().sort((a, b) => (a.sampled_date || '').localeCompare(b.sampled_date || '')); // chart pakai SEMUA (pra+pasca)
           // Param yg naik (detail dgn laju)
           const upList = dec.upParams.map(u => {
             const lbl = SOS_PARAM_LABELS[u.key] || u.key;
@@ -11205,7 +11231,12 @@
           const chartSpecs = c.component_type === 'ENGINE'
             ? [{ grp: 'wear_metals', key: 'fe', label: 'Fe', color: '#dc2626' }, { grp: 'wear_metals', key: 'cu', label: 'Cu', color: '#ea580c' }, { grp: null, key: 'tbn', label: 'TBN', color: '#2563eb' }, { grp: 'oil_condition', key: 'oxidation', label: 'Oxi', color: '#16a34a' }]
             : [{ grp: 'wear_metals', key: 'fe', label: 'Fe', color: '#dc2626' }, { grp: 'wear_metals', key: 'cu', label: 'Cu', color: '#ea580c' }];
-          const chartHtml = renderSosTrendChart(ordered, chartSpecs);
+          const chartHtml = renderSosTrendChart(ordered, chartSpecs, baselineDate);
+          // Banner info baseline reset
+          const baselineBanner = baselineDate ? `<div class="bg-amber-50 border border-amber-200 rounded-lg p-2.5 text-xs text-amber-800 mb-3">
+            🔧 <b>Baseline di-reset ${fmtDate(baselineDate)}</b> (${escapeHtml(resetTypeLabel)})${c.baseline_reset_note ? ' — ' + escapeHtml(c.baseline_reset_note) : ''}.
+            Analisa trend hanya pakai <b>${slActive.length} sample</b> pasca-overhaul${preCount > 0 ? `; <b>${preCount} sample</b> pra-overhaul diarsipkan (garis putus-putus di grafik)` : ''}.
+          </div>` : '';
           const decisionPanel = dec.decision === 'INSUFFICIENT'
             ? `<div class="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-600">⚪ <b>Data belum cukup</b> untuk Decision Engine. Butuh ≥2 sample (idealnya ≥3 untuk trend valid). Sekarang ${dec.sampleCount} sample.</div>`
             : `<div class="${meta.panel} border-2 rounded-lg p-3">
@@ -11242,6 +11273,7 @@
                   </div>
                   <span class="px-3 py-1 rounded-full text-xs font-semibold ${verdictColor}">Lab Trakindo: ${escapeHtml(verdict)}</span>
                 </div>
+                ${baselineBanner}
                 <!-- SIDE-BY-SIDE: Lab Trakindo vs eRAMHoist -->
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
                   <div class="bg-slate-50 border border-slate-200 rounded-lg p-3">
@@ -11365,6 +11397,26 @@
             <label class="text-xs text-slate-500">Catatan Spek</label>
             <textarea id="sc-notes" rows="2" placeholder="mis. Pakai oli CAT DEO-ULS, drain ~22 liter" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none">${escapeHtml(existing?.spec_notes || '')}</textarea>
           </div>
+          <div class="border-t border-slate-200 pt-3 mt-1">
+            <div class="text-xs font-bold text-amber-700 uppercase mb-1">🔧 Reset Baseline (GOH/TOH)</div>
+            <p class="text-[11px] text-slate-500 mb-2">Isi <b>hanya kalau sudah pernah overhaul</b>. Sample SOS sebelum tanggal ini diarsipkan & tidak ikut dihitung trend (karena wear metal balik ke nol setelah ganti part). Kosongkan kalau belum pernah overhaul.</p>
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="text-xs text-slate-500">Tanggal Overhaul</label>
+                <input id="sc-reset-date" type="date" value="${escapeHtml(existing?.baseline_reset_date || '')}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none">
+              </div>
+              <div>
+                <label class="text-xs text-slate-500">Jenis</label>
+                <select id="sc-reset-type" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none">
+                  <option value="" ${!existing?.baseline_reset_type ? 'selected' : ''}>—</option>
+                  <option value="GOH" ${existing?.baseline_reset_type === 'GOH' ? 'selected' : ''}>GOH (General Overhaul)</option>
+                  <option value="TOH" ${existing?.baseline_reset_type === 'TOH' ? 'selected' : ''}>TOH (Top Overhaul)</option>
+                  <option value="OTHER" ${existing?.baseline_reset_type === 'OTHER' ? 'selected' : ''}>Ganti komponen mayor</option>
+                </select>
+              </div>
+            </div>
+            <input id="sc-reset-note" type="text" value="${escapeHtml(existing?.baseline_reset_note || '')}" placeholder="Catatan overhaul (opsional) — mis. ganti ring, liner, bearing" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none mt-2">
+          </div>
         </div>`;
       const footer = `<button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
         <button onclick="submitSosComponent('${equipmentId}','${componentId || ''}')" class="px-4 py-2 rounded-lg bg-safety hover:bg-safety-700 text-white text-sm font-semibold">💾 Simpan</button>`;
@@ -11384,6 +11436,9 @@
         serial_number: (document.getElementById('sc-sn')?.value || '').trim() || null,
         sampling_interval_hours: Number(document.getElementById('sc-interval')?.value) || 250,
         spec_notes: (document.getElementById('sc-notes')?.value || '').trim() || null,
+        baseline_reset_date: (document.getElementById('sc-reset-date')?.value || '') || null,
+        baseline_reset_type: (document.getElementById('sc-reset-type')?.value || '') || null,
+        baseline_reset_note: (document.getElementById('sc-reset-note')?.value || '').trim() || null,
       };
       try {
         if (componentId) {
