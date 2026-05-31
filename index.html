@@ -10907,9 +10907,7 @@
     // (Sub-fase 1B nanti pakai sos_thresholds DB)
     function classifyParam(componentType, paramKey, value) {
       if (value == null || value === '') return { level: 'unknown', label: '—' };
-      const v = Number(value);
-      if (isNaN(v)) return { level: 'unknown', label: '—' };
-      // Engine defaults (rule-of-thumb industri, bisa di-override via threshold DB nanti)
+      // Engine defaults (rule-of-thumb industri, bisa di-override via threshold DB)
       const rules = {
         ENGINE: {
           fe: [50, 100], cr: [10, 25], pb: [15, 30], cu: [20, 50], al: [10, 25], sn: [10, 20], ni: [5, 10],
@@ -10921,9 +10919,27 @@
         },
       };
       const r = rules[componentType]?.[paramKey];
+      // Y/N (water/fuel) — non-numeric, cek paling awal
+      if (r && r.yn) {
+        return (value === 'Y' || value === 'y' || value === true)
+          ? { level: 'red', label: '🔴 ADA' }
+          : { level: 'green', label: '🟢 Tidak ada' };
+      }
+      const v = Number(value);
+      if (isNaN(v)) return { level: 'unknown', label: '—' };
+      // Param spesial (reverse/range) tetap pakai hardcoded, BUKAN override DB "max"
+      const isSpecial = r && !Array.isArray(r);
+      // === DB THRESHOLD OVERRIDE (Sub-fase 1B) — param "makin tinggi makin buruk" ===
+      const db = (window.__sosThresholds || {})[componentType + '|' + paramKey];
+      if (db && !isSpecial && (db.normal_max != null || db.warning_max != null || db.critical_max != null)) {
+        const n = db.normal_max, w = db.warning_max, cr = db.critical_max;
+        if (cr != null && v >= cr) return { level: 'red', label: '🔴 Kritis' };
+        if (w != null && v >= w) return { level: 'red', label: '🔴 Tinggi' };
+        if (n != null && v >= n) return { level: 'yellow', label: '🟡 Naik' };
+        return { level: 'green', label: '🟢 OK' };
+      }
       if (!r) return { level: 'unknown', label: String(value) };
-      // PENTING: cek Array DULU — array punya method .reverse bawaan (truthy),
-      // kalau cek r.reverse duluan, array-rule (fe:[50,100]) salah masuk branch reverse.
+      // PENTING: cek Array DULU — array punya method .reverse bawaan (truthy).
       if (Array.isArray(r)) {
         if (v < r[0]) return { level: 'green', label: '🟢 OK' };
         if (v < r[1]) return { level: 'yellow', label: '🟡 Naik' };
@@ -10935,12 +10951,6 @@
         if (v >= r.thresholds[1]) return { level: 'yellow', label: '🟡 Menipis' };
         return { level: 'red', label: '🔴 Habis' };
       }
-      // Y/N (yes = bahaya)
-      if (r.yn) {
-        return value === 'Y' || value === 'y' || value === true
-          ? { level: 'red', label: '🔴 ADA' }
-          : { level: 'green', label: '🟢 Tidak ada' };
-      }
       // Range (ada batas atas & batas bawah)
       if (r.range) {
         if (v >= r.range[0] && v <= r.range[1]) return { level: 'green', label: '🟢 Dalam range' };
@@ -10948,6 +10958,88 @@
       }
       return { level: 'unknown', label: String(value) };
     }
+
+    // === Threshold loader + admin UI (Sub-fase 1B) ===
+    async function loadSosThresholds() {
+      try {
+        const { data } = await state.supabase.from('sos_thresholds').select('*');
+        const map = {};
+        (data || []).forEach(t => { map[t.component_type + '|' + t.parameter] = t; });
+        window.__sosThresholds = map;
+      } catch (e) { window.__sosThresholds = window.__sosThresholds || {}; }
+    }
+    function sosThresholdParamList(type) {
+      const p = SOS_PARAMS[type] || {};
+      const out = [];
+      ['wear_metals', 'contaminants', 'oil_condition'].forEach(g => (p[g] || []).forEach(([k, lbl]) => out.push([k, lbl])));
+      out.push(['pqi', 'PQ Index']);
+      // FUEL belum ada param di SOS_PARAMS → kasih daftar dasar
+      if (type === 'FUEL') return [['water', 'Water (%)'], ['sediment', 'Sediment'], ['particle', 'Particle Count (ISO)']];
+      return out;
+    }
+    async function openSosThresholdModal(componentType) {
+      if (!isSrMekanikOrAbove()) { toast('Khusus Sr Mekanik+', 'warn'); return; }
+      componentType = componentType || 'ENGINE';
+      const { data } = await state.supabase.from('sos_thresholds').select('*').eq('component_type', componentType);
+      const map = {}; (data || []).forEach(t => { map[t.parameter] = t; });
+      const list = sosThresholdParamList(componentType);
+      const rows = list.map(([k, lbl]) => {
+        const t = map[k] || {};
+        const cell = (id, val, ph) => `<input id="th-${k}-${id}" type="number" step="any" value="${val != null ? val : ''}" placeholder="${ph}" class="w-full px-2 py-1 border border-slate-300 rounded text-xs outline-none focus:ring-1 focus:ring-navy">`;
+        return `<tr class="border-b border-slate-100">
+          <td class="py-1.5 pr-2 text-xs font-medium text-slate-700">${escapeHtml(lbl)}</td>
+          <td class="py-1 px-1">${cell('n', t.normal_max, 'normal')}</td>
+          <td class="py-1 px-1">${cell('w', t.warning_max, 'warning')}</td>
+          <td class="py-1 px-1">${cell('c', t.critical_max, 'kritis')}</td>
+          <td class="py-1 pl-1"><input id="th-${k}-u" type="text" value="${escapeHtml(t.unit || '')}" placeholder="ppm" class="w-14 px-2 py-1 border border-slate-300 rounded text-xs outline-none"></td>
+        </tr>`;
+      }).join('');
+      const typeBtns = ['ENGINE', 'GEARBOX', 'TRANSMISSION', 'FUEL'].map(tp =>
+        `<button onclick="openSosThresholdModal('${tp}')" class="px-2.5 py-1 rounded text-xs font-semibold ${tp === componentType ? 'bg-navy text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}">${tp}</button>`).join('');
+      const body = `
+        <div class="space-y-3">
+          <div class="bg-blue-50 border border-blue-200 rounded-lg p-2.5 text-xs text-blue-800">
+            💡 Isi ambang batas (satuan ppm utk logam). <b>Normal</b> = batas hijau, di atasnya 🟡. <b>Warning</b> = mulai 🔴 Tinggi. <b>Kritis</b> = 🔴 Kritis. Boleh isi sebagian saja; yg kosong tidak dipakai.
+          </div>
+          <div class="flex gap-1.5 flex-wrap">${typeBtns}</div>
+          <div class="overflow-x-auto">
+            <table class="w-full">
+              <thead><tr class="text-[10px] uppercase text-slate-400 border-b border-slate-200">
+                <th class="text-left py-1">Parameter</th><th class="py-1 w-20">Normal max</th><th class="py-1 w-20">Warning max</th><th class="py-1 w-20">Kritis max</th><th class="py-1 w-16">Satuan</th>
+              </tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        </div>`;
+      const footer = `<button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Tutup</button>
+        <button onclick="submitSosThresholds('${componentType}')" class="px-4 py-2 rounded-lg bg-safety hover:bg-safety-700 text-white text-sm font-semibold">💾 Simpan ${componentType}</button>`;
+      openModal({ title: '⚙️ Ambang Batas SOS — ' + componentType, body, footer, maxWidth: 'max-w-2xl' });
+    }
+    window.openSosThresholdModal = openSosThresholdModal;
+    async function submitSosThresholds(componentType) {
+      const list = sosThresholdParamList(componentType);
+      const rows = [];
+      list.forEach(([k]) => {
+        const num = id => { const x = parseFloat(document.getElementById('th-' + k + '-' + id)?.value); return isNaN(x) ? null : x; };
+        const n = num('n'), w = num('w'), c = num('c');
+        const u = (document.getElementById('th-' + k + '-u')?.value || '').trim() || null;
+        if (n != null || w != null || c != null) {
+          rows.push({ component_type: componentType, parameter: k, normal_max: n, warning_max: w, critical_max: c, unit: u, updated_by: state.user.id });
+        }
+      });
+      try {
+        if (rows.length) {
+          const { error } = await state.supabase.from('sos_thresholds').upsert(rows, { onConflict: 'component_type,parameter' });
+          if (error) throw error;
+        }
+        await loadSosThresholds();
+        toast(`Ambang batas ${componentType} disimpan (${rows.length} parameter).`, 'success');
+        closeModal();
+        const host = document.getElementById('detail-tab-content');
+        if (host) renderSosTab(window.__currentEq, host);
+      } catch (err) { toast('Gagal simpan: ' + err.message, 'error'); }
+    }
+    window.submitSosThresholds = submitSosThresholds;
 
     // Trend analyzer: NAIK / STABIL / TURUN dari array nilai (urut newest → oldest)
     function detectTrend(values) {
@@ -11157,6 +11249,8 @@
           const { data: sigs } = await state.supabase.from('sos_signatures').select('*').eq('is_active', true);
           signatures = sigs || [];
         } catch (e) { /* tabel mungkin belum di-seed */ }
+        // Load ambang batas dari DB (Sub-fase 1B) → dipakai classifyParam
+        await loadSosThresholds();
 
         const compCards = comps.map(c => {
           const sl = samplesByComp[c.id] || [];
@@ -11206,8 +11300,37 @@
 
           // ===== MODUL 2 — Decision Engine per component (hanya sample PASCA-baseline) =====
           const dec = computeSosDecision(slActive, c.component_type, signatures);
-          const meta = SOS_DECISION_META[dec.decision] || SOS_DECISION_META.MONITOR;
           const ordered = sl.slice().sort((a, b) => (a.sampled_date || '').localeCompare(b.sampled_date || '')); // chart pakai SEMUA (pra+pasca)
+          // === Threshold breach (absolut) dari sample terbaru — sumber warning ke-2 ===
+          const shownKeys = new Set([...dec.upParams.map(u => u.key), ...dec.downParams.map(d => d.key), ...dec.eventParams.map(e => e.key)]);
+          const breaches = [];
+          if (latest) {
+            const d = latest.data || {};
+            SOS_PARAM_PATHS.forEach(([grp, key]) => {
+              if (shownKeys.has(key)) return; // hindari dobel dgn daftar tren
+              const val = grp ? d[grp]?.[key] : d[key];
+              if (val == null || val === '') return;
+              const cls = classifyParam(c.component_type, key, val);
+              if (cls.level === 'red' || cls.level === 'yellow') breaches.push({ key, level: cls.level, value: val });
+            });
+          }
+          const hasRed = breaches.some(b => b.level === 'red');
+          const hasYellow = breaches.some(b => b.level === 'yellow');
+          // Escalate kategori keputusan kalau ada breach absolut (threshold MEMPERTAJAM, bukan prasyarat)
+          const decOrder = ['INSUFFICIENT', 'MONITOR', 'WATCH', 'TIGHTEN_SAMPLING', 'PLAN_ACTION', 'ACT_NOW'];
+          let effDecision = dec.decision;
+          const bumpTo = min => { if (decOrder.indexOf(effDecision) < decOrder.indexOf(min)) effDecision = min; };
+          if (hasYellow) bumpTo('WATCH');
+          if (hasRed) bumpTo('PLAN_ACTION');
+          const meta = SOS_DECISION_META[effDecision] || SOS_DECISION_META.MONITOR;
+          const breachList = breaches.map(b => {
+            const lbl = SOS_PARAM_LABELS[b.key] || b.key;
+            const emoji = b.level === 'red' ? '🔴' : '🟡';
+            const txt = b.level === 'red' ? 'lewat ambang batas' : 'mendekati ambang batas';
+            const why = SOS_PARAM_MEANING[b.key];
+            const whyHtml = why ? `<div class="text-[11px] text-slate-500 mt-0.5 ml-4">↳ ${escapeHtml(why)}</div>` : '';
+            return `<li>${emoji} <b>${escapeHtml(lbl)}</b> ${txt} → ${escapeHtml(String(b.value))}${whyHtml}</li>`;
+          }).join('');
           // Param yg naik (detail dgn laju)
           const upList = dec.upParams.map(u => {
             const lbl = SOS_PARAM_LABELS[u.key] || u.key;
@@ -11237,7 +11360,7 @@
             🔧 <b>Baseline di-reset ${fmtDate(baselineDate)}</b> (${escapeHtml(resetTypeLabel)})${c.baseline_reset_note ? ' — ' + escapeHtml(c.baseline_reset_note) : ''}.
             Analisa trend hanya pakai <b>${slActive.length} sample</b> pasca-overhaul${preCount > 0 ? `; <b>${preCount} sample</b> pra-overhaul diarsipkan (garis putus-putus di grafik)` : ''}.
           </div>` : '';
-          const decisionPanel = dec.decision === 'INSUFFICIENT'
+          const decisionPanel = effDecision === 'INSUFFICIENT'
             ? `<div class="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-600">⚪ <b>Data belum cukup</b> untuk Decision Engine. Butuh ≥2 sample (idealnya ≥3 untuk trend valid). Sekarang ${dec.sampleCount} sample.</div>`
             : `<div class="${meta.panel} border-2 rounded-lg p-3">
                 <div class="flex items-center justify-between flex-wrap gap-2 mb-2">
@@ -11245,8 +11368,8 @@
                   <span class="px-3 py-1 rounded-full text-xs font-bold ${meta.badge}">${meta.emoji} ${meta.label}</span>
                 </div>
                 <div class="text-xs ${meta.head} mb-2">${meta.desc}</div>
-                ${(upList || downList || eventList || sigList) ? `<ul class="text-xs text-slate-700 space-y-0.5 mb-2">${sigList}${upList}${downList}${eventList}</ul>` : '<div class="text-xs text-slate-500 mb-2">Semua parameter stabil — tidak ada pergerakan signifikan.</div>'}
-                ${dec.decision === 'PLAN_ACTION' || dec.decision === 'ACT_NOW' ? `<button onclick="sosCreateMaintenancePlan('${eq.id}','${escapeHtml(c.name).replace(/'/g,"&#39;")}','${dec.matchedSignatures.map(s=>s.direction).join(',')}')" class="mt-1 px-3 py-1.5 rounded ${meta.btn} text-white text-xs font-semibold">📅 Buat Rencana Maintenance</button>` : ''}
+                ${(upList || downList || eventList || sigList || breachList) ? `<ul class="text-xs text-slate-700 space-y-0.5 mb-2">${sigList}${upList}${downList}${eventList}${breachList}</ul>` : '<div class="text-xs text-slate-500 mb-2">Semua parameter stabil — tidak ada pergerakan signifikan.</div>'}
+                ${effDecision === 'PLAN_ACTION' || effDecision === 'ACT_NOW' ? `<button onclick="sosCreateMaintenancePlan('${eq.id}','${escapeHtml(c.name).replace(/'/g,"&#39;")}','${dec.matchedSignatures.map(s=>s.direction).join(',')}')" class="mt-1 px-3 py-1.5 rounded ${meta.btn} text-white text-xs font-semibold">📅 Buat Rencana Maintenance</button>` : ''}
               </div>`;
 
           return `<div class="bg-white border border-slate-200 rounded-xl overflow-hidden">
@@ -11311,7 +11434,10 @@
               <h4 class="font-bold text-slate-800">🧪 SOS Lab Results — ${comps.length} component</h4>
               <p class="text-xs text-slate-500">Hasil Scheduled Oil Sampling dari Trakindo + analisa trend lintas-sample.</p>
             </div>
-            ${isSrMekanikOrAbove() ? `<button onclick="openSosComponentModal('${eq.id}')" class="bg-safety hover:bg-safety-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium">➕ Tambah Component</button>` : ''}
+            ${isSrMekanikOrAbove() ? `<div class="flex gap-2">
+              <button onclick="openSosThresholdModal('ENGINE')" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg text-sm font-medium">⚙️ Ambang Batas</button>
+              <button onclick="openSosComponentModal('${eq.id}')" class="bg-safety hover:bg-safety-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium">➕ Tambah Component</button>
+            </div>` : ''}
           </div>
           <div class="space-y-3">${compCards}</div>
           <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-800 mt-3">
