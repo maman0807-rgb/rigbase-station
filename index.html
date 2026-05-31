@@ -8640,10 +8640,53 @@
     function setFmeaFilterQ(v) { fmeaFilter.q = v; clearTimeout(_fmeaDeb); _fmeaDeb = setTimeout(renderFmeaList, 300); }
     window.setFmeaFilter = setFmeaFilter; window.setFmeaFilterQ = setFmeaFilterQ;
 
+    // Acuan skala S/O/D (ditampilkan sbg tooltip per angka di form)
+    const FMEA_TIPS = {
+      s: { 10:'Bahaya keselamatan/lingkungan langsung', 9:'Bahaya keselamatan/lingkungan langsung', 8:'Kehilangan fungsi utama / pelanggaran regulasi wajib', 7:'Kehilangan fungsi utama / pelanggaran regulasi wajib', 6:'Fungsi menurun', 5:'Fungsi menurun', 4:'Fungsi menurun', 3:'Minor', 2:'Minor', 1:'Minor' },
+      o: { 10:'Sangat sering / hampir pasti berulang', 9:'Sangat sering / hampir pasti berulang', 8:'Sering berulang', 7:'Sering berulang', 6:'Sesekali', 5:'Sesekali', 4:'Sesekali', 3:'Jarang', 2:'Jarang', 1:'Nyaris tak pernah' },
+      d: { 10:'Tak terdeteksi sebelum berdampak', 9:'Tak terdeteksi sebelum berdampak', 8:'Sulit dideteksi', 7:'Sulit dideteksi', 6:'Terdeteksi hanya saat inspeksi/tes berkala', 5:'Terdeteksi hanya saat inspeksi/tes berkala', 4:'Terdeteksi hanya saat inspeksi/tes berkala', 3:'Terdeteksi cepat (alarm/gauge kontinu)', 2:'Terdeteksi cepat (alarm/gauge kontinu)', 1:'Pasti terdeteksi otomatis' },
+    };
+    const FMEA_TIP_SUMMARY = {
+      s: 'SEVERITY — 9-10: bahaya keselamatan/lingkungan langsung · 7-8: kehilangan fungsi utama / pelanggaran regulasi wajib · 4-6: fungsi menurun · 1-3: minor',
+      o: 'OCCURRENCE — 7-8: sering berulang · 4-6: sesekali · 2-3: jarang · 1: nyaris tak pernah',
+      d: 'DETECTION — 9-10: tak terdeteksi sebelum berdampak · 4-6: terdeteksi hanya saat inspeksi/tes berkala · 2-3: terdeteksi cepat (alarm/gauge kontinu)',
+    };
+    // Saran Action Priority (AOIG-style) — boleh di-override manual
+    function suggestFmeaAp(sev, rpn, hasReg) {
+      if (sev >= 9) return 'Tinggi';
+      if (sev >= 7 && hasReg) return 'Tinggi';
+      if (rpn >= 150) return 'Tinggi';
+      if (rpn >= 80) return 'Sedang';
+      return 'Rendah';
+    }
+    function fmeaApColorClass(v) {
+      return v === 'Tinggi' ? 'border-red-400 bg-red-50 text-red-700'
+        : v === 'Sedang' ? 'border-yellow-400 bg-yellow-50 text-yellow-700'
+        : 'border-green-400 bg-green-50 text-green-700';
+    }
+    function renderFmeaAp() {
+      const g = (id) => Number(document.getElementById(id)?.value) || 0;
+      const sev = g('fmea-s');
+      const rpn = sev * g('fmea-o') * g('fmea-d');
+      const hasReg = !!(document.getElementById('fmea-regulasi')?.value || '').trim();
+      const sug = suggestFmeaAp(sev, rpn, hasReg);
+      const apSel = document.getElementById('fmea-ap');
+      if (apSel) {
+        if (!window.__fmeaApManual) apSel.value = sug;
+        apSel.className = `w-full px-3 py-2 border rounded-lg text-sm font-semibold outline-none focus:ring-2 focus:ring-navy ${fmeaApColorClass(apSel.value)}`;
+      }
+      const hint = document.getElementById('fmea-ap-hint');
+      if (hint) hint.textContent = window.__fmeaApManual ? '(diatur manual)' : `saran otomatis: ${sug}`;
+    }
+    window.renderFmeaAp = renderFmeaAp;
+    function fmeaApManualMark() { window.__fmeaApManual = true; renderFmeaAp(); }
+    window.fmeaApManualMark = fmeaApManualMark;
+
     function renderFmeaRpn() {
       const g = (id) => Number(document.getElementById(id)?.value) || 0;
       const rpn = g('fmea-s') * g('fmea-o') * g('fmea-d');
       const el = document.getElementById('fmea-rpn'); if (el) el.innerHTML = `RPN: <b class="text-lg">${rpn}</b> ${rpnBadge(rpn)}`;
+      renderFmeaAp();
     }
     window.renderFmeaRpn = renderFmeaRpn;
 
@@ -8655,8 +8698,10 @@
       const selId = e.equipment_id || preset?.id || '';
       const locked = !!preset && !existing;
       const opts = `<option value="">— pilih equipment —</option>` + eqs.map(x => `<option value="${x.id}" data-tag="${escapeHtml(x.tag_number)}" data-name="${escapeHtml(x.nama_equipment || '')}" ${x.id === selId ? 'selected' : ''}>${escapeHtml(x.tag_number)} — ${escapeHtml(x.nama_equipment || '')}</option>`).join('');
-      const sel110 = (id, val, def) => `<select id="${id}" onchange="renderFmeaRpn()" class="w-full px-2 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-navy">${[1,2,3,4,5,6,7,8,9,10].map(n => `<option value="${n}" ${Number(val || def) === n ? 'selected' : ''}>${n}</option>`).join('')}</select>`;
+      const sel110 = (id, val, def, tipKey) => { const tips = FMEA_TIPS[tipKey] || {}; return `<select id="${id}" onchange="renderFmeaRpn()" class="w-full px-2 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-navy">${[1,2,3,4,5,6,7,8,9,10].map(n => `<option value="${n}" title="${escapeHtml(tips[n] || '')}" ${Number(val || def) === n ? 'selected' : ''}>${n}${tips[n] ? ' — ' + escapeHtml(tips[n]) : ''}</option>`).join('')}</select>`; };
+      const lblTip = (text, tipKey) => `<label class="text-xs text-slate-500 flex items-center gap-1">${text} <span class="cursor-help text-navy" title="${escapeHtml(FMEA_TIP_SUMMARY[tipKey] || '')}">ℹ️</span></label>`;
       const inp = (id, val, ph) => `<input id="${id}" value="${escapeHtml(val || '')}" placeholder="${ph || ''}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy">`;
+      const ta = (id, val, ph) => `<textarea id="${id}" rows="2" placeholder="${ph || ''}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy">${escapeHtml(val || '')}</textarea>`;
       const body = `
         <div class="space-y-3">
           <div>
@@ -8670,12 +8715,24 @@
             <div><label class="text-xs text-slate-500">Efek</label>${inp('fmea-effect', e.effect, 'akibat kegagalan')}</div>
             <div><label class="text-xs text-slate-500">Penyebab</label>${inp('fmea-cause', e.cause, 'akar penyebab')}</div>
           </div>
+          <div><label class="text-xs text-slate-500">Catatan Dasar / Regulasi <span class="text-slate-400 font-normal">(opsional)</span></label><input id="fmea-regulasi" oninput="renderFmeaAp()" value="${escapeHtml(e.catatan_regulasi || '')}" placeholder="mis. Migas: power source acc unit wajib 2 (air pump + dynamo starter)" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy"><p class="text-[11px] text-slate-400 mt-0.5">Justifikasi nilai Severity saat audit. Bila terisi & Severity ≥7 → AP otomatis Tinggi.</p></div>
+          <div><label class="text-xs text-slate-500">Kontrol Saat Ini (Deteksi)</label>${ta('fmea-kontrol', e.kontrol_saat_ini, 'mis. gauge tekanan kontinu, function test berkala, inspeksi visual')}<p class="text-[11px] text-slate-400 mt-0.5">Dasar penilaian angka Detection.</p></div>
           <div class="grid grid-cols-3 gap-3">
-            <div><label class="text-xs text-slate-500">Severity (1-10)</label>${sel110('fmea-s', e.severity, 5)}</div>
-            <div><label class="text-xs text-slate-500">Occurrence (1-10)</label>${sel110('fmea-o', e.occurrence, 5)}</div>
-            <div><label class="text-xs text-slate-500">Detection (1-10)</label>${sel110('fmea-d', e.detection, 5)}</div>
+            <div>${lblTip('Severity (1-10)', 's')}${sel110('fmea-s', e.severity, 5, 's')}</div>
+            <div>${lblTip('Occurrence (1-10)', 'o')}${sel110('fmea-o', e.occurrence, 5, 'o')}</div>
+            <div>${lblTip('Detection (1-10)', 'd')}${sel110('fmea-d', e.detection, 5, 'd')}</div>
           </div>
-          <div id="fmea-rpn" class="bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 text-sm"></div>
+          <div class="grid grid-cols-2 gap-3 items-start">
+            <div id="fmea-rpn" class="bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 text-sm self-stretch flex items-center"></div>
+            <div>
+              <label class="text-xs text-slate-500 flex items-center justify-between">Action Priority <span id="fmea-ap-hint" class="text-[10px] text-slate-400 font-normal"></span></label>
+              <select id="fmea-ap" onchange="fmeaApManualMark()" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy">
+                <option value="Tinggi" ${e.action_priority === 'Tinggi' ? 'selected' : ''}>Tinggi</option>
+                <option value="Sedang" ${e.action_priority === 'Sedang' ? 'selected' : ''}>Sedang</option>
+                <option value="Rendah" ${e.action_priority === 'Rendah' ? 'selected' : ''}>Rendah</option>
+              </select>
+            </div>
+          </div>
           <div><label class="text-xs text-slate-500">Rekomendasi Aksi</label>${inp('fmea-action', e.recommended_action, 'tindakan menurunkan risiko')}</div>
           <div class="grid grid-cols-2 gap-3">
             <div><label class="text-xs text-slate-500">PIC</label>${inp('fmea-pic', e.pic, '')}</div>
@@ -8692,6 +8749,7 @@
         <button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
         <button onclick="saveFmea('${existing?.id || ''}')" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy-700 text-white text-sm font-semibold">💾 Simpan</button>`;
       openModal({ title: existing ? 'Edit FMEA' : 'Tambah FMEA', body, footer, maxWidth: 'max-w-2xl' });
+      window.__fmeaApManual = !!e.action_priority; // kalau sudah ada AP tersimpan → jangan ditimpa saran
       renderFmeaRpn();
     }
     window.openFmeaForm = openFmeaForm;
@@ -8713,7 +8771,9 @@
         equipment_tag: opt?.dataset?.tag || window.__fmeaById?.[id]?.equipment_tag || null,
         equipment_name: opt?.dataset?.name || window.__fmeaById?.[id]?.equipment_name || null,
         fungsi: v('fmea-fungsi'), failure_mode: mode, effect: v('fmea-effect'), cause: v('fmea-cause'),
+        catatan_regulasi: v('fmea-regulasi'), kontrol_saat_ini: v('fmea-kontrol'),
         severity: ni('fmea-s'), occurrence: ni('fmea-o'), detection: ni('fmea-d'),
+        action_priority: document.getElementById('fmea-ap')?.value || null,
         recommended_action: v('fmea-action'), pic: v('fmea-pic'),
         status: document.getElementById('fmea-status')?.value || 'open', notes: v('fmea-notes'),
       };
