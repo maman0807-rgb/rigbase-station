@@ -10979,6 +10979,27 @@
       soot:'Soot', oxidation:'Oxidation', nitration:'Nitration', sulfate_by_product:'Sulfate', sulfur_products:'Sulfur',
       tbn:'TBN', tan:'TAN', viscosity_100c:'Viscosity 100°C', pqi:'PQ Index', water:'Water', fuel:'Fuel',
     };
+    // Penjelasan bahasa awam: kalau parameter ini NAIK, artinya apa?
+    const SOS_PARAM_MEANING = {
+      fe:'serbuk besi makin banyak → indikasi keausan ring, liner, atau blok/cam',
+      cr:'lapisan chrome ring piston/liner mulai terkikis → keausan top-end',
+      pb:'logam bearing (timah hitam) terkikis → indikasi keausan lower-end/bearing',
+      cu:'tembaga dari bushing/cooler/bearing → keausan komponen kuningan (atau oil cooler bocor)',
+      al:'aluminium dari piston/bearing terkikis → keausan piston',
+      sn:'lapisan timah pada bearing terkikis → keausan bearing',
+      ni:'nikel dari komponen valve/crankshaft → keausan part khusus',
+      si:'debu/pasir masuk ke oli → cek air filter & jalur intake (silikon = abrasif, mempercepat aus)',
+      na:'natrium naik → bisa indikasi coolant (air radiator) masuk ke oli',
+      k:'kalium naik → bisa indikasi coolant (air radiator) masuk ke oli',
+      b:'boron naik → bisa indikasi coolant/aditif coolant masuk ke oli',
+      soot:'jelaga pembakaran menumpuk → pembakaran kurang sempurna / oli kelelahan',
+      oxidation:'oli teroksidasi (mulai rusak karena panas/umur) → oli menua, mendekati ganti',
+      nitration:'senyawa nitrasi naik (khas engine gas) → oli menua / blow-by gas',
+      sulfate_by_product:'produk belerang menumpuk → oli menua / bahan bakar berbelerang tinggi',
+      tan:'TAN (keasaman) naik → oli mulai asam, daya lindung menurun',
+      pqi:'indeks partikel ferro besar naik → ada serpihan logam besar (keausan parah)',
+      viscosity_100c:'kekentalan bergeser → oli encer (kontaminasi BBM) atau mengental (oksidasi)',
+    };
     // Daftar (group, key) param numerik yg di-analisa trend
     const SOS_PARAM_PATHS = [
       ['wear_metals','fe'],['wear_metals','cr'],['wear_metals','pb'],['wear_metals','cu'],['wear_metals','al'],['wear_metals','sn'],['wear_metals','ni'],
@@ -11165,9 +11186,19 @@
           const upList = dec.upParams.map(u => {
             const lbl = SOS_PARAM_LABELS[u.key] || u.key;
             const rateTxt = u.rate != null ? ` (~${u.rate.toFixed(1)}/250j)` : '';
-            return `<li>📈 <b>${escapeHtml(lbl)}</b> naik${rateTxt}${u.latestValue != null ? ` → ${u.latestValue}` : ''}</li>`;
+            const why = SOS_PARAM_MEANING[u.key];
+            const whyHtml = why ? `<div class="text-[11px] text-slate-500 mt-0.5 ml-4">↳ ${escapeHtml(why)}</div>` : '';
+            return `<li>📈 <b>${escapeHtml(lbl)}</b> naik${rateTxt}${u.latestValue != null ? ` → ${u.latestValue}` : ''}${whyHtml}</li>`;
           }).join('');
-          const downList = dec.downParams.map(d => `<li>📉 <b>${escapeHtml(SOS_PARAM_LABELS[d.key] || d.key)}</b> turun</li>`).join('');
+          const downMeaning = {
+            tbn:'cadangan basa oli menipis → kemampuan menetralkan asam berkurang, mendekati waktu ganti oli',
+            viscosity_100c:'kekentalan turun → kemungkinan terkontaminasi bahan bakar / oli encer',
+          };
+          const downList = dec.downParams.map(d => {
+            const why = downMeaning[d.key];
+            const whyHtml = why ? `<div class="text-[11px] text-slate-500 mt-0.5 ml-4">↳ ${escapeHtml(why)}</div>` : '';
+            return `<li>📉 <b>${escapeHtml(SOS_PARAM_LABELS[d.key] || d.key)}</b> turun${whyHtml}</li>`;
+          }).join('');
           const eventList = dec.eventParams.map(e => `<li>⚠️ <b>${escapeHtml(SOS_PARAM_LABELS[e.key] || e.key)}</b> EVENT (anomali sesaat, bukan trend)</li>`).join('');
           const sigList = dec.matchedSignatures.map(s => `<li>🧬 <b>${escapeHtml(s.signature_name)}</b> → ${escapeHtml(s.recommendation)}</li>`).join('');
           // Chart spec param kunci
@@ -11179,7 +11210,7 @@
             ? `<div class="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-600">⚪ <b>Data belum cukup</b> untuk Decision Engine. Butuh ≥2 sample (idealnya ≥3 untuk trend valid). Sekarang ${dec.sampleCount} sample.</div>`
             : `<div class="${meta.panel} border-2 rounded-lg p-3">
                 <div class="flex items-center justify-between flex-wrap gap-2 mb-2">
-                  <h5 class="font-bold ${meta.head} text-sm">📊 RANGKUMAN APP (analisa ${dec.sampleCount} sample)</h5>
+                  <h5 class="font-bold ${meta.head} text-sm">📊 RANGKUMAN eRAMHoist (analisa ${dec.sampleCount} sample)</h5>
                   <span class="px-3 py-1 rounded-full text-xs font-bold ${meta.badge}">${meta.emoji} ${meta.label}</span>
                 </div>
                 <div class="text-xs ${meta.head} mb-2">${meta.desc}</div>
@@ -11211,7 +11242,7 @@
                   </div>
                   <span class="px-3 py-1 rounded-full text-xs font-semibold ${verdictColor}">Lab Trakindo: ${escapeHtml(verdict)}</span>
                 </div>
-                <!-- SIDE-BY-SIDE: Lab Trakindo vs App -->
+                <!-- SIDE-BY-SIDE: Lab Trakindo vs eRAMHoist -->
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
                   <div class="bg-slate-50 border border-slate-200 rounded-lg p-3">
                     <div class="text-xs font-bold text-slate-700 mb-1">🏷️ LAB TRAKINDO <span class="font-normal text-slate-400">(per-sample / snapshot)</span></div>
@@ -11252,7 +11283,7 @@
           </div>
           <div class="space-y-3">${compCards}</div>
           <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-800 mt-3">
-            💡 <b>Cara kerja:</b> Trakindo kasih verdict per-sample (snapshot). App baca SEMUA sample lintas-waktu → kasih analisa trend (NAIK/STABIL/TURUN) + tandai EVENT (anomali sesaat). Trend lebih powerful dari snapshot karena bisa detect early warning sebelum kerusakan.
+            💡 <b>Cara kerja:</b> Trakindo kasih verdict per-sample (snapshot). eRAMHoist baca SEMUA sample lintas-waktu → kasih analisa trend (NAIK/STABIL/TURUN) + tandai EVENT (anomali sesaat) + penjelasan tiap parameter yg bergerak. Trend lebih powerful dari snapshot karena bisa detect early warning sebelum kerusakan.
           </div>
         `;
       } catch (err) {
