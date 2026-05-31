@@ -10922,8 +10922,15 @@
       };
       const r = rules[componentType]?.[paramKey];
       if (!r) return { level: 'unknown', label: String(value) };
+      // PENTING: cek Array DULU — array punya method .reverse bawaan (truthy),
+      // kalau cek r.reverse duluan, array-rule (fe:[50,100]) salah masuk branch reverse.
+      if (Array.isArray(r)) {
+        if (v < r[0]) return { level: 'green', label: '🟢 OK' };
+        if (v < r[1]) return { level: 'yellow', label: '🟡 Naik' };
+        return { level: 'red', label: '🔴 Tinggi' };
+      }
       // Reverse threshold (TBN — makin rendah makin berbahaya)
-      if (r.reverse) {
+      if (r.reverse === true && Array.isArray(r.thresholds)) {
         if (v >= r.thresholds[0]) return { level: 'green', label: '🟢 OK' };
         if (v >= r.thresholds[1]) return { level: 'yellow', label: '🟡 Menipis' };
         return { level: 'red', label: '🔴 Habis' };
@@ -10938,12 +10945,6 @@
       if (r.range) {
         if (v >= r.range[0] && v <= r.range[1]) return { level: 'green', label: '🟢 Dalam range' };
         return { level: 'yellow', label: '🟡 Drift' };
-      }
-      // Standard threshold [warning, critical]
-      if (Array.isArray(r)) {
-        if (v < r[0]) return { level: 'green', label: '🟢 OK' };
-        if (v < r[1]) return { level: 'yellow', label: '🟡 Naik' };
-        return { level: 'red', label: '🔴 Tinggi' };
       }
       return { level: 'unknown', label: String(value) };
     }
