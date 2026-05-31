@@ -11108,34 +11108,59 @@
         const { data } = await state.supabase.from('equipment_components').select('*').eq('id', componentId).single();
         existing = data;
       }
+      // Auto-detect tipe & nama dari equipment (untuk NEW component)
+      const eq = window.__currentEq || {};
+      const hay = ((eq.tag_number || '') + ' ' + (eq.nama_equipment || '') + ' ' + getCategoryName(eq.kategori_id)).toUpperCase();
+      let autoType = 'ENGINE', autoSub = '', autoName = '';
+      if (/TRANS|TX|GEARBOX|GBX/.test(hay)) { autoType = /GEARBOX|GBX/.test(hay) ? 'GEARBOX' : 'TRANSMISSION'; }
+      else if (/FUEL|TANGKI|TANK/.test(hay)) { autoType = 'FUEL'; }
+      else if (/ENGINE|MOBENG|GENSET|GS-|PRIMOVER|MP-/.test(hay)) { autoType = 'ENGINE'; }
+      // Detect engine subtype dari brand/spec
+      if (autoType === 'ENGINE') {
+        const brandModel = ((eq.brand || '') + ' ' + (eq.model || '')).toUpperCase();
+        if (/G34|G35|GAS|\bNG\b|NATURAL/.test(brandModel)) autoSub = 'gas';
+        else autoSub = 'diesel';
+      }
+      // Auto nama: "{type label} — {tag}"
+      const typeLabel = { ENGINE: 'Engine Oil', GEARBOX: 'Gear Oil', TRANSMISSION: 'Trans/Hydraulic Oil', FUEL: 'Fuel' }[autoType];
+      autoName = `${typeLabel} — ${eq.tag_number || ''}`;
+      // Kalau editing, pakai existing. Kalau new, pakai auto-detect.
+      const selType = existing?.component_type || autoType;
+      const selSub = existing?.engine_subtype || autoSub;
+      const selName = existing?.name || autoName;
+
       const body = `
         <div class="space-y-3">
+          ${!existing ? `<div class="bg-blue-50 border border-blue-200 rounded-lg p-2.5 text-xs text-blue-800">
+            🤖 <b>Auto-terdeteksi dari ${escapeHtml(eq.tag_number || 'equipment')}:</b> tipe <b>${selType}</b>${selSub ? ' (' + selSub + ')' : ''}. Tinggal cek & ubah kalau perlu, lalu Simpan.
+          </div>` : ''}
           <div>
             <label class="text-xs font-semibold text-slate-600 uppercase">Tipe Component *</label>
             <select id="sc-type" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-navy">
-              <option value="ENGINE" ${existing?.component_type === 'ENGINE' ? 'selected' : ''}>⚙️ ENGINE (engine oil)</option>
-              <option value="GEARBOX" ${existing?.component_type === 'GEARBOX' ? 'selected' : ''}>🔧 GEARBOX (gear oil)</option>
-              <option value="TRANSMISSION" ${existing?.component_type === 'TRANSMISSION' ? 'selected' : ''}>🔄 TRANSMISSION (hydraulic/trans oil)</option>
-              <option value="FUEL" ${existing?.component_type === 'FUEL' ? 'selected' : ''}>⛽ FUEL (bahan bakar)</option>
+              <option value="ENGINE" ${selType === 'ENGINE' ? 'selected' : ''}>⚙️ ENGINE (engine oil)</option>
+              <option value="GEARBOX" ${selType === 'GEARBOX' ? 'selected' : ''}>🔧 GEARBOX (gear oil)</option>
+              <option value="TRANSMISSION" ${selType === 'TRANSMISSION' ? 'selected' : ''}>🔄 TRANSMISSION (hydraulic/trans oil)</option>
+              <option value="FUEL" ${selType === 'FUEL' ? 'selected' : ''}>⛽ FUEL (bahan bakar)</option>
             </select>
           </div>
           <div>
             <label class="text-xs font-semibold text-slate-600 uppercase">Engine Subtype (opsional, hanya untuk ENGINE)</label>
             <select id="sc-engsub" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none">
-              <option value="">— (kosongkan kalau bukan engine)</option>
-              <option value="diesel" ${existing?.engine_subtype === 'diesel' ? 'selected' : ''}>Diesel</option>
-              <option value="gas" ${existing?.engine_subtype === 'gas' ? 'selected' : ''}>Gas (NG)</option>
-              <option value="dual_fuel" ${existing?.engine_subtype === 'dual_fuel' ? 'selected' : ''}>Dual Fuel</option>
+              <option value="" ${!selSub ? 'selected' : ''}>— (kosongkan kalau bukan engine)</option>
+              <option value="diesel" ${selSub === 'diesel' ? 'selected' : ''}>Diesel</option>
+              <option value="gas" ${selSub === 'gas' ? 'selected' : ''}>Gas (NG)</option>
+              <option value="dual_fuel" ${selSub === 'dual_fuel' ? 'selected' : ''}>Dual Fuel</option>
             </select>
           </div>
           <div>
             <label class="text-xs font-semibold text-slate-600 uppercase">Nama Component *</label>
-            <input id="sc-name" type="text" value="${escapeHtml(existing?.name || '')}" placeholder="mis. Engine oil CAT C7.1, Coolant system, Hydraulic main" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy">
+            <input id="sc-name" type="text" value="${escapeHtml(selName)}" placeholder="mis. Engine oil CAT C7.1" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy">
+            <p class="text-[11px] text-slate-400 mt-1">💡 Ini nama <b>sistem fluida</b> yg di-SOS (bukan equipment). 1 equipment bisa punya >1: engine oil + coolant + hydraulic.</p>
           </div>
           <div class="grid grid-cols-2 gap-2">
             <div>
               <label class="text-xs text-slate-500">Serial Number</label>
-              <input id="sc-sn" type="text" value="${escapeHtml(existing?.serial_number || '')}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none">
+              <input id="sc-sn" type="text" value="${escapeHtml(existing?.serial_number || (existing ? '' : (eq.spec_data?.engine_sn || eq.serial_number || '')))}" placeholder="auto dari equipment" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none">
             </div>
             <div>
               <label class="text-xs text-slate-500">Sampling Interval (jam)</label>
