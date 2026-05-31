@@ -11,6 +11,11 @@
   <script>
     // Konfigurasi warna brand
     tailwind.config = {
+      safelist: [
+        // Warna dinamis untuk Decision Engine SOS + panel lain (di-generate via JS template)
+        { pattern: /(bg|border|text)-(green|blue|amber|orange|red|slate|purple)-(50|100|200|300|600|700|800)/ },
+        { pattern: /(bg|hover:bg)-(green|blue|amber|orange|red)-(600|700)/ },
+      ],
       theme: {
         extend: {
           colors: {
@@ -10968,6 +10973,118 @@
       return { trend: 'stable', emoji: '→', label: 'STABIL' };
     }
 
+    // ============================================================
+    // MODUL 2 — DECISION ENGINE (membaca SEMUA sample per component)
+    // ============================================================
+    const SOS_WEAR_METALS = ['fe','cr','pb','cu','al','sn','ni'];
+    const SOS_PARAM_LABELS = {
+      fe:'Fe (Iron)', cr:'Cr (Chromium)', pb:'Pb (Lead)', cu:'Cu (Copper)', al:'Al (Aluminum)', sn:'Sn (Tin)', ni:'Ni (Nickel)',
+      si:'Si (Silicon)', na:'Na (Sodium)', k:'K (Potassium)', b:'B (Boron)',
+      soot:'Soot', oxidation:'Oxidation', nitration:'Nitration', sulfate_by_product:'Sulfate', sulfur_products:'Sulfur',
+      tbn:'TBN', tan:'TAN', viscosity_100c:'Viscosity 100°C', pqi:'PQ Index', water:'Water', fuel:'Fuel',
+    };
+    // Daftar (group, key) param numerik yg di-analisa trend
+    const SOS_PARAM_PATHS = [
+      ['wear_metals','fe'],['wear_metals','cr'],['wear_metals','pb'],['wear_metals','cu'],['wear_metals','al'],['wear_metals','sn'],['wear_metals','ni'],
+      ['contaminants','si'],['contaminants','na'],['contaminants','k'],['contaminants','b'],
+      ['oil_condition','soot'],['oil_condition','oxidation'],['oil_condition','nitration'],['oil_condition','sulfate_by_product'],
+      [null,'tbn'],[null,'tan'],[null,'viscosity_100c'],[null,'pqi'],
+    ];
+
+    function sosGetSeries(orderedSamples, grp, key) {
+      // ordered = oldest → newest
+      return orderedSamples.map(s => {
+        const d = s.data || {};
+        const v = grp ? d[grp]?.[key] : d[key];
+        return { value: (v === '' || v == null) ? null : v, meter: Number(s.meter_hr) || null, mof: Number(s.meter_on_fluid) || null, date: s.sampled_date };
+      });
+    }
+
+    // Hitung keputusan per component dari SEMUA sample-nya
+    function computeSosDecision(samples, componentType, signatures) {
+      const ordered = samples.slice().sort((a, b) => (a.sampled_date || '').localeCompare(b.sampled_date || ''));
+      if (ordered.length < 2) {
+        return { decision: 'INSUFFICIENT', sampleCount: ordered.length, upParams: [], downParams: [], eventParams: [], matchedSignatures: [] };
+      }
+      const upParams = [], downParams = [], eventParams = [];
+      SOS_PARAM_PATHS.forEach(([grp, key]) => {
+        const series = sosGetSeries(ordered, grp, key);
+        const valuesNewestFirst = series.map(s => s.value).reverse();
+        const t = detectTrend(valuesNewestFirst);
+        if (t.trend === 'up') {
+          // hitung laju per 250 jam (pakai meter_hr)
+          const valid = series.filter(s => s.value != null && !isNaN(Number(s.value)) && s.meter != null);
+          let rate = null;
+          if (valid.length >= 2) {
+            const first = valid[0], last = valid[valid.length - 1];
+            const dV = Number(last.value) - Number(first.value);
+            const dM = last.meter - first.meter;
+            if (dM > 0) rate = (dV / dM) * 250;
+          }
+          const latest = series.filter(s => s.value != null);
+          upParams.push({ key, grp, rate, latestValue: latest.length ? latest[latest.length - 1].value : null });
+        } else if (t.trend === 'down') {
+          downParams.push({ key, grp });
+        } else if (t.trend === 'event') {
+          eventParams.push({ key, grp });
+        }
+      });
+      // Signature matching: SEMUA required_params harus lagi NAIK
+      const matchedSignatures = (signatures || []).filter(sig => {
+        if (sig.component_type !== componentType || !sig.is_active) return false;
+        return (sig.required_params || []).every(p => upParams.some(u => u.key === p));
+      });
+      // Keputusan 5-kategori
+      let decision = 'MONITOR';
+      if (matchedSignatures.some(s => s.severity === 'ACT_NOW')) decision = 'ACT_NOW';
+      else if (matchedSignatures.some(s => s.severity === 'PLAN_ACTION')) decision = 'PLAN_ACTION';
+      else if (upParams.some(u => SOS_WEAR_METALS.includes(u.key))) decision = 'TIGHTEN_SAMPLING';
+      else if (upParams.length >= 1 || downParams.some(d => d.key === 'tbn')) decision = 'WATCH';
+      else decision = 'MONITOR';
+
+      return { decision, sampleCount: ordered.length, upParams, downParams, eventParams, matchedSignatures };
+    }
+
+    const SOS_DECISION_META = {
+      INSUFFICIENT:     { emoji: '⚪', label: 'DATA KURANG',      color: 'slate',  desc: 'Butuh ≥2 sample untuk analisa trend.' },
+      MONITOR:          { emoji: '🟢', label: 'MONITOR',          color: 'green',  desc: 'Semua stabil/turun. Lanjut interval sampling normal.' },
+      WATCH:            { emoji: '🔵', label: 'WATCH',            color: 'blue',   desc: 'Ada param mulai bergerak (oli aging / 1 param naik). Catat & pantau.' },
+      TIGHTEN_SAMPLING: { emoji: '🟡', label: 'TIGHTEN SAMPLING', color: 'amber',  desc: 'Wear metal mulai naik. Perketat interval sampling (mis. 250→125 jam) untuk konfirmasi.' },
+      PLAN_ACTION:      { emoji: '🟠', label: 'PLAN ACTION',      color: 'orange', desc: 'Pola signature terbaca. Mulai siapkan part & jadwal (lead time bisa 1-2 bulan).' },
+      ACT_NOW:          { emoji: '🔴', label: 'ACT NOW',          color: 'red',    desc: 'Laju cepat / kombinasi serius. Eskalasi segera.' },
+    };
+
+    // SVG sparkline trend chart (overlay beberapa param)
+    function renderSosTrendChart(orderedSamples, paramSpecs) {
+      // paramSpecs: [{grp, key, label, color}]
+      if (orderedSamples.length < 2) return '';
+      const W = 600, H = 140, padX = 40, padY = 16;
+      const n = orderedSamples.length;
+      const xStep = (W - padX * 2) / Math.max(1, n - 1);
+      const lines = paramSpecs.map(spec => {
+        const vals = orderedSamples.map(s => {
+          const d = s.data || {};
+          const v = spec.grp ? d[spec.grp]?.[spec.key] : d[spec.key];
+          return (v === '' || v == null || isNaN(Number(v))) ? null : Number(v);
+        });
+        const present = vals.filter(v => v != null);
+        if (present.length < 2) return null;
+        const min = Math.min(...present), max = Math.max(...present);
+        const range = max - min || 1;
+        const pts = vals.map((v, i) => v == null ? null : { x: padX + i * xStep, y: padY + (H - padY * 2) * (1 - (v - min) / range), v });
+        const path = pts.filter(Boolean).map((p, i) => (i === 0 ? 'M' : 'L') + p.x.toFixed(1) + ',' + p.y.toFixed(1)).join(' ');
+        const dots = pts.filter(Boolean).map(p => `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="2.5" fill="${spec.color}"/>`).join('');
+        return { path, dots, color: spec.color, label: spec.label, min, max };
+      }).filter(Boolean);
+      if (!lines.length) return '<div class="text-xs text-slate-400 text-center py-4">Belum cukup data untuk grafik.</div>';
+      const xLabels = orderedSamples.map((s, i) => `<text x="${(padX + i * xStep).toFixed(1)}" y="${H - 2}" font-size="8" fill="#94a3b8" text-anchor="middle">${(s.sampled_date || '').slice(2, 7)}</text>`).join('');
+      const legend = lines.map(l => `<span class="inline-flex items-center gap-1 text-[10px] mr-2"><span style="width:10px;height:3px;background:${l.color};display:inline-block"></span>${escapeHtml(l.label)} (${l.min}–${l.max})</span>`).join('');
+      return `<div class="overflow-x-auto"><svg viewBox="0 0 ${W} ${H}" class="w-full" style="min-width:400px;max-height:160px">
+        ${lines.map(l => `<path d="${l.path}" fill="none" stroke="${l.color}" stroke-width="1.5"/>${l.dots}`).join('')}
+        ${xLabels}
+      </svg></div><div class="mt-1">${legend}</div>`;
+    }
+
     async function renderSosTab(eq, container) {
       try {
         // Fetch components untuk equipment ini
@@ -10994,6 +11111,13 @@
         if (e2) throw e2;
         const samplesByComp = {};
         (samples || []).forEach(s => { (samplesByComp[s.component_id] = samplesByComp[s.component_id] || []).push(s); });
+
+        // Fetch signatures (Modul 2 — pola wear) — sekali, cache
+        let signatures = [];
+        try {
+          const { data: sigs } = await state.supabase.from('sos_signatures').select('*').eq('is_active', true);
+          signatures = sigs || [];
+        } catch (e) { /* tabel mungkin belum di-seed */ }
 
         const compCards = comps.map(c => {
           const sl = samplesByComp[c.id] || [];
@@ -11036,6 +11160,36 @@
             }).join('');
           }
 
+          // ===== MODUL 2 — Decision Engine per component =====
+          const dec = computeSosDecision(sl, c.component_type, signatures);
+          const meta = SOS_DECISION_META[dec.decision] || SOS_DECISION_META.MONITOR;
+          const ordered = sl.slice().sort((a, b) => (a.sampled_date || '').localeCompare(b.sampled_date || ''));
+          // Param yg naik (detail dgn laju)
+          const upList = dec.upParams.map(u => {
+            const lbl = SOS_PARAM_LABELS[u.key] || u.key;
+            const rateTxt = u.rate != null ? ` (~${u.rate.toFixed(1)}/250j)` : '';
+            return `<li>📈 <b>${escapeHtml(lbl)}</b> naik${rateTxt}${u.latestValue != null ? ` → ${u.latestValue}` : ''}</li>`;
+          }).join('');
+          const downList = dec.downParams.map(d => `<li>📉 <b>${escapeHtml(SOS_PARAM_LABELS[d.key] || d.key)}</b> turun</li>`).join('');
+          const eventList = dec.eventParams.map(e => `<li>⚠️ <b>${escapeHtml(SOS_PARAM_LABELS[e.key] || e.key)}</b> EVENT (anomali sesaat, bukan trend)</li>`).join('');
+          const sigList = dec.matchedSignatures.map(s => `<li>🧬 <b>${escapeHtml(s.signature_name)}</b> → ${escapeHtml(s.recommendation)}</li>`).join('');
+          // Chart spec param kunci
+          const chartSpecs = c.component_type === 'ENGINE'
+            ? [{ grp: 'wear_metals', key: 'fe', label: 'Fe', color: '#dc2626' }, { grp: 'wear_metals', key: 'cu', label: 'Cu', color: '#ea580c' }, { grp: null, key: 'tbn', label: 'TBN', color: '#2563eb' }, { grp: 'oil_condition', key: 'oxidation', label: 'Oxi', color: '#16a34a' }]
+            : [{ grp: 'wear_metals', key: 'fe', label: 'Fe', color: '#dc2626' }, { grp: 'wear_metals', key: 'cu', label: 'Cu', color: '#ea580c' }];
+          const chartHtml = renderSosTrendChart(ordered, chartSpecs);
+          const decisionPanel = dec.decision === 'INSUFFICIENT'
+            ? `<div class="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-600">⚪ <b>Data belum cukup</b> untuk Decision Engine. Butuh ≥2 sample (idealnya ≥3 untuk trend valid). Sekarang ${dec.sampleCount} sample.</div>`
+            : `<div class="bg-${meta.color}-50 border-2 border-${meta.color}-300 rounded-lg p-3">
+                <div class="flex items-center justify-between flex-wrap gap-2 mb-2">
+                  <h5 class="font-bold text-${meta.color}-800 text-sm">📊 RANGKUMAN APP (analisa ${dec.sampleCount} sample)</h5>
+                  <span class="px-3 py-1 rounded-full text-xs font-bold bg-${meta.color}-200 text-${meta.color}-800">${meta.emoji} ${meta.label}</span>
+                </div>
+                <div class="text-xs text-${meta.color}-800 mb-2">${meta.desc}</div>
+                ${(upList || downList || eventList || sigList) ? `<ul class="text-xs text-slate-700 space-y-0.5 mb-2">${sigList}${upList}${downList}${eventList}</ul>` : '<div class="text-xs text-slate-500 mb-2">Semua parameter stabil — tidak ada pergerakan signifikan.</div>'}
+                ${dec.decision === 'PLAN_ACTION' || dec.decision === 'ACT_NOW' ? `<button onclick="sosCreateMaintenancePlan('${eq.id}','${escapeHtml(c.name).replace(/'/g,"&#39;")}','${dec.matchedSignatures.map(s=>s.direction).join(',')}')" class="mt-1 px-3 py-1.5 rounded bg-${meta.color}-600 hover:bg-${meta.color}-700 text-white text-xs font-semibold">📅 Buat Rencana Maintenance</button>` : ''}
+              </div>`;
+
           return `<div class="bg-white border border-slate-200 rounded-xl overflow-hidden">
             <div class="p-4 bg-slate-50 border-b border-slate-200 flex items-start justify-between gap-3 flex-wrap">
               <div class="flex-1 min-w-0">
@@ -11060,13 +11214,25 @@
                   </div>
                   <span class="px-3 py-1 rounded-full text-xs font-semibold ${verdictColor}">Lab Trakindo: ${escapeHtml(verdict)}</span>
                 </div>
-                ${latest.lab_recommendation ? `<div class="bg-blue-50 border border-blue-200 rounded-lg p-2 text-xs text-blue-800 mb-3">💡 <b>Rekomendasi Trakindo:</b> ${escapeHtml(latest.lab_recommendation)}</div>` : ''}
+                <!-- SIDE-BY-SIDE: Lab Trakindo vs App -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+                  <div class="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                    <div class="text-xs font-bold text-slate-700 mb-1">🏷️ LAB TRAKINDO <span class="font-normal text-slate-400">(per-sample / snapshot)</span></div>
+                    <span class="px-2 py-0.5 rounded-full text-xs font-semibold ${verdictColor}">${escapeHtml(verdict)}</span>
+                    ${latest.lab_recommendation ? `<div class="text-[11px] text-slate-600 mt-2">${escapeHtml(latest.lab_recommendation)}</div>` : ''}
+                  </div>
+                  <div>${decisionPanel}</div>
+                </div>
                 <div class="mb-3">
-                  <div class="text-xs font-semibold text-slate-700 mb-2">📊 Parameter Kunci (apa kata angka):</div>
+                  <div class="text-xs font-semibold text-slate-700 mb-2">📊 Parameter Kunci Sample Terbaru (apa kata angka):</div>
                   <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">${translatorHtml}</div>
                 </div>
+                ${sl.length >= 2 ? `<div class="bg-white border border-slate-200 rounded-lg p-3 mb-3">
+                  <div class="text-xs font-semibold text-slate-700 mb-2">📈 Grafik Tren (${sl.length} sample, kiri=lama → kanan=baru):</div>
+                  ${chartHtml}
+                </div>` : ''}
                 <div class="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                  <div class="text-xs font-semibold text-amber-900 mb-2">📈 Trend Lintas-Sample (${sl.length} sample):</div>
+                  <div class="text-xs font-semibold text-amber-900 mb-2">📋 Arah Parameter Kunci:</div>
                   ${trendHtml}
                   ${sl.length < 3 ? '<div class="text-[11px] text-amber-700 mt-2"><i>💡 Butuh minimal 3 sample untuk analisa trend yg valid.</i></div>' : ''}
                 </div>
@@ -11455,6 +11621,24 @@
       }
     }
     window.showSosSamplesList = showSosSamplesList;
+
+    // Dari Decision Engine → buat rencana maintenance (jump ke tab Maintenance)
+    function sosCreateMaintenancePlan(equipmentId, componentName, directions) {
+      const dirMap = {
+        TOH: 'Top Overhaul', GOH: 'General Overhaul',
+        INVESTIGATE_AIR_FILTER: 'Investigasi air filter/intake',
+        INVESTIGATE_HEAD_GASKET: 'Investigasi head gasket/coolant leak',
+        INVESTIGATE_SEAL: 'Investigasi seal', INVESTIGATE_SEAL_BREATHER: 'Investigasi seal/breather',
+        OVERHAUL: 'Overhaul', FILTER_AND_FLUSH: 'Filter & flush hydraulic',
+        CHECK_FLUID: 'Cek spec fluid', FUEL_POLISHING: 'Fuel polishing',
+      };
+      const dirText = (directions || '').split(',').filter(Boolean).map(d => dirMap[d] || d).join(', ') || 'tindakan';
+      toast(`💡 SOS ${componentName} → indikasi: ${dirText}. Buka tab Maintenance untuk catat rencana & set interval.`, 'info');
+      // Switch ke tab Maintenance
+      state.equipmentDetailTab = 'maintenance';
+      renderDetailTab(window.__currentEq);
+    }
+    window.sosCreateMaintenancePlan = sosCreateMaintenancePlan;
 
     // ============================================================
     // PILIHAN B — GENERATE WORK ORDER PDF
