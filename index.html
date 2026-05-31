@@ -10999,9 +10999,15 @@
       const body = `
         <div class="space-y-3">
           <div class="bg-blue-50 border border-blue-200 rounded-lg p-2.5 text-xs text-blue-800">
-            💡 Isi ambang batas (satuan ppm utk logam). <b>Normal</b> = batas hijau, di atasnya 🟡. <b>Warning</b> = mulai 🔴 Tinggi. <b>Kritis</b> = 🔴 Kritis. Boleh isi sebagian saja; yg kosong tidak dipakai.
+            💡 Angka ini <b>tidak ada</b> di report Trakindo. Isi dari: <b>📋 Default standar</b> (rule-of-thumb industri) atau <b>📊 Saran dari histori</b> (dihitung dari sample unit ini sendiri). Lalu cek & Simpan. <b>Normal</b> = batas hijau, di atasnya 🟡; <b>Warning</b> = mulai 🔴; <b>Kritis</b> = 🔴 Kritis. Boleh isi sebagian.
           </div>
-          <div class="flex gap-1.5 flex-wrap">${typeBtns}</div>
+          <div class="flex gap-1.5 flex-wrap items-center justify-between">
+            <div class="flex gap-1.5 flex-wrap">${typeBtns}</div>
+            <div class="flex gap-1.5 flex-wrap">
+              <button onclick="sosFillDefaultThresholds('${componentType}')" class="px-2.5 py-1 rounded text-xs font-semibold bg-blue-100 text-blue-700 hover:bg-blue-200">📋 Default standar</button>
+              <button onclick="sosSuggestThresholdsFromHistory('${componentType}')" class="px-2.5 py-1 rounded text-xs font-semibold bg-green-100 text-green-700 hover:bg-green-200">📊 Saran dari histori</button>
+            </div>
+          </div>
           <div class="overflow-x-auto">
             <table class="w-full">
               <thead><tr class="text-[10px] uppercase text-slate-400 border-b border-slate-200">
@@ -11040,6 +11046,78 @@
       } catch (err) { toast('Gagal simpan: ' + err.message, 'error'); }
     }
     window.submitSosThresholds = submitSosThresholds;
+
+    // Default rule-of-thumb industri (titik awal, BUKAN dari report Trakindo). [normal, warning, kritis]
+    const SOS_THRESHOLD_DEFAULTS = {
+      ENGINE: {
+        fe: [50, 100, 150], cr: [10, 25, 40], pb: [15, 30, 50], cu: [20, 50, 80], al: [10, 25, 40], sn: [10, 20, 30], ni: [5, 10, 20],
+        b: [20, 40, 60], k: [10, 20, 40], na: [20, 40, 60], si: [15, 30, 50],
+        soot: [3, 5, 8], oxidation: [25, 40, 60], nitration: [20, 35, 50], sulfate_by_product: [30, 50, 70], sulfur_products: [30, 50, 70],
+        pqi: [25, 50, 100],
+      },
+      GEARBOX: { fe: [100, 200, 300], cu: [30, 60, 100], pb: [20, 40, 60], cr: [10, 25, 40], al: [15, 30, 50], si: [20, 40, 60], pqi: [50, 100, 200] },
+      TRANSMISSION: { fe: [80, 150, 250], cu: [40, 80, 120], al: [15, 30, 50], cr: [10, 25, 40], sn: [10, 20, 30], si: [15, 30, 50], oxidation: [25, 40, 60], pqi: [40, 80, 150] },
+      FUEL: { water: [0.05, 0.1, 0.2], sediment: [0.01, 0.05, 0.1], particle: [18, 20, 22] },
+    };
+    function sosFillDefaultThresholds(type) {
+      const defs = SOS_THRESHOLD_DEFAULTS[type] || {};
+      let filled = 0;
+      Object.entries(defs).forEach(([k, arr]) => {
+        const set = (id, val) => { const el = document.getElementById('th-' + k + '-' + id); if (el && val != null) el.value = val; };
+        set('n', arr[0]); set('w', arr[1]); set('c', arr[2]); filled++;
+      });
+      toast(`Default standar terisi (${filled} parameter). Cek & sesuaikan, lalu Simpan.`, 'success');
+    }
+    window.sosFillDefaultThresholds = sosFillDefaultThresholds;
+    // Baca nilai param dari sebuah sample (cari di semua grup)
+    function sosReadParam(sample, key) {
+      const d = sample.data || {};
+      for (const g of ['wear_metals', 'contaminants', 'additives', 'oil_condition']) {
+        if (d[g] && d[g][key] != null) return d[g][key];
+      }
+      return d[key];
+    }
+    // Saran ambang batas statistik dari kumpulan nilai (alarm line di atas nilai tertinggi yg pernah terlihat)
+    function sosSuggestLimits(vals) {
+      const nums = vals.filter(v => v != null && v !== '' && !isNaN(Number(v))).map(Number);
+      if (nums.length < 3) return null;
+      const m = nums.reduce((a, b) => a + b, 0) / nums.length;
+      const s = Math.sqrt(nums.reduce((a, b) => a + (b - m) * (b - m), 0) / nums.length);
+      const mx = Math.max(...nums);
+      const round = x => x >= 10 ? Math.round(x) : Math.round(x * 100) / 100;
+      let n = round(Math.max(m + 2 * s, mx * 1.2, 0.01));
+      let w = round(Math.max(m + 3 * s, mx * 1.5));
+      let cr = round(Math.max(m + 4 * s, mx * 2));
+      if (w <= n) w = round(n * 1.5 + (n >= 10 ? 1 : 0.1));
+      if (cr <= w) cr = round(w * 1.5 + (w >= 10 ? 1 : 0.1));
+      return { n, w, cr };
+    }
+    async function sosSuggestThresholdsFromHistory(type) {
+      const eq = window.__currentEq;
+      if (!eq) { toast('Buka dari halaman equipment dulu.', 'warn'); return; }
+      try {
+        const { data: comps } = await state.supabase.from('equipment_components')
+          .select('id,baseline_reset_date').eq('equipment_id', eq.id).eq('component_type', type);
+        if (!comps || !comps.length) { toast('Belum ada component tipe ' + type + ' di unit ini.', 'warn'); return; }
+        const ids = comps.map(c => c.id);
+        const baseByComp = {}; comps.forEach(c => { baseByComp[c.id] = c.baseline_reset_date; });
+        const { data: samples } = await state.supabase.from('sos_samples')
+          .select('component_id,sampled_date,data').in('component_id', ids);
+        const usable = (samples || []).filter(s => { const b = baseByComp[s.component_id]; return !b || (s.sampled_date || '') >= b; });
+        if (usable.length < 3) { toast(`Butuh min. 3 sample (pasca-overhaul) untuk saran statistik. Sekarang ${usable.length}.`, 'warn'); return; }
+        const list = sosThresholdParamList(type);
+        let filled = 0;
+        list.forEach(([k]) => {
+          const lim = sosSuggestLimits(usable.map(s => sosReadParam(s, k)));
+          if (lim) {
+            const set = (id, val) => { const el = document.getElementById('th-' + k + '-' + id); if (el) el.value = val; };
+            set('n', lim.n); set('w', lim.w); set('c', lim.cr); filled++;
+          }
+        });
+        toast(filled ? `Saran terisi utk ${filled} parameter (dari ${usable.length} sample unit ini). Cek & Simpan.` : 'Variasi data belum cukup untuk saran statistik.', filled ? 'success' : 'warn');
+      } catch (err) { toast('Gagal hitung saran: ' + err.message, 'error'); }
+    }
+    window.sosSuggestThresholdsFromHistory = sosSuggestThresholdsFromHistory;
 
     // Trend analyzer: NAIK / STABIL / TURUN dari array nilai (urut newest → oldest)
     function detectTrend(values) {
