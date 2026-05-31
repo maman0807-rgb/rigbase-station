@@ -5559,6 +5559,7 @@
               ${[
                 ['info','📋 Info'],
                 ['maintenance','🛠️ Maintenance'],
+                ['sos','🧪 SOS Lab'],
                 ['sertifikasi','📜 Sertifikasi'],
                 ['dokumen','📎 Dokumen'],
                 ['inspeksi','🔍 Riwayat Inspeksi'],
@@ -5592,7 +5593,7 @@
       const parent = c.parentElement.querySelector('.flex.border-b');
       if (parent) {
         parent.querySelectorAll('button').forEach((btn, i) => {
-          const ids = ['info','maintenance','sertifikasi','dokumen','inspeksi','history','stress','fmea'];
+          const ids = ['info','maintenance','sos','sertifikasi','dokumen','inspeksi','history','stress','fmea'];
           btn.className = `px-4 py-3 text-sm font-medium whitespace-nowrap ${state.equipmentDetailTab===ids[i] ? 'border-b-2 border-safety text-safety bg-safety/5' : 'text-slate-600 hover:text-navy'}`;
         });
       }
@@ -5600,6 +5601,7 @@
         case 'info':        c.innerHTML = renderInfoTab(eq); break;
         case 'sertifikasi': c.innerHTML = renderSertifikasiTab(eq); break;
         case 'maintenance': c.innerHTML = '<div class="text-slate-400">Memuat…</div>'; renderMaintenanceTab(eq, c); break;
+        case 'sos':         c.innerHTML = '<div class="text-slate-400">Memuat…</div>'; renderSosTab(eq, c); break;
         case 'dokumen':     c.innerHTML = '<div class="text-slate-400">Memuat…</div>'; renderDokumenTab(eq, c); break;
         case 'inspeksi':    c.innerHTML = '<div class="text-slate-400">Memuat…</div>'; renderInspeksiHistoryTab(eq, c); break;
         case 'history':     c.innerHTML = '<div class="text-slate-400">Memuat…</div>'; renderHistoryTab(eq, c); break;
@@ -10868,6 +10870,566 @@
       }
     }
     window.toggleFollowParentHM = toggleFollowParentHM;
+
+    // ============================================================
+    // FASE 13 — SOS LAB MODULE (Sub-fase 1A)
+    // ============================================================
+    // Translator (raw lab → bahasa awam) + history + grafik tren dasar
+    // Decision Engine (Modul 2) menyusul di phase berikutnya.
+    // ============================================================
+
+    // Parameter definitions per component_type (untuk form & display)
+    const SOS_PARAMS = {
+      ENGINE: {
+        wear_metals:   [['cr','Cr (Chromium)'],['pb','Pb (Lead)'],['fe','Fe (Iron)'],['cu','Cu (Copper)'],['al','Al (Aluminum)'],['sn','Sn (Tin)'],['ni','Ni (Nickel)']],
+        contaminants:  [['b','B (Boron)'],['k','K (Potassium)'],['na','Na (Sodium)'],['si','Si (Silicon)']],
+        additives:     [['ca','Ca (Calcium)'],['p','P (Phosphorus)'],['zn','Zn (Zinc)'],['mg','Mg (Magnesium)'],['mo','Mo (Molybdenum)']],
+        oil_condition: [['soot','ST Soot'],['oxidation','OXI Oxidation'],['nitration','NIT Nitration'],['sulfate_by_product','SUL Sulfate By-Product'],['sulfur_products','Sulfur Products']],
+      },
+      GEARBOX: {
+        wear_metals:   [['fe','Fe'],['cu','Cu'],['pb','Pb'],['cr','Cr'],['al','Al']],
+        contaminants:  [['si','Si (Silicon)']],
+        oil_condition: [],
+      },
+      TRANSMISSION: {
+        wear_metals:   [['fe','Fe'],['cu','Cu'],['al','Al'],['cr','Cr'],['sn','Sn']],
+        contaminants:  [['si','Si (Silicon)']],
+        oil_condition: [['oxidation','OXI Oxidation']],
+      },
+      FUEL: {
+        wear_metals:   [],
+        contaminants:  [],
+        oil_condition: [],
+      },
+    };
+
+    // Translator: angka → status hijau/kuning/merah berdasarkan rule-of-thumb umum
+    // (Sub-fase 1B nanti pakai sos_thresholds DB)
+    function classifyParam(componentType, paramKey, value) {
+      if (value == null || value === '') return { level: 'unknown', label: '—' };
+      const v = Number(value);
+      if (isNaN(v)) return { level: 'unknown', label: '—' };
+      // Engine defaults (rule-of-thumb industri, bisa di-override via threshold DB nanti)
+      const rules = {
+        ENGINE: {
+          fe: [50, 100], cr: [10, 25], pb: [15, 30], cu: [20, 50], al: [10, 25], sn: [10, 20], ni: [5, 10],
+          si: [15, 30], na: [20, 40], k: [10, 20],
+          soot: [3, 5], oxidation: [25, 40], nitration: [20, 35], sulfate_by_product: [30, 50],
+          tbn: { reverse: true, thresholds: [3, 1] }, // makin RENDAH makin berbahaya
+          water: { yn: true }, fuel: { yn: true },
+          viscosity_100c: { range: [11, 16] }, pqi: [25, 50],
+        },
+      };
+      const r = rules[componentType]?.[paramKey];
+      if (!r) return { level: 'unknown', label: String(value) };
+      // Reverse threshold (TBN — makin rendah makin berbahaya)
+      if (r.reverse) {
+        if (v >= r.thresholds[0]) return { level: 'green', label: '🟢 OK' };
+        if (v >= r.thresholds[1]) return { level: 'yellow', label: '🟡 Menipis' };
+        return { level: 'red', label: '🔴 Habis' };
+      }
+      // Y/N (yes = bahaya)
+      if (r.yn) {
+        return value === 'Y' || value === 'y' || value === true
+          ? { level: 'red', label: '🔴 ADA' }
+          : { level: 'green', label: '🟢 Tidak ada' };
+      }
+      // Range (ada batas atas & batas bawah)
+      if (r.range) {
+        if (v >= r.range[0] && v <= r.range[1]) return { level: 'green', label: '🟢 Dalam range' };
+        return { level: 'yellow', label: '🟡 Drift' };
+      }
+      // Standard threshold [warning, critical]
+      if (Array.isArray(r)) {
+        if (v < r[0]) return { level: 'green', label: '🟢 OK' };
+        if (v < r[1]) return { level: 'yellow', label: '🟡 Naik' };
+        return { level: 'red', label: '🔴 Tinggi' };
+      }
+      return { level: 'unknown', label: String(value) };
+    }
+
+    // Trend analyzer: NAIK / STABIL / TURUN dari array nilai (urut newest → oldest)
+    function detectTrend(values) {
+      const nums = values.filter(v => v != null && v !== '' && !isNaN(Number(v))).map(Number);
+      if (nums.length < 3) return { trend: 'insufficient', emoji: '—' };
+      // Bandingkan 3-4 sample terakhir (newest → older), cek konsisten
+      const recent = nums.slice(0, 4);
+      let upCount = 0, downCount = 0;
+      for (let i = 0; i < recent.length - 1; i++) {
+        if (recent[i] > recent[i + 1] * 1.05) upCount++;       // 5% threshold
+        else if (recent[i] < recent[i + 1] * 0.95) downCount++;
+      }
+      // Cek EVENT: spike > 3x dari median
+      const median = nums.slice().sort((a, b) => a - b)[Math.floor(nums.length / 2)];
+      const hasEvent = nums.some(v => median > 0 && v > median * 3);
+      if (hasEvent && upCount < 2) return { trend: 'event', emoji: '⚠️', label: 'EVENT' };
+      if (upCount >= 2 && downCount === 0) return { trend: 'up', emoji: '📈', label: 'NAIK' };
+      if (downCount >= 2 && upCount === 0) return { trend: 'down', emoji: '📉', label: 'TURUN' };
+      return { trend: 'stable', emoji: '→', label: 'STABIL' };
+    }
+
+    async function renderSosTab(eq, container) {
+      try {
+        // Fetch components untuk equipment ini
+        const { data: components, error: e1 } = await state.supabase.from('equipment_components')
+          .select('*').eq('equipment_id', eq.id).order('created_at');
+        if (e1) throw e1;
+        const comps = components || [];
+
+        if (comps.length === 0) {
+          container.innerHTML = `
+            <div class="bg-white border border-slate-200 rounded-xl p-8 text-center">
+              <div class="text-5xl mb-3">🧪</div>
+              <h4 class="font-bold text-slate-800 mb-2">Belum ada Component untuk Equipment ini</h4>
+              <p class="text-sm text-slate-500 mb-4">Tambah Component dulu (mis. Engine Oil, Gearbox, Coolant) untuk mulai catat hasil SOS Lab dari Trakindo.</p>
+              ${isSrMekanikOrAbove() ? `<button onclick="openSosComponentModal('${eq.id}')" class="bg-safety hover:bg-safety-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">➕ Tambah Component Pertama</button>` : '<p class="text-xs text-slate-400">Khusus Sr Mekanik+ yg bisa tambah.</p>'}
+            </div>`;
+          return;
+        }
+
+        // Fetch samples untuk semua components di equipment ini
+        const compIds = comps.map(c => c.id);
+        const { data: samples, error: e2 } = await state.supabase.from('sos_samples')
+          .select('*').in('component_id', compIds).order('sampled_date', { ascending: false });
+        if (e2) throw e2;
+        const samplesByComp = {};
+        (samples || []).forEach(s => { (samplesByComp[s.component_id] = samplesByComp[s.component_id] || []).push(s); });
+
+        const compCards = comps.map(c => {
+          const sl = samplesByComp[c.id] || [];
+          const latest = sl[0];
+          const verdict = latest?.lab_status || '(belum ada sample)';
+          const verdictColor = !latest ? 'bg-slate-100 text-slate-600' :
+            /no action|normal/i.test(verdict) ? 'bg-green-100 text-green-700' :
+            /action|monitor/i.test(verdict) ? 'bg-amber-100 text-amber-700' :
+            /critical|urgent/i.test(verdict) ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-700';
+
+          // Translator + trend untuk parameter kunci
+          let translatorHtml = '';
+          let trendHtml = '';
+          if (latest) {
+            const data = latest.data || {};
+            const keyParams = c.component_type === 'ENGINE'
+              ? [['Fe (Iron)','wear_metals','fe'],['Cu (Copper)','wear_metals','cu'],['Si (Silicon)','contaminants','si'],['TBN','','tbn'],['Oxidation','oil_condition','oxidation']]
+              : [['Fe (Iron)','wear_metals','fe'],['Cu (Copper)','wear_metals','cu'],['Water','','water']];
+            translatorHtml = keyParams.map(([lbl, grp, key]) => {
+              const v = grp ? (data[grp]?.[key] ?? null) : (data[key] ?? null);
+              const cls = classifyParam(c.component_type, key, v);
+              const colorBg = cls.level === 'green' ? 'bg-green-50 border-green-200' : cls.level === 'yellow' ? 'bg-amber-50 border-amber-200' : cls.level === 'red' ? 'bg-red-50 border-red-200' : 'bg-slate-50 border-slate-200';
+              return `<div class="${colorBg} border rounded-lg p-2 text-center">
+                <div class="text-[10px] text-slate-500">${escapeHtml(lbl)}</div>
+                <div class="text-lg font-bold text-slate-900">${v != null && v !== '' ? escapeHtml(String(v)) : '—'}</div>
+                <div class="text-[10px]">${cls.label}</div>
+              </div>`;
+            }).join('');
+            // Trend dari semua sample untuk param kunci
+            trendHtml = keyParams.map(([lbl, grp, key]) => {
+              const values = sl.map(s => {
+                const d = s.data || {};
+                return grp ? d[grp]?.[key] : d[key];
+              });
+              const t = detectTrend(values);
+              return `<div class="flex items-center justify-between text-xs py-1 border-b border-slate-100 last:border-0">
+                <span class="text-slate-600">${escapeHtml(lbl)}</span>
+                <span class="font-semibold">${t.emoji} ${t.label || ''}</span>
+              </div>`;
+            }).join('');
+          }
+
+          return `<div class="bg-white border border-slate-200 rounded-xl overflow-hidden">
+            <div class="p-4 bg-slate-50 border-b border-slate-200 flex items-start justify-between gap-3 flex-wrap">
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 mb-1 flex-wrap">
+                  <span class="text-xl">${c.component_type === 'ENGINE' ? '⚙️' : c.component_type === 'GEARBOX' ? '🔧' : c.component_type === 'TRANSMISSION' ? '🔄' : '⛽'}</span>
+                  <h4 class="font-bold text-slate-800">${escapeHtml(c.name)}</h4>
+                  <span class="text-xs px-2 py-0.5 rounded bg-slate-200 text-slate-700">${escapeHtml(c.component_type)}${c.engine_subtype ? ' · ' + escapeHtml(c.engine_subtype) : ''}</span>
+                </div>
+                <div class="text-xs text-slate-500">SN: ${escapeHtml(c.serial_number || '-')} · Sampling interval: ${c.sampling_interval_hours || 250} jam</div>
+              </div>
+              <div class="flex gap-2">
+                ${isSrMekanikOrAbove() ? `<button onclick="openSosSampleModal('${c.id}','${escapeHtml(c.name).replace(/'/g,"&#39;")}','${c.component_type}','${eq.id}')" class="bg-safety hover:bg-safety-700 text-white px-3 py-1.5 rounded-lg text-xs font-semibold">+ Tambah Sample</button>` : ''}
+                ${isSrMekanikOrAbove() ? `<button onclick="openSosComponentModal('${eq.id}','${c.id}')" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg text-xs">✏ Edit</button>` : ''}
+              </div>
+            </div>
+            ${latest ? `
+              <div class="p-4">
+                <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+                  <div>
+                    <div class="text-xs text-slate-500">Sample terbaru: <b>${fmtDate(latest.sampled_date)}</b> · ID: ${escapeHtml(latest.sample_id || '-')}</div>
+                    <div class="text-xs text-slate-500">Meter: ${latest.meter_hr || '-'} jam · Meter on fluid: ${latest.meter_on_fluid ?? '-'} jam</div>
+                  </div>
+                  <span class="px-3 py-1 rounded-full text-xs font-semibold ${verdictColor}">Lab Trakindo: ${escapeHtml(verdict)}</span>
+                </div>
+                ${latest.lab_recommendation ? `<div class="bg-blue-50 border border-blue-200 rounded-lg p-2 text-xs text-blue-800 mb-3">💡 <b>Rekomendasi Trakindo:</b> ${escapeHtml(latest.lab_recommendation)}</div>` : ''}
+                <div class="mb-3">
+                  <div class="text-xs font-semibold text-slate-700 mb-2">📊 Parameter Kunci (apa kata angka):</div>
+                  <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">${translatorHtml}</div>
+                </div>
+                <div class="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                  <div class="text-xs font-semibold text-amber-900 mb-2">📈 Trend Lintas-Sample (${sl.length} sample):</div>
+                  ${trendHtml}
+                  ${sl.length < 3 ? '<div class="text-[11px] text-amber-700 mt-2"><i>💡 Butuh minimal 3 sample untuk analisa trend yg valid.</i></div>' : ''}
+                </div>
+                <div class="mt-3 flex gap-2 flex-wrap">
+                  <button onclick="showSosSamplesList('${c.id}')" class="px-3 py-1.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium">📋 Lihat Semua Sample (${sl.length})</button>
+                  ${latest.pdf_attachment_path ? `<button onclick="viewSosPdf('${latest.pdf_attachment_path}')" class="px-3 py-1.5 rounded bg-purple-100 hover:bg-purple-200 text-purple-700 text-xs font-medium">📄 Lihat PDF Lab</button>` : ''}
+                </div>
+              </div>
+            ` : `<div class="p-4 text-center text-slate-400 text-sm">Belum ada sample. ${isSrMekanikOrAbove() ? 'Klik "+ Tambah Sample" untuk catat hasil SOS pertama.' : ''}</div>`}
+          </div>`;
+        }).join('');
+
+        container.innerHTML = `
+          <div class="mb-3 flex items-center justify-between flex-wrap gap-2">
+            <div>
+              <h4 class="font-bold text-slate-800">🧪 SOS Lab Results — ${comps.length} component</h4>
+              <p class="text-xs text-slate-500">Hasil Scheduled Oil Sampling dari Trakindo + analisa trend lintas-sample.</p>
+            </div>
+            ${isSrMekanikOrAbove() ? `<button onclick="openSosComponentModal('${eq.id}')" class="bg-safety hover:bg-safety-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium">➕ Tambah Component</button>` : ''}
+          </div>
+          <div class="space-y-3">${compCards}</div>
+          <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-800 mt-3">
+            💡 <b>Cara kerja:</b> Trakindo kasih verdict per-sample (snapshot). App baca SEMUA sample lintas-waktu → kasih analisa trend (NAIK/STABIL/TURUN) + tandai EVENT (anomali sesaat). Trend lebih powerful dari snapshot karena bisa detect early warning sebelum kerusakan.
+          </div>
+        `;
+      } catch (err) {
+        container.innerHTML = `<div class="bg-red-50 text-red-700 p-4 rounded-xl text-sm">Gagal load: ${escapeHtml(err.message)}<br><small>⚠️ Pastikan SQL <code>fase13_sos_schema.sql</code> sudah dijalankan di Supabase.</small></div>`;
+      }
+    }
+    window.renderSosTab = renderSosTab;
+
+    // ============================================================
+    // SOS COMPONENT MODAL — Tambah/Edit component
+    // ============================================================
+    async function openSosComponentModal(equipmentId, componentId) {
+      if (!isSrMekanikOrAbove()) { toast('Khusus Sr Mekanik+', 'warn'); return; }
+      let existing = null;
+      if (componentId) {
+        const { data } = await state.supabase.from('equipment_components').select('*').eq('id', componentId).single();
+        existing = data;
+      }
+      const body = `
+        <div class="space-y-3">
+          <div>
+            <label class="text-xs font-semibold text-slate-600 uppercase">Tipe Component *</label>
+            <select id="sc-type" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-navy">
+              <option value="ENGINE" ${existing?.component_type === 'ENGINE' ? 'selected' : ''}>⚙️ ENGINE (engine oil)</option>
+              <option value="GEARBOX" ${existing?.component_type === 'GEARBOX' ? 'selected' : ''}>🔧 GEARBOX (gear oil)</option>
+              <option value="TRANSMISSION" ${existing?.component_type === 'TRANSMISSION' ? 'selected' : ''}>🔄 TRANSMISSION (hydraulic/trans oil)</option>
+              <option value="FUEL" ${existing?.component_type === 'FUEL' ? 'selected' : ''}>⛽ FUEL (bahan bakar)</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-xs font-semibold text-slate-600 uppercase">Engine Subtype (opsional, hanya untuk ENGINE)</label>
+            <select id="sc-engsub" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none">
+              <option value="">— (kosongkan kalau bukan engine)</option>
+              <option value="diesel" ${existing?.engine_subtype === 'diesel' ? 'selected' : ''}>Diesel</option>
+              <option value="gas" ${existing?.engine_subtype === 'gas' ? 'selected' : ''}>Gas (NG)</option>
+              <option value="dual_fuel" ${existing?.engine_subtype === 'dual_fuel' ? 'selected' : ''}>Dual Fuel</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-xs font-semibold text-slate-600 uppercase">Nama Component *</label>
+            <input id="sc-name" type="text" value="${escapeHtml(existing?.name || '')}" placeholder="mis. Engine oil CAT C7.1, Coolant system, Hydraulic main" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy">
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="text-xs text-slate-500">Serial Number</label>
+              <input id="sc-sn" type="text" value="${escapeHtml(existing?.serial_number || '')}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none">
+            </div>
+            <div>
+              <label class="text-xs text-slate-500">Sampling Interval (jam)</label>
+              <input id="sc-interval" type="number" value="${existing?.sampling_interval_hours || 250}" min="50" step="50" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none">
+            </div>
+          </div>
+          <div>
+            <label class="text-xs text-slate-500">Catatan Spek</label>
+            <textarea id="sc-notes" rows="2" placeholder="mis. Pakai oli CAT DEO-ULS, drain ~22 liter" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none">${escapeHtml(existing?.spec_notes || '')}</textarea>
+          </div>
+        </div>`;
+      const footer = `<button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
+        <button onclick="submitSosComponent('${equipmentId}','${componentId || ''}')" class="px-4 py-2 rounded-lg bg-safety hover:bg-safety-700 text-white text-sm font-semibold">💾 Simpan</button>`;
+      openModal({ title: existing ? '✏ Edit Component' : '➕ Tambah Component', body, footer, maxWidth: 'max-w-lg' });
+    }
+    window.openSosComponentModal = openSosComponentModal;
+
+    async function submitSosComponent(equipmentId, componentId) {
+      const type = document.getElementById('sc-type')?.value;
+      const name = (document.getElementById('sc-name')?.value || '').trim();
+      if (!name) { toast('Nama component wajib diisi.', 'warn'); return; }
+      const payload = {
+        equipment_id: equipmentId,
+        component_type: type,
+        engine_subtype: document.getElementById('sc-engsub')?.value || null,
+        name,
+        serial_number: (document.getElementById('sc-sn')?.value || '').trim() || null,
+        sampling_interval_hours: Number(document.getElementById('sc-interval')?.value) || 250,
+        spec_notes: (document.getElementById('sc-notes')?.value || '').trim() || null,
+      };
+      try {
+        if (componentId) {
+          payload.updated_by = state.user.id;
+          const { error } = await state.supabase.from('equipment_components').update(payload).eq('id', componentId);
+          if (error) throw error;
+          toast('Component di-update.', 'success');
+        } else {
+          payload.created_by = state.user.id;
+          const { error } = await state.supabase.from('equipment_components').insert(payload);
+          if (error) throw error;
+          toast('Component baru ditambahkan.', 'success');
+        }
+        closeModal();
+        const host = document.getElementById('detail-tab-content');
+        if (host) renderSosTab(window.__currentEq, host);
+      } catch (err) {
+        toast('Gagal simpan: ' + err.message, 'error');
+      }
+    }
+    window.submitSosComponent = submitSosComponent;
+
+    // ============================================================
+    // SOS SAMPLE MODAL — Form entry (layout mengikuti report Trakindo)
+    // ============================================================
+    function buildSosParamInputs(componentType, data) {
+      data = data || {};
+      const params = SOS_PARAMS[componentType] || {};
+      const section = (title, items, group) => items.length ? `
+        <div class="mt-3">
+          <div class="text-xs font-bold text-slate-700 uppercase mb-1.5">${title}</div>
+          <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            ${items.map(([key, lbl]) => {
+              const v = group ? (data[group]?.[key] ?? '') : (data[key] ?? '');
+              return `<div>
+                <label class="text-[10px] text-slate-500 block">${escapeHtml(lbl)}</label>
+                <input type="number" step="0.01" data-grp="${group || ''}" data-key="${key}" value="${v === null || v === undefined ? '' : v}" class="w-full px-2 py-1 border border-slate-300 rounded text-sm outline-none focus:ring-1 focus:ring-navy">
+              </div>`;
+            }).join('')}
+          </div>
+        </div>` : '';
+      // Per-component special fields
+      const physChem = componentType === 'ENGINE' ? `
+        <div class="mt-3">
+          <div class="text-xs font-bold text-slate-700 uppercase mb-1.5">Oil Condition Tambahan</div>
+          <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            <div><label class="text-[10px] text-slate-500 block">Fuel (Y/N)</label><select data-grp="" data-key="fuel" class="w-full px-2 py-1 border border-slate-300 rounded text-sm outline-none"><option value="">—</option><option value="N" ${data.fuel === 'N' ? 'selected' : ''}>N</option><option value="Y" ${data.fuel === 'Y' ? 'selected' : ''}>Y</option></select></div>
+            <div><label class="text-[10px] text-slate-500 block">Water (Y/N)</label><select data-grp="" data-key="water" class="w-full px-2 py-1 border border-slate-300 rounded text-sm outline-none"><option value="">—</option><option value="N" ${data.water === 'N' ? 'selected' : ''}>N</option><option value="Y" ${data.water === 'Y' ? 'selected' : ''}>Y</option></select></div>
+            <div><label class="text-[10px] text-slate-500 block">V100 (cSt)</label><input type="number" step="0.01" data-grp="" data-key="viscosity_100c" value="${data.viscosity_100c ?? ''}" class="w-full px-2 py-1 border border-slate-300 rounded text-sm outline-none"></div>
+            <div><label class="text-[10px] text-slate-500 block">TBN (mg KOH/g)</label><input type="number" step="0.01" data-grp="" data-key="tbn" value="${data.tbn ?? ''}" class="w-full px-2 py-1 border border-slate-300 rounded text-sm outline-none"></div>
+            <div><label class="text-[10px] text-slate-500 block">TAN (mg KOH/g)</label><input type="number" step="0.01" data-grp="" data-key="tan" value="${data.tan ?? ''}" class="w-full px-2 py-1 border border-slate-300 rounded text-sm outline-none"></div>
+            <div><label class="text-[10px] text-slate-500 block">PQ Index</label><input type="number" step="0.01" data-grp="" data-key="pqi" value="${data.pqi ?? ''}" class="w-full px-2 py-1 border border-slate-300 rounded text-sm outline-none"></div>
+          </div>
+        </div>` : '';
+      return section('Wear Metals (ppm)', params.wear_metals || [], 'wear_metals')
+           + section('Contaminants (ppm)', params.contaminants || [], 'contaminants')
+           + section('Additives (ppm)', params.additives || [], 'additives')
+           + section('Oil Condition (JOAP)', params.oil_condition || [], 'oil_condition')
+           + physChem;
+    }
+
+    async function openSosSampleModal(componentId, componentName, componentType, equipmentId, sampleId) {
+      if (!isSrMekanikOrAbove()) { toast('Khusus Sr Mekanik+', 'warn'); return; }
+      let existing = null;
+      if (sampleId) {
+        const { data } = await state.supabase.from('sos_samples').select('*').eq('id', sampleId).single();
+        existing = data;
+      }
+      const e = existing || {};
+      const d = e.data || {};
+      const body = `
+        <div class="space-y-3 max-h-[75vh] overflow-y-auto">
+          <div class="bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs text-slate-600">
+            <b>Component:</b> ${escapeHtml(componentName)} (${componentType})<br>
+            💡 Salin per baris dari PDF Trakindo. Field kosong = tidak diisi.
+          </div>
+
+          <!-- Sample Metadata -->
+          <div class="border border-slate-200 rounded-lg p-3">
+            <div class="text-xs font-bold text-slate-700 uppercase mb-2">📋 Sample Metadata</div>
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              <div><label class="text-[10px] text-slate-500">Tgl Sampling *</label><input id="ss-sampled" type="date" value="${e.sampled_date || ''}" class="w-full px-2 py-1 border border-slate-300 rounded text-sm"></div>
+              <div><label class="text-[10px] text-slate-500">Sample ID</label><input id="ss-sid" type="text" value="${escapeHtml(e.sample_id || '')}" placeholder="J21A-..." class="w-full px-2 py-1 border border-slate-300 rounded text-sm"></div>
+              <div><label class="text-[10px] text-slate-500">Lab Date</label><input id="ss-labdate" type="date" value="${e.lab_date || ''}" class="w-full px-2 py-1 border border-slate-300 rounded text-sm"></div>
+              <div><label class="text-[10px] text-slate-500">Label Code</label><input id="ss-label" type="text" value="${escapeHtml(e.label_code || '')}" placeholder="0F39" class="w-full px-2 py-1 border border-slate-300 rounded text-sm"></div>
+              <div><label class="text-[10px] text-slate-500">Interp By</label><input id="ss-interp" type="text" value="${escapeHtml(e.interp_by || '')}" class="w-full px-2 py-1 border border-slate-300 rounded text-sm"></div>
+              <div><label class="text-[10px] text-slate-500">Interpreted On</label><input id="ss-interpdate" type="date" value="${e.interpreted_on || ''}" class="w-full px-2 py-1 border border-slate-300 rounded text-sm"></div>
+            </div>
+          </div>
+
+          <!-- Meter -->
+          <div class="border border-slate-200 rounded-lg p-3">
+            <div class="text-xs font-bold text-slate-700 uppercase mb-2">⏱️ Meter Info</div>
+            <div class="grid grid-cols-3 gap-2">
+              <div><label class="text-[10px] text-slate-500">Meter [Hr]</label><input id="ss-meter" type="number" step="0.1" value="${e.meter_hr ?? ''}" class="w-full px-2 py-1 border border-slate-300 rounded text-sm"></div>
+              <div><label class="text-[10px] text-slate-500">Comp Meter [Hr]</label><input id="ss-compmeter" type="number" step="0.1" value="${e.comp_meter_hr ?? ''}" class="w-full px-2 py-1 border border-slate-300 rounded text-sm"></div>
+              <div><label class="text-[10px] text-slate-500">Meter On Fluid</label><input id="ss-mof" type="number" step="0.1" value="${e.meter_on_fluid ?? ''}" class="w-full px-2 py-1 border border-slate-300 rounded text-sm"></div>
+            </div>
+          </div>
+
+          <!-- Fluid -->
+          <div class="border border-slate-200 rounded-lg p-3">
+            <div class="text-xs font-bold text-slate-700 uppercase mb-2">🛢️ Fluid Info</div>
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              <div><label class="text-[10px] text-slate-500">Brand</label><input id="ss-fbrand" type="text" value="${escapeHtml(e.fluid_brand || '')}" placeholder="PERTAMINA" class="w-full px-2 py-1 border border-slate-300 rounded text-sm"></div>
+              <div><label class="text-[10px] text-slate-500">Type</label><input id="ss-ftype" type="text" value="${escapeHtml(e.fluid_type || '')}" placeholder="NG LUBE / SAE 15W-40" class="w-full px-2 py-1 border border-slate-300 rounded text-sm"></div>
+              <div><label class="text-[10px] text-slate-500">Weight (SAE)</label><input id="ss-fweight" type="text" value="${escapeHtml(e.fluid_weight || '')}" placeholder="40" class="w-full px-2 py-1 border border-slate-300 rounded text-sm"></div>
+              <div><label class="text-[10px] text-slate-500">Fluid Change</label><select id="ss-fchange" class="w-full px-2 py-1 border border-slate-300 rounded text-sm"><option value="false" ${!e.fluid_change_yn ? 'selected' : ''}>N</option><option value="true" ${e.fluid_change_yn ? 'selected' : ''}>Y</option></select></div>
+              <div><label class="text-[10px] text-slate-500">Filter Change</label><select id="ss-filchange" class="w-full px-2 py-1 border border-slate-300 rounded text-sm"><option value="false" ${!e.filter_change_yn ? 'selected' : ''}>N</option><option value="true" ${e.filter_change_yn ? 'selected' : ''}>Y</option></select></div>
+              <div><label class="text-[10px] text-slate-500">Make-up Fluid (L)</label><input id="ss-makeup" type="number" step="0.1" value="${e.make_up_fluid_l ?? ''}" class="w-full px-2 py-1 border border-slate-300 rounded text-sm"></div>
+            </div>
+          </div>
+
+          <!-- Lab Verdict -->
+          <div class="border border-slate-200 rounded-lg p-3">
+            <div class="text-xs font-bold text-slate-700 uppercase mb-2">🏷️ Lab Verdict Trakindo</div>
+            <div class="space-y-2">
+              <div><label class="text-[10px] text-slate-500">Status</label><input id="ss-status" type="text" value="${escapeHtml(e.lab_status || '')}" placeholder="No Action Required" class="w-full px-2 py-1 border border-slate-300 rounded text-sm"></div>
+              <div><label class="text-[10px] text-slate-500">Recommendation (paste dari report)</label><textarea id="ss-recomm" rows="2" class="w-full px-2 py-1 border border-slate-300 rounded text-sm">${escapeHtml(e.lab_recommendation || '')}</textarea></div>
+            </div>
+          </div>
+
+          <!-- Lab Data -->
+          <div class="border border-slate-200 rounded-lg p-3" id="ss-params-host">
+            <div class="text-xs font-bold text-slate-700 uppercase mb-2">🧪 Lab Data (parameter)</div>
+            ${buildSosParamInputs(componentType, d)}
+          </div>
+
+          <!-- PDF Upload -->
+          <div class="border border-slate-200 rounded-lg p-3">
+            <label class="text-xs font-bold text-slate-700 uppercase">📄 PDF Lab Report (opsional)</label>
+            <input id="ss-pdf" type="file" accept="application/pdf" class="w-full text-xs mt-1">
+            ${e.pdf_attachment_path ? `<div class="text-[10px] text-slate-500 mt-1">Sudah ada: <button onclick="viewSosPdf('${e.pdf_attachment_path}')" class="text-blue-600 underline">${escapeHtml(e.pdf_attachment_path)}</button></div>` : ''}
+          </div>
+
+          <!-- Notes -->
+          <div>
+            <label class="text-[10px] text-slate-500">Catatan Internal</label>
+            <textarea id="ss-notes" rows="2" class="w-full px-2 py-1 border border-slate-300 rounded text-sm">${escapeHtml(e.notes || '')}</textarea>
+          </div>
+        </div>`;
+      const footer = `<button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
+        <button onclick="submitSosSample('${componentId}','${componentType}','${equipmentId}','${sampleId || ''}')" class="px-4 py-2 rounded-lg bg-safety hover:bg-safety-700 text-white text-sm font-semibold">💾 Simpan Sample</button>`;
+      openModal({ title: existing ? '✏ Edit Sample SOS' : '➕ Tambah Sample SOS · ' + componentName, body, footer, maxWidth: 'max-w-3xl' });
+    }
+    window.openSosSampleModal = openSosSampleModal;
+
+    async function submitSosSample(componentId, componentType, equipmentId, sampleId) {
+      const sampled = document.getElementById('ss-sampled')?.value;
+      if (!sampled) { toast('Tgl sampling wajib diisi.', 'warn'); return; }
+      // Build data JSONB dari semua input dgn data-grp/data-key
+      const data = {};
+      document.querySelectorAll('#ss-params-host [data-key]').forEach(el => {
+        const grp = el.dataset.grp || null;
+        const key = el.dataset.key;
+        let v = el.value;
+        if (v === '' || v == null) return;
+        // Convert number kalau bukan Y/N field
+        if (!['fuel','water'].includes(key) && !isNaN(Number(v))) v = Number(v);
+        if (grp) {
+          if (!data[grp]) data[grp] = {};
+          data[grp][key] = v;
+        } else {
+          data[key] = v;
+        }
+      });
+      const payload = {
+        component_id: componentId,
+        sampled_date: sampled,
+        sample_id: document.getElementById('ss-sid')?.value.trim() || null,
+        lab_date: document.getElementById('ss-labdate')?.value || null,
+        label_code: document.getElementById('ss-label')?.value.trim() || null,
+        interp_by: document.getElementById('ss-interp')?.value.trim() || null,
+        interpreted_on: document.getElementById('ss-interpdate')?.value || null,
+        meter_hr: Number(document.getElementById('ss-meter')?.value) || null,
+        comp_meter_hr: Number(document.getElementById('ss-compmeter')?.value) || null,
+        meter_on_fluid: Number(document.getElementById('ss-mof')?.value) || null,
+        fluid_brand: document.getElementById('ss-fbrand')?.value.trim() || null,
+        fluid_type: document.getElementById('ss-ftype')?.value.trim() || null,
+        fluid_weight: document.getElementById('ss-fweight')?.value.trim() || null,
+        fluid_change_yn: document.getElementById('ss-fchange')?.value === 'true',
+        filter_change_yn: document.getElementById('ss-filchange')?.value === 'true',
+        make_up_fluid_l: Number(document.getElementById('ss-makeup')?.value) || null,
+        lab_status: document.getElementById('ss-status')?.value.trim() || null,
+        lab_recommendation: document.getElementById('ss-recomm')?.value.trim() || null,
+        data,
+        notes: document.getElementById('ss-notes')?.value.trim() || null,
+      };
+      try {
+        let savedId = sampleId;
+        if (sampleId) {
+          const { error } = await state.supabase.from('sos_samples').update(payload).eq('id', sampleId);
+          if (error) throw error;
+        } else {
+          payload.created_by = state.user.id;
+          payload.created_by_name = state.profile?.full_name || state.profile?.email || null;
+          const { data: ins, error } = await state.supabase.from('sos_samples').insert(payload).select('id').single();
+          if (error) throw error;
+          savedId = ins.id;
+        }
+        // Upload PDF kalau ada
+        const fi = document.getElementById('ss-pdf');
+        const file = fi?.files?.[0];
+        if (file) {
+          const path = `${savedId}/${Date.now()}-report.pdf`;
+          await state.supabase.storage.from('sos-reports').upload(path, file);
+          await state.supabase.from('sos_samples').update({ pdf_attachment_path: path }).eq('id', savedId);
+        }
+        closeModal();
+        toast(sampleId ? 'Sample di-update.' : 'Sample baru ditambahkan.', 'success');
+        const host = document.getElementById('detail-tab-content');
+        if (host) renderSosTab(window.__currentEq, host);
+      } catch (err) {
+        toast('Gagal simpan: ' + err.message, 'error');
+      }
+    }
+    window.submitSosSample = submitSosSample;
+
+    async function viewSosPdf(path) {
+      try {
+        const { data, error } = await state.supabase.storage.from('sos-reports').createSignedUrl(path, 300);
+        if (error) throw error;
+        window.open(data.signedUrl, '_blank');
+      } catch (err) {
+        toast('Gagal buka PDF: ' + err.message, 'error');
+      }
+    }
+    window.viewSosPdf = viewSosPdf;
+
+    async function showSosSamplesList(componentId) {
+      try {
+        const { data: samples } = await state.supabase.from('sos_samples').select('*').eq('component_id', componentId).order('sampled_date', { ascending: false });
+        const { data: comp } = await state.supabase.from('equipment_components').select('*').eq('id', componentId).single();
+        const sl = samples || [];
+        if (!sl.length) { toast('Belum ada sample.', 'info'); return; }
+        const rows = sl.map((s, i) => {
+          const verdict = s.lab_status || '-';
+          const verdictColor = /no action|normal/i.test(verdict) ? 'bg-green-100 text-green-700' :
+            /critical|urgent/i.test(verdict) ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700';
+          return `<tr class="border-b border-slate-100 hover:bg-slate-50">
+            <td class="px-3 py-2 text-sm text-slate-500">${i + 1}</td>
+            <td class="px-3 py-2 text-sm font-semibold">${fmtDate(s.sampled_date)}</td>
+            <td class="px-3 py-2 text-sm font-mono">${escapeHtml(s.sample_id || '-')}</td>
+            <td class="px-3 py-2 text-sm text-right">${s.meter_hr ?? '-'}</td>
+            <td class="px-3 py-2 text-sm text-right">${s.meter_on_fluid ?? '-'}</td>
+            <td class="px-3 py-2 text-sm"><span class="px-2 py-0.5 rounded text-xs font-semibold ${verdictColor}">${escapeHtml(verdict)}</span></td>
+            <td class="px-3 py-2 text-right whitespace-nowrap">
+              ${s.pdf_attachment_path ? `<button onclick="viewSosPdf('${s.pdf_attachment_path}')" class="px-2 py-1 rounded bg-purple-100 hover:bg-purple-200 text-purple-700 text-xs">📄</button>` : ''}
+              ${isSrMekanikOrAbove() ? `<button onclick="closeModal();openSosSampleModal('${componentId}','${escapeHtml(comp.name).replace(/'/g,"&#39;")}','${comp.component_type}','${comp.equipment_id}','${s.id}')" class="px-2 py-1 rounded bg-navy hover:bg-navy-700 text-white text-xs">✏</button>` : ''}
+            </td>
+          </tr>`;
+        }).join('');
+        const body = `<div class="overflow-x-auto"><table class="w-full">
+          <thead><tr class="bg-slate-50 text-left text-xs font-bold text-slate-600">
+            <th class="px-3 py-2">#</th><th class="px-3 py-2">Tgl Sample</th><th class="px-3 py-2">Sample ID</th>
+            <th class="px-3 py-2 text-right">Meter</th><th class="px-3 py-2 text-right">On Fluid</th>
+            <th class="px-3 py-2">Lab Verdict</th><th class="px-3 py-2 text-right">Aksi</th>
+          </tr></thead><tbody>${rows}</tbody></table></div>`;
+        const footer = `<button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Tutup</button>`;
+        openModal({ title: `📋 Semua Sample · ${comp.name} (${sl.length})`, body, footer, maxWidth: 'max-w-4xl' });
+      } catch (err) {
+        toast('Gagal load: ' + err.message, 'error');
+      }
+    }
+    window.showSosSamplesList = showSosSamplesList;
 
     // ============================================================
     // PILIHAN B — GENERATE WORK ORDER PDF
