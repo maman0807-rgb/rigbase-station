@@ -12475,9 +12475,15 @@
       const rpnCell = (r) => { r = Number(r) || 0; const st = r >= 200 ? 'background:#fef2f2;color:#dc2626' : r >= 100 ? 'background:#fffbeb;color:#d97706' : 'color:#16a34a'; return `<td style="text-align:center;font-weight:bold;${st}">${r}</td>`; };
       const rows = list.slice(0, 300).map((e, i) => `<tr><td style="text-align:center">${i + 1}</td><td>${escapeHtml(e.equipment_tag || '-')}<br><span style="color:#6b7280">${escapeHtml(e.equipment_name || '')}</span></td><td>${escapeHtml(e.failure_mode || '')}</td><td style="text-align:center">${e.severity}</td><td style="text-align:center">${e.occurrence}</td><td style="text-align:center">${e.detection}</td>${rpnCell(e.rpn)}<td>${escapeHtml(e.recommended_action || '-')}</td></tr>`).join('');
       const table = `<table><thead><tr><th>No</th><th>Equipment</th><th>Mode Kegagalan</th><th>S</th><th>O</th><th>D</th><th>RPN</th><th>Rekomendasi Tindakan</th></tr></thead><tbody>${rows || '<tr><td colspan="8" style="text-align:center">Tidak ada data</td></tr>'}</tbody></table>`;
-      const kesimpulan = `<b style="color:#dc2626">⚠️ Dampak bila tidak ditindaklanjuti:</b> ${kritis} mode kegagalan kritis berpotensi menyebabkan kerusakan besar, berhentinya operasi, atau risiko keselamatan.<br><br><b style="color:#16a34a">✅ Permohonan:</b> mohon persetujuan penerbitan <b>SPK (Surat Perintah Kerja)</b> untuk melaksanakan rekomendasi tindakan di atas.`;
       const sedang = list.filter(e => { const r = Number(e.rpn) || 0; return r >= 40 && r < 100; }).length;
       const rendah = list.filter(e => (Number(e.rpn) || 0) < 40).length;
+      // Dampak DINAMIS — ikut kategori RPN tertinggi yg jumlahnya > 0 (Kritis → Tinggi → Sedang → Rendah)
+      let dampak;
+      if (kritis > 0)      dampak = `${kritis} mode kegagalan kritis berpotensi menyebabkan kerusakan besar, berhentinya operasi, atau risiko keselamatan.`;
+      else if (tinggi > 0) dampak = `${tinggi} mode kegagalan prioritas tinggi perlu segera ditindaklanjuti untuk mencegah penurunan keandalan dan potensi non-compliance terhadap regulasi.`;
+      else if (sedang > 0) dampak = `${sedang} mode kegagalan kategori sedang sebaiknya dijadwalkan untuk perbaikan terencana.`;
+      else                 dampak = `Tidak ada mode kegagalan signifikan; lanjutkan pemantauan rutin.`;
+      const kesimpulan = `<b style="color:#dc2626">⚠️ Dampak bila tidak ditindaklanjuti:</b> ${dampak}<br><br><b style="color:#16a34a">✅ Permohonan:</b> mohon persetujuan penerbitan <b>SPK (Surat Perintah Kerja)</b> untuk melaksanakan rekomendasi tindakan di atas.`;
       const chart = chartBars('Distribusi RPN', [{ label: 'Kritis ≥200', value: kritis, color: '#dc2626' }, { label: 'Tinggi ≥100', value: tinggi, color: '#d97706' }, { label: 'Sedang ≥40', value: sedang, color: '#ca8a04' }, { label: 'Rendah <40', value: rendah, color: '#16a34a' }]);
       openSignDialog({ title: 'Justifikasi Tindakan Perbaikan', type: 'FMEA', summary, chart, intro, table, kesimpulan });
     }
