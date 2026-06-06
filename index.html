@@ -8888,9 +8888,12 @@
     }
 
     async function cetakSlipGaji(entryId) {
+      const w = window.open('','_blank','width=700,height=600');
+      if (!w) { toast('Popup diblokir browser. Izinkan popup untuk situs ini lalu coba lagi.','warn'); return; }
+      w.document.write('<html><body style="font-family:Arial;padding:20px;color:#555">Memuat slip gaji…</body></html>');
       const { data: e } = await state.supabase.from('payroll_entries').select('*').eq('id',entryId).single().then(r=>r).catch(()=>({data:null}));
       const cfg = await loadPayrollConfig();
-      if (!e) { toast('Data tidak ditemukan.','error'); return; }
+      if (!e) { w.close(); toast('Data tidak ditemukan.','error'); return; }
       const bulan = new Date(payrollState.selectedPeriode+'-01').toLocaleDateString('id-ID',{month:'long',year:'numeric'});
       const totalBpjs = (e.bpjs_kes||0)+(e.bpjs_jht||0)+(e.bpjs_jp||0);
       const html = `<!doctype html><html><head><meta charset="utf-8"><title>Slip Gaji ${escapeHtml(e.nama_snapshot||'')} ${bulan}</title>
@@ -8940,12 +8943,14 @@
         <div class="foot">Slip ini dicetak dari eRAMHoist • ${new Date().toLocaleString('id-ID')}</div>
         <script>window.onload=()=>window.print()<\/script>
       </body></html>`;
-      const w = window.open('','_blank','width=700,height=600');
-      if (w) { w.document.write(html); w.document.close(); }
+      w.document.open(); w.document.write(html); w.document.close();
     }
     window.cetakSlipGaji = cetakSlipGaji;
 
     async function cetakPayrollRekap() {
+      const w = window.open('','_blank','width=1100,height=750');
+      if (!w) { toast('Popup diblokir browser. Izinkan popup untuk situs ini lalu coba lagi.','warn'); return; }
+      w.document.write('<html><body style="font-family:Arial;padding:20px;color:#555">Memuat rekap payroll…</body></html>');
       const { data: period } = await state.supabase.from('payroll_periods').select('*').eq('periode', payrollState.selectedPeriode).single().then(r=>r).catch(()=>({data:null}));
       const { data: entries } = await state.supabase.from('payroll_entries').select('*').eq('period_id', period?.id||'').order('nama_snapshot');
       const cfg = await loadPayrollConfig();
@@ -9007,8 +9012,7 @@
         <div class="foot">eRAMHoist Payroll • ${new Date().toLocaleString('id-ID')}</div>
         <script>window.onload=()=>window.print()<\/script>
       </body></html>`;
-      const w = window.open('','_blank','width=1100,height=750');
-      if (w) { w.document.write(html); w.document.close(); }
+      w.document.open(); w.document.write(html); w.document.close();
     }
     window.cetakPayrollRekap = cetakPayrollRekap;
 
@@ -9255,9 +9259,14 @@
 
     // --- Cetak Bukti Potong A1 per karyawan ---
     async function cetakBupotA1(empId, tahun) {
+      // Buka window di sini (synchronous — sebelum await) agar tidak diblokir browser
+      const w = window.open('','_blank','width=820,height=1100');
+      if (!w) { toast('Popup diblokir browser. Izinkan popup untuk situs ini lalu coba lagi.','warn'); return; }
+      w.document.write('<html><body style="font-family:Arial;padding:20px;color:#555">Memuat data, harap tunggu…</body></html>');
+
       const cfg = await loadPayrollConfig();
       const emp = payrollState.employees.find(e=>e.id===empId);
-      if (!emp) { toast('Data karyawan tidak ditemukan.','warn'); return; }
+      if (!emp) { w.close(); toast('Data karyawan tidak ditemukan.','warn'); return; }
 
       // Ambil semua entries final untuk karyawan ini di tahun tsb
       const periodeList = Array.from({length:12},(_,i)=>`${tahun}-${String(i+1).padStart(2,'0')}`);
@@ -9277,14 +9286,14 @@
       const totalBpjsKes = entries.reduce((s,e)=>s+(e.bpjs_kes||0),0);
       const totalBpjsJht = entries.reduce((s,e)=>s+(e.bpjs_jht||0),0);
       const totalBpjsJp  = entries.reduce((s,e)=>s+(e.bpjs_jp||0),0);
-      const iuranPensiun = totalBpjsJp; // JP adalah iuran pensiun
+      const iuranPensiun = totalBpjsJp;
       const pkp = Math.max(0, totalBruto - iuranPensiun - (PTKP[emp.status_ptkp]||54000000));
       const pphSetahun = entries.reduce((s,e)=>s+(e.pph21||0),0);
       const lebihBayar  = entries.reduce((s,e)=>s+(e.lebih_bayar_pph||0),0);
       const netPph = pphSetahun - lebihBayar;
       const bulanNamaArr = ['','Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
 
-      const w = window.open('','_blank','width=820,height=1100');
+      w.document.open();
       w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Bukti Potong A1 - ${emp.nama}</title>
       <style>
         body{font-family:Arial,sans-serif;font-size:11px;color:#000;margin:0;padding:20px}
@@ -9382,13 +9391,18 @@
 
     // --- Cetak SPT Masa 1721 ---
     async function cetakSptMasa(tahun, bulan) {
+      // Buka window sebelum await agar tidak diblokir browser
+      const w = window.open('','_blank','width=900,height=1100');
+      if (!w) { toast('Popup diblokir browser. Izinkan popup untuk situs ini lalu coba lagi.','warn'); return; }
+      w.document.write('<html><body style="font-family:Arial;padding:20px;color:#555">Memuat data, harap tunggu…</body></html>');
+
       const cfg = await loadPayrollConfig();
       const bulanNamaArr = ['','Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
       const bulanInt = parseInt(bulan);
 
       const { data: periodObj } = await state.supabase.from('payroll_periods')
         .select('id').eq('periode',`${tahun}-${bulan}`).eq('status','Final').single().then(r=>r).catch(()=>({data:null}));
-      if (!periodObj) { toast('Tidak ada data Final untuk periode ini.','warn'); return; }
+      if (!periodObj) { w.close(); toast('Tidak ada data Final untuk periode ini.','warn'); return; }
 
       const { data: entries } = await state.supabase.from('payroll_entries')
         .select('*').eq('period_id', periodObj.id).then(r=>r).catch(()=>({data:[]}));
@@ -9398,7 +9412,7 @@
       const totalPph   = (entries||[]).reduce((s,e)=>s+(e.pph21||0),0);
       const totalBeban = (entries||[]).reduce((s,e)=>s+(e.total_beban_perusahaan||0),0);
 
-      const w = window.open('','_blank','width=900,height=1100');
+      w.document.open();
       w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>SPT Masa 1721 - ${bulanNamaArr[bulanInt]} ${tahun}</title>
       <style>
         body{font-family:Arial,sans-serif;font-size:11px;color:#000;margin:0;padding:20px}
