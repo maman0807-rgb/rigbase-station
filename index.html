@@ -1489,7 +1489,7 @@
       state.user = user;
       const { data, error } = await state.supabase
         .from('profiles')
-        .select('id, email, full_name, role, telegram_user_id')
+        .select('id, email, full_name, role, telegram_user_id, can_payroll')
         .eq('id', user.id)
         .single();
       if (error) {
