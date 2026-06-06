@@ -1795,7 +1795,8 @@
           </div>
           <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-              <h4 class="text-base font-bold text-slate-800 mb-3 flex items-center gap-2">🛠️ Maintenance Jatuh Tempo (30 hari)</h4>
+              <h4 class="text-base font-bold text-slate-800 mb-3 flex items-center gap-2">🔧 Mendekati Maintenance PM</h4>
+              <p class="text-xs text-slate-400 mb-3">Equipment dengan sisa HM ≤ 200 jam sebelum PM berikutnya.</p>
               <div id="dash-due" class="space-y-2 text-sm">Memuat…</div>
             </div>
             <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
@@ -1839,7 +1840,7 @@
           try {
             const [stats, due, skpi, loans, pmHours, pmKm, overhaul, inspAktif] = await Promise.all([
               fetchDashboardStats(),
-              fetchDueMaintenance(30),
+              fetchPMDueByHours(200).catch(() => []),
               fetchExpiringSkpi(60),
               fetchAllActiveLoans().catch(() => []),
               fetchPMDueByHours(50).catch(() => []),
@@ -1854,20 +1855,26 @@
               ${statCard('Down',            fmtNumber(stats.down),    ICONS.warning, 'bg-red-100 text-red-700')}
               ${statCard('Maintenance Due', fmtNumber(due.length),    ICONS.bell,    'bg-orange-100 text-orange-700')}
             `;
-            // Due
+            // Mendekati Maintenance PM (HM-based, threshold 200 jam)
             $('#dash-due').innerHTML = due.length === 0
-              ? '<div class="text-slate-400 text-sm">Tidak ada yang jatuh tempo dalam 30 hari ke depan.</div>'
+              ? '<div class="text-slate-400 text-sm">Tidak ada equipment yang mendekati jadwal PM (dalam 200 HM).</div>'
               : due.map(e => {
-                  const d = daysUntil(e.next_maintenance_date);
-                  const color = d < 0 ? 'text-red-700' : (d <= 7 ? 'text-amber-700' : 'text-slate-700');
-                  return `<button onclick="setEquipmentView('detail','${e.id}'); navigate('equipment')" class="w-full text-left flex items-center justify-between hover:bg-slate-50 px-2 py-1.5 rounded">
+                  const rem = e._remaining;
+                  const borderCls = rem <= 0   ? 'border-red-300 bg-red-50'
+                                  : rem <= 50  ? 'border-amber-300 bg-amber-50'
+                                  : 'border-yellow-200 bg-yellow-50';
+                  const label    = rem <= 0   ? `⛔ LEWAT ${Math.abs(Math.round(rem))} HM`
+                                 : rem <= 50  ? `⚠️ Sisa ${Math.round(rem)} HM`
+                                 : `🟡 Sisa ${Math.round(rem)} HM`;
+                  const txtCls   = rem <= 0 ? 'text-red-700 font-bold' : rem <= 50 ? 'text-amber-700 font-semibold' : 'text-yellow-700 font-semibold';
+                  return `<button onclick="setEquipmentView('detail','${e.id}'); navigate('equipment')" class="w-full text-left flex items-center justify-between border ${borderCls} rounded-lg px-3 py-2 hover:opacity-80 transition">
                     <div class="min-w-0">
                       <div class="font-semibold text-navy text-sm truncate">${escapeHtml(e.tag_number)}</div>
                       <div class="text-xs text-slate-500 truncate">${escapeHtml(e.nama_equipment)} • ${escapeHtml(getParentUnitName(e.assigned_unit_id))}</div>
                     </div>
-                    <div class="text-right flex-shrink-0 ml-2">
-                      <div class="${color} font-semibold text-sm">${fmtDate(e.next_maintenance_date)}</div>
-                      <div class="text-xs text-slate-500">${d < 0 ? `${-d} hari telat` : `${d} hari lagi`}</div>
+                    <div class="text-right flex-shrink-0 ml-3">
+                      <div class="${txtCls} text-sm">${label}</div>
+                      <div class="text-xs text-slate-400">Interval ${e._interval} HM</div>
                     </div>
                   </button>`;
                 }).join('');
