@@ -1845,7 +1845,7 @@
               fetchPMDueByHours(50).catch(() => []),
               fetchPMDueByKm(500).catch(() => []),
               fetchOverhaulDue(500).catch(() => []),
-              state.supabase.from('v_inspection_downtime').select('*').eq('is_holding', true).order('mulai').catch(() => ({ data: [] })),
+              state.supabase.from('v_inspection_downtime').select('*').eq('is_holding', true).order('mulai').then(r => r).catch(() => ({ data: [] })),
             ]);
             // Stats
             $('#dash-stats').innerHTML = `
