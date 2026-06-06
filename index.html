@@ -8698,12 +8698,14 @@
           <span class="ml-auto text-xs px-3 py-1 rounded-full font-bold ${isFinal?'bg-green-100 text-green-700':'bg-yellow-100 text-yellow-700'}">${isFinal?'✅ Final':'🟡 Draft'}</span>
         </div>
         <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-3 text-sm text-amber-800">
-          <b>⚙️ Cara kerja:</b> Klik <b>Hitung Payroll</b> → sistem kalkulasi PPh21 TER, BPJS, lembur, kasbon untuk semua karyawan aktif. Hasilnya bisa dilihat di tab Laporan & Slip.
-          ${isFinal ? '<br><b class="text-red-600">⚠️ Periode ini sudah Final — tidak bisa dihitung ulang.</b>' : ''}
+          <b>⚙️ Cara kerja:</b> Klik <b>Hitung Payroll</b> → sistem kalkulasi PPh21 TER, BPJS, lembur, kasbon untuk semua karyawan aktif. Hasilnya bisa dilihat di tab Laporan & Slip.<br>
+          Setelah semua karyawan sudah benar, klik <b>Hitung & Final</b> untuk mengunci periode.
         </div>
-        <div class="flex gap-3 flex-wrap">
+        <div class="flex gap-3 flex-wrap items-center">
           <button onclick="prosesPayroll(false)" ${isFinal?'disabled':''} class="px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl font-extrabold text-sm shadow ${isFinal?'opacity-40 cursor-not-allowed':''}">⚙️ Hitung Payroll</button>
           <button onclick="prosesPayroll(true)" ${isFinal?'disabled':''} class="px-6 py-3 bg-navy hover:bg-navy/90 text-white rounded-xl font-extrabold text-sm shadow ${isFinal?'opacity-40 cursor-not-allowed':''}">🔒 Hitung & Final</button>
+          ${isFinal ? `<button onclick="bukaPeriodePayroll()" class="px-5 py-3 bg-red-100 hover:bg-red-200 text-red-700 border border-red-300 rounded-xl font-bold text-sm">🔓 Buka Kunci (Revert ke Draft)</button>
+          <span class="text-xs text-slate-500">Gunakan jika ada koreksi atau karyawan baru</span>` : ''}
         </div>
         <div id="payroll-proses-result" class="mt-4"></div>`;
     }
@@ -8818,6 +8820,21 @@
       }
     }
     window.prosesPayroll = prosesPayroll;
+
+    async function bukaPeriodePayroll() {
+      const ok = await confirmDialog({ title: '🔓 Buka Kunci Periode?', message: `Periode <b>${payrollState.selectedPeriode}</b> akan dikembalikan ke status <b>Draft</b>.<br>Data entri payroll yang ada <b>tidak dihapus</b> — tetap bisa dilihat dan dihitung ulang.<br><br>Lanjutkan?`, confirmText: 'Ya, Buka Kunci', danger: true });
+      if (!ok) return;
+      try {
+        const { error } = await state.supabase.from('payroll_periods')
+          .update({ status: 'Draft' }).eq('periode', payrollState.selectedPeriode).then(r=>r).catch(e=>({error:e}));
+        if (error) throw error;
+        toast('Periode berhasil dibuka kembali — silakan hitung ulang.', 'success');
+        renderPayrollTab();
+      } catch(err) {
+        toast('Gagal membuka kunci: ' + err.message, 'error');
+      }
+    }
+    window.bukaPeriodePayroll = bukaPeriodePayroll;
 
     // ============================================================
     // TAB: LAPORAN & SLIP
