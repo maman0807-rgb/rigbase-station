@@ -2513,7 +2513,7 @@
         }
         const div = document.createElement('div');
         div.className = 'page space-y-4';
-        const tabs = [['karyawan','👤 Karyawan'],['komponen','💵 Komponen Gaji'],['lembur','⏱ Lembur'],['kasbon','💳 Kasbon'],['proses','⚙️ Proses Payroll'],['laporan','📄 Laporan & Slip']];
+        const tabs = [['karyawan','👤 Karyawan'],['komponen','💵 Komponen Gaji'],['lembur','⏱ Lembur'],['kasbon','💳 Kasbon'],['proses','⚙️ Proses Payroll'],['laporan','📄 Laporan & Slip'],['pajak','🧾 Pajak']];
         if (!state.payrollTab) state.payrollTab = 'karyawan';
         div.innerHTML = `
           <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -8277,6 +8277,8 @@
       employees: [],
       config: null,
       selectedPeriode: (() => { const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; })(),
+      pajakTahun: new Date().getFullYear(),
+      pajakBulan: String(new Date().getMonth()+1).padStart(2,'0'),
     };
 
     function setPayrollTab(t) {
@@ -8302,6 +8304,7 @@
       if (t === 'kasbon')    { await renderPayrollKasbon(host); return; }
       if (t === 'proses')    { await renderPayrollProses(host); return; }
       if (t === 'laporan')   { await renderPayrollLaporan(host); return; }
+      if (t === 'pajak')     { await renderPayrollPajak(host); return; }
     }
     window.renderPayrollTab = renderPayrollTab;
 
@@ -9008,6 +9011,588 @@
       if (w) { w.document.write(html); w.document.close(); }
     }
     window.cetakPayrollRekap = cetakPayrollRekap;
+
+    // ============================================================
+    // TAB PAJAK — Bukti Potong A1, SPT Masa 1721, e-Bupot Export
+    // ============================================================
+
+    async function renderPayrollPajak(host) {
+      const cfg = await loadPayrollConfig();
+      if (!payrollState.pajakTahun) payrollState.pajakTahun = new Date().getFullYear();
+      if (!payrollState.pajakBulan) payrollState.pajakBulan = String(new Date().getMonth()+1).padStart(2,'0');
+      const tahun = payrollState.pajakTahun;
+      const bulan = payrollState.pajakBulan;
+      const bulanNama = ['','Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+
+      // Fetch semua entries untuk tahun tsb
+      const periodeList = Array.from({length:12},(_,i)=>`${tahun}-${String(i+1).padStart(2,'0')}`);
+      const [{ data: periods }, { data: emps }] = await Promise.all([
+        state.supabase.from('payroll_periods').select('id,periode,status').in('periode', periodeList).then(r=>r).catch(()=>({data:[]})),
+        state.supabase.from('payroll_employees').select('id,nik,nama,npwp,jabatan,status_ptkp,aktif').eq('aktif',true).order('nama').then(r=>r).catch(()=>({data:[]})),
+      ]);
+      const periodIds = (periods||[]).filter(p=>p.status==='Final').map(p=>p.id);
+      const periodeMap = Object.fromEntries((periods||[]).map(p=>[p.id,p.periode]));
+
+      let allEntries = [];
+      if (periodIds.length) {
+        const { data: ent } = await state.supabase.from('payroll_entries')
+          .select('*').in('period_id', periodIds).then(r=>r).catch(()=>({data:[]}));
+        allEntries = ent || [];
+      }
+
+      // Agregat per karyawan untuk setahun (Bupot A1)
+      const empMap = Object.fromEntries((emps||[]).map(e=>[e.id,e]));
+      const byEmp = {};
+      for (const en of allEntries) {
+        if (!byEmp[en.employee_id]) byEmp[en.employee_id] = { entries:[], totalBruto:0, totalBpjsKaryawan:0, totalPph21:0, lebihBayar:0 };
+        const periode = periodeMap[en.period_id] || '';
+        byEmp[en.employee_id].entries.push({...en, periode});
+        byEmp[en.employee_id].totalBruto      += (en.total_bruto||0);
+        byEmp[en.employee_id].totalBpjsKaryawan += ((en.bpjs_kes||0)+(en.bpjs_jht||0)+(en.bpjs_jp||0));
+        byEmp[en.employee_id].totalPph21      += (en.pph21||0);
+        byEmp[en.employee_id].lebihBayar      += (en.lebih_bayar_pph||0);
+      }
+
+      // Rekap SPT Masa untuk bulan terpilih
+      const periode = `${tahun}-${bulan}`;
+      const periodObj = (periods||[]).find(p=>p.periode===periode);
+      const masaEntries = periodObj ? allEntries.filter(e=>e.period_id===periodObj.id) : [];
+      const masaTotalBruto = masaEntries.reduce((s,e)=>s+(e.total_bruto||0),0);
+      const masaTotalPph = masaEntries.reduce((s,e)=>s+(e.pph21||0),0);
+      const masaTotalBeban = masaEntries.reduce((s,e)=>s+(e.total_beban_perusahaan||0),0);
+
+      host.innerHTML = `
+        <div class="space-y-6">
+          <!-- Header filter -->
+          <div class="bg-white rounded-xl border border-slate-200 p-4 flex flex-wrap gap-4 items-center">
+            <div class="flex items-center gap-2">
+              <label class="text-xs font-semibold text-slate-600">Tahun:</label>
+              <select onchange="payrollState.pajakTahun=Number(this.value);renderPayrollTab()"
+                class="px-3 py-1.5 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-green-400">
+                ${[2024,2025,2026,2027].map(y=>`<option value="${y}" ${y===tahun?'selected':''}>${y}</option>`).join('')}
+              </select>
+            </div>
+            <div class="ml-auto text-xs text-slate-500">Perusahaan: <span class="font-semibold text-slate-700">${escapeHtml(cfg?.nama_perusahaan||'-')}</span></div>
+          </div>
+
+          <!-- SECTION 1: BUKTI POTONG A1 -->
+          <div class="bg-white rounded-xl border border-slate-200">
+            <div class="px-5 py-3 border-b border-slate-100 flex items-center justify-between">
+              <h3 class="font-bold text-slate-800">📋 Bukti Potong PPh 21 — Form A1 (Tahun ${tahun})</h3>
+              <span class="text-xs text-slate-500">${Object.keys(byEmp).length} karyawan punya data Final</span>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="w-full text-sm">
+                <thead class="bg-slate-50 text-xs uppercase text-slate-500">
+                  <tr>
+                    <th class="px-4 py-3 text-left">Karyawan</th>
+                    <th class="px-4 py-3 text-left">NPWP</th>
+                    <th class="px-4 py-3 text-left">PTKP</th>
+                    <th class="px-4 py-3 text-right">Total Bruto</th>
+                    <th class="px-4 py-3 text-right">Iuran Pensiun</th>
+                    <th class="px-4 py-3 text-right">PPh 21 Setahun</th>
+                    <th class="px-4 py-3 text-right">Lebih Bayar</th>
+                    <th class="px-4 py-3 text-center">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${Object.keys(byEmp).length === 0
+                    ? `<tr><td colspan="8" class="text-center py-8 text-slate-400">Belum ada data payroll Final untuk tahun ${tahun}</td></tr>`
+                    : Object.entries(byEmp).map(([empId, agg]) => {
+                        const emp = empMap[empId] || {};
+                        const netPph = agg.totalPph21 - agg.lebihBayar;
+                        return `<tr class="border-t border-slate-100 hover:bg-slate-50">
+                          <td class="px-4 py-3">
+                            <div class="font-semibold text-slate-800">${escapeHtml(emp.nama||agg.entries[0]?.nama_snapshot||'-')}</div>
+                            <div class="text-xs text-slate-500">NIK: ${escapeHtml(emp.nik||'-')}</div>
+                          </td>
+                          <td class="px-4 py-3 text-slate-600">${escapeHtml(emp.npwp||'-')}</td>
+                          <td class="px-4 py-3"><span class="px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-xs font-semibold">${emp.status_ptkp||'-'}</span></td>
+                          <td class="px-4 py-3 text-right font-semibold">${fmtRp(agg.totalBruto)}</td>
+                          <td class="px-4 py-3 text-right text-slate-600">${fmtRp(agg.totalBpjsKaryawan)}</td>
+                          <td class="px-4 py-3 text-right font-bold text-red-700">${fmtRp(netPph)}</td>
+                          <td class="px-4 py-3 text-right ${agg.lebihBayar>0?'text-green-600 font-semibold':'text-slate-400'}">${agg.lebihBayar>0?fmtRp(agg.lebihBayar):'-'}</td>
+                          <td class="px-4 py-3 text-center">
+                            <button onclick="cetakBupotA1('${empId}','${tahun}')" class="btn-cetak btn-cetak-sm">🖨 A1</button>
+                          </td>
+                        </tr>`;
+                      }).join('')
+                  }
+                </tbody>
+                ${Object.keys(byEmp).length > 0 ? `
+                <tfoot class="bg-slate-50 font-bold text-sm border-t-2 border-slate-200">
+                  <tr>
+                    <td colspan="3" class="px-4 py-3 text-slate-700">TOTAL (${Object.keys(byEmp).length} Karyawan)</td>
+                    <td class="px-4 py-3 text-right">${fmtRp(Object.values(byEmp).reduce((s,a)=>s+a.totalBruto,0))}</td>
+                    <td class="px-4 py-3 text-right">${fmtRp(Object.values(byEmp).reduce((s,a)=>s+a.totalBpjsKaryawan,0))}</td>
+                    <td class="px-4 py-3 text-right text-red-700">${fmtRp(Object.values(byEmp).reduce((s,a)=>s+a.totalPph21-a.lebihBayar,0))}</td>
+                    <td class="px-4 py-3 text-right text-green-600">${fmtRp(Object.values(byEmp).reduce((s,a)=>s+a.lebihBayar,0))}</td>
+                    <td></td>
+                  </tr>
+                </tfoot>` : ''}
+              </table>
+            </div>
+          </div>
+
+          <!-- SECTION 2: SPT MASA 1721 -->
+          <div class="bg-white rounded-xl border border-slate-200">
+            <div class="px-5 py-3 border-b border-slate-100 flex flex-wrap items-center gap-3">
+              <h3 class="font-bold text-slate-800">📊 SPT Masa PPh 21 — Form 1721</h3>
+              <div class="flex items-center gap-2 ml-auto">
+                <label class="text-xs font-semibold text-slate-600">Bulan:</label>
+                <select onchange="payrollState.pajakBulan=this.value;renderPayrollTab()"
+                  class="px-3 py-1.5 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-green-400">
+                  ${Array.from({length:12},(_,i)=>{const m=String(i+1).padStart(2,'0');return `<option value="${m}" ${m===bulan?'selected':''}>${bulanNama[i+1]}</option>`;}).join('')}
+                </select>
+                ${masaEntries.length>0?`<button onclick="cetakSptMasa('${tahun}','${bulan}')" class="btn-cetak btn-cetak-sm">🖨 Cetak SPT</button>`:''}
+              </div>
+            </div>
+            <div class="p-5">
+              ${!periodObj
+                ? `<div class="text-center py-6 text-slate-400">Belum ada data payroll Final untuk ${bulanNama[parseInt(bulan)]} ${tahun}</div>`
+                : `<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
+                    <div class="bg-blue-50 rounded-xl p-4 text-center">
+                      <div class="text-xs text-blue-600 font-semibold mb-1">Jumlah Pegawai</div>
+                      <div class="text-2xl font-bold text-blue-800">${masaEntries.length}</div>
+                    </div>
+                    <div class="bg-green-50 rounded-xl p-4 text-center">
+                      <div class="text-xs text-green-600 font-semibold mb-1">Total Bruto</div>
+                      <div class="text-lg font-bold text-green-800">${fmtRp(masaTotalBruto)}</div>
+                    </div>
+                    <div class="bg-red-50 rounded-xl p-4 text-center">
+                      <div class="text-xs text-red-600 font-semibold mb-1">PPh 21 Dipotong</div>
+                      <div class="text-lg font-bold text-red-800">${fmtRp(masaTotalPph)}</div>
+                    </div>
+                    <div class="bg-amber-50 rounded-xl p-4 text-center">
+                      <div class="text-xs text-amber-600 font-semibold mb-1">Total Beban Perusahaan</div>
+                      <div class="text-lg font-bold text-amber-800">${fmtRp(masaTotalBeban)}</div>
+                    </div>
+                  </div>
+                  <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                      <thead class="bg-slate-50 text-xs uppercase text-slate-500">
+                        <tr>
+                          <th class="px-3 py-2 text-left">No</th>
+                          <th class="px-3 py-2 text-left">Nama / NIK</th>
+                          <th class="px-3 py-2 text-left">NPWP</th>
+                          <th class="px-3 py-2 text-right">Bruto</th>
+                          <th class="px-3 py-2 text-right">BPJS Kary.</th>
+                          <th class="px-3 py-2 text-right">PPh 21</th>
+                          <th class="px-3 py-2 text-right">THP</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        ${masaEntries.map((e,i)=>{
+                          const emp = empMap[e.employee_id]||{};
+                          const bpjsK = (e.bpjs_kes||0)+(e.bpjs_jht||0)+(e.bpjs_jp||0);
+                          return `<tr class="border-t border-slate-100">
+                            <td class="px-3 py-2 text-slate-500">${i+1}</td>
+                            <td class="px-3 py-2"><div class="font-semibold">${escapeHtml(e.nama_snapshot||emp.nama||'-')}</div><div class="text-xs text-slate-500">NIK: ${escapeHtml(emp.nik||'-')}</div></td>
+                            <td class="px-3 py-2 text-slate-600 text-xs">${escapeHtml(emp.npwp||'-')}</td>
+                            <td class="px-3 py-2 text-right">${fmtRp(e.total_bruto||0)}</td>
+                            <td class="px-3 py-2 text-right text-slate-600">${fmtRp(bpjsK)}</td>
+                            <td class="px-3 py-2 text-right font-semibold text-red-700">${fmtRp(e.pph21||0)}</td>
+                            <td class="px-3 py-2 text-right font-bold text-green-700">${fmtRp(e.thp||0)}</td>
+                          </tr>`;
+                        }).join('')}
+                      </tbody>
+                      <tfoot class="bg-slate-50 font-bold border-t-2 border-slate-200">
+                        <tr>
+                          <td colspan="3" class="px-3 py-2">TOTAL</td>
+                          <td class="px-3 py-2 text-right">${fmtRp(masaTotalBruto)}</td>
+                          <td class="px-3 py-2 text-right">${fmtRp(masaEntries.reduce((s,e)=>s+((e.bpjs_kes||0)+(e.bpjs_jht||0)+(e.bpjs_jp||0)),0))}</td>
+                          <td class="px-3 py-2 text-right text-red-700">${fmtRp(masaTotalPph)}</td>
+                          <td class="px-3 py-2 text-right text-green-700">${fmtRp(masaEntries.reduce((s,e)=>s+(e.thp||0),0))}</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>`
+              }
+            </div>
+          </div>
+
+          <!-- SECTION 3: e-BUPOT EXPORT -->
+          <div class="bg-white rounded-xl border border-slate-200">
+            <div class="px-5 py-3 border-b border-slate-100 flex flex-wrap items-center gap-3">
+              <h3 class="font-bold text-slate-800">📤 e-Bupot / Coretax Export</h3>
+              <span class="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-semibold">Format DJP</span>
+            </div>
+            <div class="p-5">
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div class="border border-slate-200 rounded-xl p-4">
+                  <div class="text-sm font-bold text-slate-700 mb-1">📋 Bukti Potong A1 — Setahun</div>
+                  <div class="text-xs text-slate-500 mb-3">CSV semua karyawan tahun ${tahun} untuk upload e-Bupot Unifikasi / Coretax</div>
+                  <button onclick="exportEbupotA1('${tahun}')" class="btn-cetak btn-cetak-sm w-full justify-center">
+                    ⬇️ Download CSV A1 ${tahun}
+                  </button>
+                </div>
+                <div class="border border-slate-200 rounded-xl p-4">
+                  <div class="text-sm font-bold text-slate-700 mb-1">📊 SPT Masa 1721 — Bulanan</div>
+                  <div class="text-xs text-slate-500 mb-3">CSV periode ${bulanNama[parseInt(bulan)]} ${tahun} untuk SPT Masa PPh 21</div>
+                  <button onclick="exportSptMasaCsv('${tahun}','${bulan}')" class="btn-cetak btn-cetak-sm w-full justify-center">
+                    ⬇️ Download CSV Masa ${bulanNama[parseInt(bulan)]}
+                  </button>
+                </div>
+                <div class="border border-slate-200 rounded-xl p-4">
+                  <div class="text-sm font-bold text-slate-700 mb-1">🗂 Rekap BPJS Bulanan</div>
+                  <div class="text-xs text-slate-500 mb-3">CSV iuran BPJS karyawan + perusahaan periode ${bulanNama[parseInt(bulan)]} ${tahun}</div>
+                  <button onclick="exportBpjsCsv('${tahun}','${bulan}')" class="btn-cetak btn-cetak-sm w-full justify-center">
+                    ⬇️ Download CSV BPJS
+                  </button>
+                </div>
+              </div>
+              <div class="mt-4 bg-amber-50 border border-amber-200 rounded-xl p-4 text-xs text-amber-800">
+                <strong>ℹ️ Cara upload ke Coretax DJP:</strong><br>
+                1. Login ke <b>coretaxdjp.pajak.go.id</b> → Pemotongan/Pemungutan → e-Bupot Unifikasi<br>
+                2. Pilih jenis: <b>PPh Pasal 21</b> → Import CSV → pilih file yang didownload<br>
+                3. Validasi → Submit → Bayar sesuai kode billing yang terbit
+              </div>
+            </div>
+          </div>
+        </div>`;
+    }
+    window.renderPayrollPajak = renderPayrollPajak;
+
+    // --- Cetak Bukti Potong A1 per karyawan ---
+    async function cetakBupotA1(empId, tahun) {
+      const cfg = await loadPayrollConfig();
+      const emp = payrollState.employees.find(e=>e.id===empId);
+      if (!emp) { toast('Data karyawan tidak ditemukan.','warn'); return; }
+
+      // Ambil semua entries final untuk karyawan ini di tahun tsb
+      const periodeList = Array.from({length:12},(_,i)=>`${tahun}-${String(i+1).padStart(2,'0')}`);
+      const { data: periods } = await state.supabase.from('payroll_periods')
+        .select('id,periode').in('periode',periodeList).eq('status','Final').then(r=>r).catch(()=>({data:[]}));
+      const periodIds = (periods||[]).map(p=>p.id);
+      const periodByPeriode = Object.fromEntries((periods||[]).map(p=>[p.periode,p.id]));
+
+      let entries = [];
+      if (periodIds.length) {
+        const { data: ent } = await state.supabase.from('payroll_entries')
+          .select('*').in('period_id',periodIds).eq('employee_id',empId).then(r=>r).catch(()=>({data:[]}));
+        entries = ent || [];
+      }
+
+      const totalBruto = entries.reduce((s,e)=>s+(e.total_bruto||0),0);
+      const totalBpjsKes = entries.reduce((s,e)=>s+(e.bpjs_kes||0),0);
+      const totalBpjsJht = entries.reduce((s,e)=>s+(e.bpjs_jht||0),0);
+      const totalBpjsJp  = entries.reduce((s,e)=>s+(e.bpjs_jp||0),0);
+      const iuranPensiun = totalBpjsJp; // JP adalah iuran pensiun
+      const pkp = Math.max(0, totalBruto - iuranPensiun - (PTKP[emp.status_ptkp]||54000000));
+      const pphSetahun = entries.reduce((s,e)=>s+(e.pph21||0),0);
+      const lebihBayar  = entries.reduce((s,e)=>s+(e.lebih_bayar_pph||0),0);
+      const netPph = pphSetahun - lebihBayar;
+      const bulanNamaArr = ['','Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+
+      const w = window.open('','_blank','width=820,height=1100');
+      w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Bukti Potong A1 - ${emp.nama}</title>
+      <style>
+        body{font-family:Arial,sans-serif;font-size:11px;color:#000;margin:0;padding:20px}
+        .page{max-width:780px;margin:0 auto}
+        h2{text-align:center;font-size:14px;margin:0 0 2px}
+        h3{text-align:center;font-size:12px;margin:0 0 12px;font-weight:normal}
+        table{width:100%;border-collapse:collapse;margin-bottom:10px}
+        td,th{padding:3px 6px;border:1px solid #999;font-size:11px;vertical-align:top}
+        .lbl{background:#f5f5f5;font-weight:bold;width:40%}
+        .section{font-weight:bold;background:#ddd;text-align:center;font-size:12px}
+        .right{text-align:right}
+        .center{text-align:center}
+        .ttd{margin-top:30px;display:flex;justify-content:space-between}
+        .ttd-box{text-align:center;width:220px}
+        @media print{body{padding:0}button{display:none}}
+      </style></head><body>
+      <div class="page">
+        <div style="text-align:center;margin-bottom:16px">
+          <div style="font-size:15px;font-weight:bold">${escapeHtml(cfg?.nama_perusahaan||'')}</div>
+          <div style="font-size:11px">${escapeHtml(cfg?.alamat_perusahaan||'')}</div>
+          <div style="font-size:11px">NPWP: ${escapeHtml(cfg?.npwp_perusahaan||'-')}</div>
+          <div style="margin-top:8px;font-size:13px;font-weight:bold;border-top:2px solid #000;border-bottom:2px solid #000;padding:4px 0">
+            BUKTI PEMOTONGAN PAJAK PENGHASILAN PASAL 21<br>
+            <span style="font-weight:normal;font-size:11px">Formulir A1 — Pegawai Tetap Tahun Pajak ${tahun}</span>
+          </div>
+        </div>
+
+        <table>
+          <tr><td class="lbl">Nama Pemotong</td><td>${escapeHtml(cfg?.nama_perusahaan||'-')}</td><td class="lbl">NPWP Pemotong</td><td>${escapeHtml(cfg?.npwp_perusahaan||'-')}</td></tr>
+          <tr><td class="lbl">Nama Karyawan</td><td>${escapeHtml(emp.nama)}</td><td class="lbl">NPWP Karyawan</td><td>${escapeHtml(emp.npwp||'-')}</td></tr>
+          <tr><td class="lbl">NIK / KTP</td><td>${escapeHtml(emp.nik)}</td><td class="lbl">Status PTKP</td><td>${emp.status_ptkp||'-'}</td></tr>
+          <tr><td class="lbl">Jabatan</td><td>${escapeHtml(emp.jabatan||'-')}</td><td class="lbl">Tahun Pajak</td><td>${tahun}</td></tr>
+        </table>
+
+        <table>
+          <tr><td colspan="3" class="section">RINCIAN PENGHASILAN & PEMOTONGAN</td></tr>
+          <tr><td class="lbl" style="width:5%">A</td><td class="lbl" style="width:55%">Penghasilan Bruto Setahun</td><td class="right">${fmtRp(totalBruto)}</td></tr>
+          <tr><td></td><td class="lbl">Pengurangan: Iuran Pensiun (BPJS JP karyawan)</td><td class="right">(${fmtRp(iuranPensiun)})</td></tr>
+          <tr><td></td><td class="lbl">Penghasilan Neto Setahun</td><td class="right">${fmtRp(totalBruto - iuranPensiun)}</td></tr>
+          <tr><td class="lbl">B</td><td class="lbl">PTKP (${emp.status_ptkp})</td><td class="right">(${fmtRp(PTKP[emp.status_ptkp]||54000000)})</td></tr>
+          <tr><td class="lbl">C</td><td class="lbl"><b>Penghasilan Kena Pajak (PKP)</b></td><td class="right"><b>${fmtRp(pkp)}</b></td></tr>
+          <tr><td class="lbl">D</td><td class="lbl">PPh 21 Terutang Setahun (Metode TER + Rekonsiliasi Des)</td><td class="right">${fmtRp(pphSetahun)}</td></tr>
+          <tr><td class="lbl">E</td><td class="lbl">PPh 21 Lebih Bayar (dikembalikan Des)</td><td class="right">${fmtRp(lebihBayar)}</td></tr>
+          <tr><td class="lbl">F</td><td class="lbl"><b>PPh 21 Dipotong Bersih</b></td><td class="right"><b style="color:#c00">${fmtRp(netPph)}</b></td></tr>
+        </table>
+
+        <table>
+          <tr><td colspan="4" class="section">RINCIAN IURAN BPJS KARYAWAN</td></tr>
+          <tr><th class="center">Jenis</th><th class="right">Iuran Karyawan Setahun</th></tr>
+          <tr><td>BPJS Kesehatan (1%)</td><td class="right">${fmtRp(totalBpjsKes)}</td></tr>
+          <tr><td>BPJS JHT (2%)</td><td class="right">${fmtRp(totalBpjsJht)}</td></tr>
+          <tr><td>BPJS JP (1%)</td><td class="right">${fmtRp(totalBpjsJp)}</td></tr>
+          <tr><td><b>Total</b></td><td class="right"><b>${fmtRp(totalBpjsKes+totalBpjsJht+totalBpjsJp)}</b></td></tr>
+        </table>
+
+        <table>
+          <tr><td colspan="13" class="section">REKAP BULANAN</td></tr>
+          <tr>
+            ${Array.from({length:12},(_,i)=>`<th class="center" style="font-size:9px">${bulanNamaArr[i+1].slice(0,3)}</th>`).join('')}
+            <th class="center">Total</th>
+          </tr>
+          <tr>
+            ${Array.from({length:12},(_,i)=>{
+              const m = String(i+1).padStart(2,'0');
+              const p = `${tahun}-${m}`;
+              const pid = periodByPeriode[p];
+              const en = pid ? entries.find(e=>e.period_id===pid) : null;
+              return `<td class="right" style="font-size:9px">${en?fmtRp(en.pph21||0):'-'}</td>`;
+            }).join('')}
+            <td class="right" style="font-size:9px"><b>${fmtRp(netPph)}</b></td>
+          </tr>
+        </table>
+
+        <div class="ttd">
+          <div class="ttd-box">
+            <div>Penerima Bukti Potong,</div>
+            <div style="margin:40px 0 2px">___________________________</div>
+            <div>${escapeHtml(emp.nama)}</div>
+          </div>
+          <div class="ttd-box">
+            <div>Pemotong Pajak,</div>
+            <div style="margin:40px 0 2px">___________________________</div>
+            <div><b>${escapeHtml(cfg?.nama_ttd||'...')}</b></div>
+            <div>${escapeHtml(cfg?.jabatan_ttd||'...')}</div>
+          </div>
+        </div>
+        <div style="margin-top:12px;text-align:center">
+          <button onclick="window.print()" style="padding:8px 24px;background:#11335d;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:bold;cursor:pointer">🖨 Print</button>
+        </div>
+      </div>
+      </body></html>`);
+      w.document.close();
+    }
+    window.cetakBupotA1 = cetakBupotA1;
+
+    // --- Cetak SPT Masa 1721 ---
+    async function cetakSptMasa(tahun, bulan) {
+      const cfg = await loadPayrollConfig();
+      const bulanNamaArr = ['','Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+      const bulanInt = parseInt(bulan);
+
+      const { data: periodObj } = await state.supabase.from('payroll_periods')
+        .select('id').eq('periode',`${tahun}-${bulan}`).eq('status','Final').single().then(r=>r).catch(()=>({data:null}));
+      if (!periodObj) { toast('Tidak ada data Final untuk periode ini.','warn'); return; }
+
+      const { data: entries } = await state.supabase.from('payroll_entries')
+        .select('*').eq('period_id', periodObj.id).then(r=>r).catch(()=>({data:[]}));
+      const empMap = Object.fromEntries((payrollState.employees||[]).map(e=>[e.id,e]));
+
+      const totalBruto = (entries||[]).reduce((s,e)=>s+(e.total_bruto||0),0);
+      const totalPph   = (entries||[]).reduce((s,e)=>s+(e.pph21||0),0);
+      const totalBeban = (entries||[]).reduce((s,e)=>s+(e.total_beban_perusahaan||0),0);
+
+      const w = window.open('','_blank','width=900,height=1100');
+      w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>SPT Masa 1721 - ${bulanNamaArr[bulanInt]} ${tahun}</title>
+      <style>
+        body{font-family:Arial,sans-serif;font-size:11px;color:#000;margin:0;padding:20px}
+        .page{max-width:860px;margin:0 auto}
+        h2{text-align:center;font-size:14px;margin:0 0 4px}
+        table{width:100%;border-collapse:collapse;margin-bottom:10px}
+        td,th{padding:3px 6px;border:1px solid #999;font-size:11px}
+        .lbl{background:#f5f5f5;font-weight:bold}
+        .section{font-weight:bold;background:#ddd;text-align:center;font-size:12px}
+        .right{text-align:right} .center{text-align:center}
+        @media print{button{display:none}}
+      </style></head><body>
+      <div class="page">
+        <h2>${escapeHtml(cfg?.nama_perusahaan||'')}</h2>
+        <h2>REKAP SPT MASA PPh PASAL 21 — FORMULIR 1721</h2>
+        <h2 style="font-weight:normal;font-size:12px">Masa Pajak: ${bulanNamaArr[bulanInt]} ${tahun}</h2>
+        <table style="margin-bottom:16px">
+          <tr><td class="lbl" style="width:30%">Nama Perusahaan</td><td>${escapeHtml(cfg?.nama_perusahaan||'-')}</td><td class="lbl" style="width:30%">NPWP</td><td>${escapeHtml(cfg?.npwp_perusahaan||'-')}</td></tr>
+          <tr><td class="lbl">Masa Pajak</td><td>${bulanNamaArr[bulanInt]} ${tahun}</td><td class="lbl">Jumlah Karyawan</td><td>${(entries||[]).length} orang</td></tr>
+        </table>
+        <table>
+          <thead><tr class="section"><th colspan="8">DAFTAR PEMOTONGAN PPh PASAL 21</th></tr>
+          <tr><th class="center">No</th><th>Nama</th><th>NPWP</th><th>PTKP</th><th class="right">Penghasilan Bruto</th><th class="right">BPJS Kary.</th><th class="right">PPh 21</th><th class="right">THP</th></tr></thead>
+          <tbody>
+          ${(entries||[]).map((e,i)=>{
+            const emp = empMap[e.employee_id]||{};
+            const bpjsK = (e.bpjs_kes||0)+(e.bpjs_jht||0)+(e.bpjs_jp||0);
+            return `<tr><td class="center">${i+1}</td><td>${escapeHtml(e.nama_snapshot||emp.nama||'-')}<br><small>NIK: ${escapeHtml(emp.nik||'-')}</small></td><td>${escapeHtml(emp.npwp||'-')}</td><td class="center">${emp.status_ptkp||'-'}</td><td class="right">${fmtRp(e.total_bruto||0)}</td><td class="right">${fmtRp(bpjsK)}</td><td class="right">${fmtRp(e.pph21||0)}</td><td class="right">${fmtRp(e.thp||0)}</td></tr>`;
+          }).join('')}
+          </tbody>
+          <tfoot><tr><td colspan="4" class="lbl">JUMLAH</td><td class="right lbl">${fmtRp(totalBruto)}</td><td class="right lbl">${fmtRp((entries||[]).reduce((s,e)=>s+((e.bpjs_kes||0)+(e.bpjs_jht||0)+(e.bpjs_jp||0)),0))}</td><td class="right lbl">${fmtRp(totalPph)}</td><td class="right lbl">${fmtRp((entries||[]).reduce((s,e)=>s+(e.thp||0),0))}</td></tr></tfoot>
+        </table>
+        <table>
+          <tr><td colspan="2" class="section">RINGKASAN SETORAN</td></tr>
+          <tr><td class="lbl" style="width:60%">PPh Pasal 21 yang harus disetor</td><td class="right">${fmtRp(totalPph)}</td></tr>
+          <tr><td class="lbl">Total Beban Perusahaan (termasuk BPJS employer)</td><td class="right">${fmtRp(totalBeban)}</td></tr>
+          <tr><td class="lbl">Tanggal Jatuh Tempo Setor</td><td>Tanggal 10 bulan berikutnya</td></tr>
+          <tr><td class="lbl">Tanggal Jatuh Tempo Lapor SPT</td><td>Tanggal 20 bulan berikutnya</td></tr>
+        </table>
+        <div style="margin-top:20px;display:flex;justify-content:flex-end">
+          <div style="text-align:center;width:220px">
+            <div>Pembuat Laporan,</div>
+            <div style="margin:40px 0 2px">___________________________</div>
+            <div><b>${escapeHtml(cfg?.nama_ttd||'...')}</b></div>
+            <div>${escapeHtml(cfg?.jabatan_ttd||'...')}</div>
+          </div>
+        </div>
+        <div style="margin-top:12px;text-align:center">
+          <button onclick="window.print()" style="padding:8px 24px;background:#11335d;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:bold;cursor:pointer">🖨 Print</button>
+        </div>
+      </div></body></html>`);
+      w.document.close();
+    }
+    window.cetakSptMasa = cetakSptMasa;
+
+    // --- Export CSV e-Bupot A1 (setahun) ---
+    async function exportEbupotA1(tahun) {
+      const cfg = await loadPayrollConfig();
+      const periodeList = Array.from({length:12},(_,i)=>`${tahun}-${String(i+1).padStart(2,'0')}`);
+      const { data: periods } = await state.supabase.from('payroll_periods')
+        .select('id,periode').in('periode',periodeList).eq('status','Final').then(r=>r).catch(()=>({data:[]}));
+      const periodIds = (periods||[]).map(p=>p.id);
+      if (!periodIds.length) { toast('Tidak ada data Final untuk tahun ini.','warn'); return; }
+
+      const { data: entries } = await state.supabase.from('payroll_entries')
+        .select('*').in('period_id',periodIds).then(r=>r).catch(()=>({data:[]}));
+      const empMap = Object.fromEntries((payrollState.employees||[]).map(e=>[e.id,e]));
+
+      // Agregat per karyawan
+      const byEmp = {};
+      for (const en of (entries||[])) {
+        if (!byEmp[en.employee_id]) byEmp[en.employee_id] = { totalBruto:0, totalPph:0, lebihBayar:0, totalBpjsJp:0 };
+        byEmp[en.employee_id].totalBruto   += (en.total_bruto||0);
+        byEmp[en.employee_id].totalPph     += (en.pph21||0);
+        byEmp[en.employee_id].lebihBayar   += (en.lebih_bayar_pph||0);
+        byEmp[en.employee_id].totalBpjsJp  += (en.bpjs_jp||0);
+      }
+
+      const header = ['No','NPWP_PEMOTONG','NAMA_PEMOTONG','NPWP_PENERIMA','NAMA_PENERIMA','NIK','STATUS_PTKP','JABATAN','TAHUN_PAJAK','BRUTO_SETAHUN','IURAN_PENSIUN','PKP','PPH21_TERUTANG','LEBIH_BAYAR','PPH21_DIPOTONG'];
+      const rows = Object.entries(byEmp).map(([empId, agg], idx) => {
+        const emp = empMap[empId] || {};
+        const pkp = Math.max(0, agg.totalBruto - agg.totalBpjsJp - (PTKP[emp.status_ptkp]||54000000));
+        const netPph = agg.totalPph - agg.lebihBayar;
+        return [
+          idx+1,
+          cfg?.npwp_perusahaan||'',
+          cfg?.nama_perusahaan||'',
+          emp.npwp||'',
+          emp.nama||'',
+          emp.nik||'',
+          emp.status_ptkp||'',
+          emp.jabatan||'',
+          tahun,
+          agg.totalBruto,
+          agg.totalBpjsJp,
+          pkp,
+          agg.totalPph,
+          agg.lebihBayar,
+          netPph,
+        ].map(v=>typeof v==='string'?`"${v.replace(/"/g,'""')}"`:v);
+      });
+
+      const csv = [header, ...rows].map(r=>r.join(',')).join('\r\n');
+      const blob = new Blob(['﻿'+csv], {type:'text/csv;charset=utf-8'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = `eBupot_A1_${tahun}.csv`; a.click();
+      URL.revokeObjectURL(url);
+      toast('CSV Bukti Potong A1 berhasil didownload.','success');
+    }
+    window.exportEbupotA1 = exportEbupotA1;
+
+    // --- Export CSV SPT Masa ---
+    async function exportSptMasaCsv(tahun, bulan) {
+      const cfg = await loadPayrollConfig();
+      const { data: periodObj } = await state.supabase.from('payroll_periods')
+        .select('id').eq('periode',`${tahun}-${bulan}`).eq('status','Final').single().then(r=>r).catch(()=>({data:null}));
+      if (!periodObj) { toast('Tidak ada data Final untuk periode ini.','warn'); return; }
+      const { data: entries } = await state.supabase.from('payroll_entries')
+        .select('*').eq('period_id', periodObj.id).then(r=>r).catch(()=>({data:[]}));
+      const empMap = Object.fromEntries((payrollState.employees||[]).map(e=>[e.id,e]));
+
+      const header = ['No','NPWP_PEMOTONG','NAMA_PEMOTONG','MASA_PAJAK','NPWP_KARYAWAN','NAMA_KARYAWAN','NIK','STATUS_PTKP','BRUTO','BPJS_KES','BPJS_JHT','BPJS_JP','PPH21','THP'];
+      const rows = (entries||[]).map((e,i) => {
+        const emp = empMap[e.employee_id] || {};
+        return [
+          i+1,
+          cfg?.npwp_perusahaan||'',
+          cfg?.nama_perusahaan||'',
+          `${tahun}-${bulan}`,
+          emp.npwp||'',
+          e.nama_snapshot||emp.nama||'',
+          emp.nik||'',
+          emp.status_ptkp||'',
+          e.total_bruto||0,
+          e.bpjs_kes||0,
+          e.bpjs_jht||0,
+          e.bpjs_jp||0,
+          e.pph21||0,
+          e.thp||0,
+        ].map(v=>typeof v==='string'?`"${v.replace(/"/g,'""')}"`:v);
+      });
+
+      const csv = [header, ...rows].map(r=>r.join(',')).join('\r\n');
+      const blob = new Blob(['﻿'+csv], {type:'text/csv;charset=utf-8'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = `SPTMasa_1721_${tahun}-${bulan}.csv`; a.click();
+      URL.revokeObjectURL(url);
+      toast('CSV SPT Masa berhasil didownload.','success');
+    }
+    window.exportSptMasaCsv = exportSptMasaCsv;
+
+    // --- Export CSV BPJS Bulanan ---
+    async function exportBpjsCsv(tahun, bulan) {
+      const cfg = await loadPayrollConfig();
+      const { data: periodObj } = await state.supabase.from('payroll_periods')
+        .select('id').eq('periode',`${tahun}-${bulan}`).eq('status','Final').single().then(r=>r).catch(()=>({data:null}));
+      if (!periodObj) { toast('Tidak ada data Final untuk periode ini.','warn'); return; }
+      const { data: entries } = await state.supabase.from('payroll_entries')
+        .select('*').eq('period_id', periodObj.id).then(r=>r).catch(()=>({data:[]}));
+      const empMap = Object.fromEntries((payrollState.employees||[]).map(e=>[e.id,e]));
+
+      const header = ['No','NAMA_PERUSAHAAN','PERIODE','NAMA_KARYAWAN','NIK','BPJS_NO_KES','BPJS_NO_TK','BPJS_KES_KARY','BPJS_JHT_KARY','BPJS_JP_KARY','BPJS_KES_PERUS','BPJS_JKK_PERUS','BPJS_JKM_PERUS','BPJS_JHT_PERUS','BPJS_JP_PERUS','TOTAL_BPJS'];
+      const rows = (entries||[]).map((e,i) => {
+        const emp = empMap[e.employee_id] || {};
+        const karyTotal = (e.bpjs_kes||0)+(e.bpjs_jht||0)+(e.bpjs_jp||0);
+        const perusTotal = (e.bpjs_kes_perusahaan||0)+(e.bpjs_jkk_perusahaan||0)+(e.bpjs_jkm_perusahaan||0)+(e.bpjs_jht_perusahaan||0)+(e.bpjs_jp_perusahaan||0);
+        return [
+          i+1,
+          cfg?.nama_perusahaan||'',
+          `${tahun}-${bulan}`,
+          e.nama_snapshot||emp.nama||'',
+          emp.nik||'',
+          emp.bpjs_kes_nomor||'',
+          emp.bpjs_tk_nomor||'',
+          e.bpjs_kes||0,
+          e.bpjs_jht||0,
+          e.bpjs_jp||0,
+          e.bpjs_kes_perusahaan||0,
+          e.bpjs_jkk_perusahaan||0,
+          e.bpjs_jkm_perusahaan||0,
+          e.bpjs_jht_perusahaan||0,
+          e.bpjs_jp_perusahaan||0,
+          karyTotal + perusTotal,
+        ].map(v=>typeof v==='string'?`"${v.replace(/"/g,'""')}"`:v);
+      });
+
+      const csv = [header, ...rows].map(r=>r.join(',')).join('\r\n');
+      const blob = new Blob(['﻿'+csv], {type:'text/csv;charset=utf-8'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = `BPJS_${tahun}-${bulan}.csv`; a.click();
+      URL.revokeObjectURL(url);
+      toast('CSV BPJS berhasil didownload.','success');
+    }
+    window.exportBpjsCsv = exportBpjsCsv;
 
     async function saveSettings() {
       const name = $('#settings-name').value.trim();
