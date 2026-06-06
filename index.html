@@ -38,6 +38,27 @@
 
   <style>
     body { font-family: 'Inter', system-ui, sans-serif; }
+
+    /* ===== TOMBOL CETAK / PRINT — global style ===== */
+    .btn-cetak {
+      display: inline-flex; align-items: center; gap: 7px;
+      padding: 9px 20px;
+      background: linear-gradient(135deg, #11335d 0%, #1a5299 100%);
+      color: #fff !important; border: none; border-radius: 10px;
+      font-size: 0.875rem; font-weight: 800; letter-spacing: 0.04em;
+      box-shadow: 0 3px 10px rgba(17,51,93,0.35), inset 0 1px 0 rgba(255,255,255,0.12);
+      cursor: pointer; white-space: nowrap; text-decoration: none;
+      transition: all 0.18s cubic-bezier(.4,0,.2,1);
+    }
+    .btn-cetak:hover {
+      background: linear-gradient(135deg, #0d2647 0%, #134082 100%);
+      box-shadow: 0 6px 22px rgba(17,51,93,0.45), inset 0 1px 0 rgba(255,255,255,0.15);
+      transform: translateY(-2px);
+    }
+    .btn-cetak:active { transform: scale(0.96); box-shadow: 0 1px 5px rgba(17,51,93,0.25); }
+    .btn-cetak-sm {
+      padding: 6px 14px; font-size: 0.78rem; border-radius: 8px; gap: 5px;
+    }
     .hide { display: none !important; }
     /* Smooth transition saat ganti halaman */
     .page { animation: fadeIn .2s ease-out; }
@@ -3306,7 +3327,7 @@
                 </div>
                 <div class="flex gap-2 flex-wrap mt-2 mb-1">
                   <button onclick='openInspectionFormModal(${JSON.stringify(insp).replace(/'/g, "&apos;")})' class="px-3 py-1.5 rounded-lg bg-navy hover:bg-navy-700 text-white text-xs font-semibold">✏ Edit Siklus</button>
-                  <button onclick="cetakInspeksiReport('${insp.id}')" class="px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold">🖨 Cetak Laporan</button>
+                  <button onclick="cetakInspeksiReport('${insp.id}')" class="btn-cetak btn-cetak-sm">🖨 Cetak Laporan</button>
                   ${state.profile.role === 'admin' ? `<button onclick="confirmDeleteInspection('${insp.id}', '${escapeHtml(insp.inspection_code)}')" class="px-3 py-1.5 rounded-lg bg-red-100 hover:bg-red-200 text-red-700 text-xs font-semibold">🗑 Hapus Siklus</button>` : ''}
                 </div>
                 <p class="text-base text-slate-700 mt-1">🏭 ${escapeHtml(insp.parent_unit?.name || '—')} (${escapeHtml(insp.parent_unit?.type || '—')})</p>
@@ -5840,7 +5861,7 @@
                 </div>
               </div>
               <div class="flex gap-2 flex-wrap">
-                <button onclick="printEquipmentDetail()" class="px-3 py-2 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-700 text-sm font-medium no-print">🖨 Print / PDF</button>
+                <button onclick="printEquipmentDetail()" class="btn-cetak no-print">🖨 Print / PDF</button>
                 ${isAdmin ? `
                   ${canPinjam ? `<button onclick="openLoanModal('${eq.id}')" class="px-3 py-2 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-800 text-sm font-medium">🤝 Pinjam Pengganti</button>` : ''}
                   ${canKembalikan ? `<button onclick="openReturnLoanModal('${activeLoan.id}')" class="px-3 py-2 rounded-lg bg-green-100 hover:bg-green-200 text-green-800 text-sm font-medium">↩️ Kembalikan Pinjaman</button>` : ''}
@@ -6768,7 +6789,7 @@
             ${chip('mutasi', 'Mutasi')}
             ${chip('pinjam', 'Pinjaman')}
             ${chip('downtime', 'Downtime')}
-            <button onclick="cetakHistoryReport()" class="px-3 py-1 rounded-full text-xs font-semibold bg-navy hover:bg-navy-700 text-white">🖨 Print</button>
+            <button onclick="cetakHistoryReport()" class="btn-cetak btn-cetak-sm">🖨 Print</button>
           </div>
         </div>
         ${ev.length === 0 ? '<div class="text-center py-6 text-slate-400 text-sm bg-slate-50 rounded-lg">Belum ada riwayat untuk filter ini.</div>' :
@@ -8724,7 +8745,7 @@
             <h3 class="text-xl font-bold text-slate-900">📦 CSPP — Critical Spare Parts</h3>
             <p class="text-sm text-slate-500">Perencanaan suku cadang kritis — klik kartu merah/kuning untuk filter cepat.</p>
           </div>
-          <button onclick="cetakCsppReport()" class="px-4 py-2.5 rounded-lg border border-slate-300 hover:bg-slate-50 text-sm font-semibold text-slate-700 whitespace-nowrap">🖨 Cetak Justifikasi</button>
+          <button onclick="cetakCsppReport()" class="btn-cetak">🖨 Cetak Justifikasi</button>
         </div>
         <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
           ${kpi('Total Spare Parts', total)}
@@ -8873,7 +8894,7 @@
             <p class="text-sm text-slate-500">RPN = Severity × Occurrence × Detection. Makin tinggi = makin prioritas.</p>
           </div>
           <div class="flex gap-2">
-            <button onclick="cetakFmeaReport()" class="px-4 py-2.5 rounded-lg border border-slate-300 hover:bg-slate-50 text-sm font-semibold text-slate-700 whitespace-nowrap">🖨 Cetak SPK</button>
+            <button onclick="cetakFmeaReport()" class="btn-cetak">🖨 Cetak SPK</button>
             <button onclick="openFmeaForm()" class="bg-safety hover:bg-safety/90 text-white px-4 py-2.5 rounded-lg text-sm font-semibold whitespace-nowrap">+ Tambah FMEA</button>
           </div>
         </div>
@@ -9661,6 +9682,7 @@
               ${(state.parentUnits||[]).map(u=>`<option value="${u.id}" ${String(availFilter.unit_id)===String(u.id)?'selected':''}>${escapeHtml(u.name)}</option>`).join('')}
             </select>
             <span class="text-xs text-slate-400">12 bulan terakhir · ${escapeHtml(unitName)}</span>
+            <button onclick="cetakRamTrendReport()" class="btn-cetak ml-auto">🖨 Cetak Laporan Trend</button>
           </div>
 
           <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -9718,6 +9740,65 @@
       }
     }
     window.renderRamTrendPage = renderRamTrendPage;
+
+    function cetakRamTrendReport() {
+      const host = document.getElementById('ram-content');
+      if (!host) return;
+      const chartSvg  = host.querySelector('svg')?.outerHTML || '';
+      const tableHtml = host.querySelector('table')?.outerHTML || '';
+      const unitName  = availFilter.unit_id
+        ? (state.parentUnits||[]).find(u=>String(u.id)===String(availFilter.unit_id))?.name || 'Unit'
+        : 'Semua Fleet';
+      const tgl = new Date().toLocaleDateString('id-ID',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+      const who = escapeHtml(state.profile?.full_name || state.profile?.email || '');
+      const html = `<!doctype html><html><head><meta charset="utf-8">
+        <title>Laporan Trend RAM — ${escapeHtml(unitName)}</title>
+        <style>
+          *{box-sizing:border-box} body{font-family:Arial,Helvetica,sans-serif;color:#1f2937;padding:28px;font-size:12px;line-height:1.5;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+          @page{size:A4 landscape;margin:12mm}
+          .kop{display:flex;align-items:center;gap:14px;border-bottom:3px solid #11335d;padding-bottom:10px;margin-bottom:14px}
+          .brand{font-size:20px;font-weight:800;color:#11335d}.ram{color:#f97316}
+          .sub{font-size:11px;color:#6b7280}
+          h1{font-size:14px;font-weight:800;text-align:center;text-transform:uppercase;margin:10px 0 4px;color:#11335d}
+          .meta{text-align:center;font-size:10px;color:#6b7280;margin-bottom:14px}
+          svg{width:100%;max-height:220px;display:block;margin:0 auto 16px}
+          table{width:100%;border-collapse:collapse;margin-top:10px}
+          th{background:#11335d;color:white;padding:6px 10px;text-align:left;font-size:10px;text-transform:uppercase}
+          td{padding:5px 10px;border-bottom:1px solid #e5e7eb;font-size:11px}
+          tr:nth-child(even) td{background:#f8fafc}
+          .badge-ok{background:#dcfce7;color:#166534;padding:2px 7px;border-radius:9px;font-weight:700;font-size:10px}
+          .badge-warn{background:#fef3c7;color:#92400e;padding:2px 7px;border-radius:9px;font-weight:700;font-size:10px}
+          .badge-bad{background:#fee2e2;color:#991b1b;padding:2px 7px;border-radius:9px;font-weight:700;font-size:10px}
+          .foot{margin-top:16px;border-top:1px solid #e2e8f0;padding-top:6px;font-size:9px;color:#94a3b8;display:flex;justify-content:space-between}
+          @media print{button{display:none}}
+        </style>
+      </head><body>
+        <div class="kop">
+          <div>
+            <div class="brand">eRAM<span class="ram">Hoist</span></div>
+            <div class="sub">Laporan Trend RAM — Ketersediaan Operasional</div>
+          </div>
+        </div>
+        <h1>Trend Availability (Ao & Ai) — 12 Bulan Terakhir</h1>
+        <div class="meta">${escapeHtml(unitName)} &nbsp;|&nbsp; ${tgl} &nbsp;|&nbsp; Dicetak oleh: ${who}</div>
+        <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;padding:8px 14px;font-size:10px;margin-bottom:12px;color:#0c4a6e">
+          <b>Keterangan:</b> &nbsp;
+          <span style="color:#11335d">━ Ao</span> = Operational Availability (semua downtime) &nbsp;|&nbsp;
+          <span style="color:#16a34a">- - Ai</span> = Inherent Availability (unplanned only) &nbsp;|&nbsp;
+          <span style="color:#ef4444">- - 95%</span> = Target minimal
+        </div>
+        ${chartSvg}
+        ${tableHtml}
+        <div class="foot">
+          <span>eRAMHoist — Rigbase Station</span>
+          <span>${new Date().toLocaleString('id-ID')}</span>
+        </div>
+        <script>window.onload=()=>window.print()<\/script>
+      </body></html>`;
+      const w = window.open('','_blank','width=1000,height=750');
+      if (w) { w.document.write(html); w.document.close(); }
+    }
+    window.cetakRamTrendReport = cetakRamTrendReport;
 
     async function renderAvailabilityPage(host) {
       let eqAll = [], inspData = [];
@@ -9885,7 +9966,7 @@
               <option value="365" ${availPeriodDays==365?'selected':''}>1 tahun</option>
             </select>
             <button onclick="openDowntimeForm()" class="bg-safety hover:bg-safety/90 text-white px-4 py-2.5 rounded-lg text-sm font-semibold whitespace-nowrap">+ Catat Downtime</button>
-            <button onclick="cetakAvailReport()" class="px-4 py-2.5 rounded-lg border border-slate-300 hover:bg-slate-50 text-sm font-semibold text-slate-700 whitespace-nowrap">🖨 Cetak</button>
+            <button onclick="cetakAvailReport()" class="btn-cetak">🖨 Cetak</button>
           </div>
         </div>
         <div class="grid grid-cols-2 md:grid-cols-6 gap-3">
@@ -10816,7 +10897,7 @@
             </div>
             <div class="ml-auto flex gap-2">
               <button onclick="exportCalendarExcel()" class="px-3 py-2 bg-navy hover:bg-navy-700 text-white rounded-lg text-sm font-medium">📥 Excel</button>
-              <button onclick="openPrintCalendarModal()" class="px-3 py-2 bg-navy hover:bg-navy-700 text-white rounded-lg text-sm font-medium">🖨 Print PDF</button>
+              <button onclick="openPrintCalendarModal()" class="btn-cetak">🖨 Print PDF</button>
             </div>
           </div>`;
 
