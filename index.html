@@ -1867,10 +1867,16 @@
                                  : rem <= 50  ? `⚠️ Sisa ${Math.round(rem)} HM`
                                  : `🟡 Sisa ${Math.round(rem)} HM`;
                   const txtCls   = rem <= 0 ? 'text-red-700 font-bold' : rem <= 50 ? 'text-amber-700 font-semibold' : 'text-yellow-700 font-semibold';
+                  const alertBadge = rem <= 0
+                    ? `<span class="inline-flex items-center gap-1 text-xs bg-red-600 text-white px-2 py-0.5 rounded-full font-bold mt-1">🚨 LAKUKAN PM SEKARANG</span>`
+                    : rem <= 50
+                    ? `<span class="inline-flex items-center gap-1 text-xs bg-amber-500 text-white px-2 py-0.5 rounded-full font-semibold mt-1">⚠️ JADWALKAN PM</span>`
+                    : `<span class="inline-flex items-center gap-1 text-xs bg-yellow-500 text-white px-2 py-0.5 rounded-full font-semibold mt-1">📦 SIAPKAN PART PM</span>`;
                   return `<button onclick="setEquipmentView('detail','${e.id}'); navigate('equipment')" class="w-full text-left flex items-center justify-between border ${borderCls} rounded-lg px-3 py-2 hover:opacity-80 transition">
                     <div class="min-w-0">
                       <div class="font-semibold text-navy text-sm truncate">${escapeHtml(e.tag_number)}</div>
                       <div class="text-xs text-slate-500 truncate">${escapeHtml(e.nama_equipment)} • ${escapeHtml(getParentUnitName(e.assigned_unit_id))}</div>
+                      ${alertBadge}
                     </div>
                     <div class="text-right flex-shrink-0 ml-3">
                       <div class="${txtCls} text-sm">${label}</div>
