@@ -1822,6 +1822,13 @@
             <h4 class="text-base font-bold text-slate-800 mb-3 flex items-center gap-2">🤝 Pinjaman Aktif</h4>
             <div id="dash-loans" class="space-y-2">Memuat…</div>
           </div>
+          <div class="bg-white rounded-xl border border-purple-200 p-5 shadow-sm">
+            <div class="flex items-center justify-between mb-3">
+              <h4 class="text-base font-bold text-slate-800 flex items-center gap-2">🔒 Siklus Inspeksi Aktif</h4>
+              <button onclick="navigate('inspections')" class="text-xs text-navy hover:underline font-semibold">Lihat semua →</button>
+            </div>
+            <div id="dash-inspeksi" class="space-y-2 text-sm">Memuat…</div>
+          </div>
           <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
             <h4 class="text-base font-bold text-slate-800 mb-3">🏭 Equipment per Parent Unit</h4>
             <div id="dash-unit" class="space-y-2">Memuat…</div>
@@ -1830,7 +1837,7 @@
 
         (async () => {
           try {
-            const [stats, due, skpi, loans, pmHours, pmKm, overhaul] = await Promise.all([
+            const [stats, due, skpi, loans, pmHours, pmKm, overhaul, inspAktif] = await Promise.all([
               fetchDashboardStats(),
               fetchDueMaintenance(30),
               fetchExpiringSkpi(60),
@@ -1838,6 +1845,7 @@
               fetchPMDueByHours(50).catch(() => []),
               fetchPMDueByKm(500).catch(() => []),
               fetchOverhaulDue(500).catch(() => []),
+              state.supabase.from('v_inspection_downtime').select('*').eq('is_holding', true).order('mulai').catch(() => ({ data: [] })),
             ]);
             // Stats
             $('#dash-stats').innerHTML = `
@@ -1960,6 +1968,25 @@
                       ${borrowerTag ? ` (gantikan ${escapeHtml(borrowerTag)})` : ''}
                     </div>
                     <div class="text-xs text-amber-600 mt-0.5">Dipinjam ${fmtDate(l.loan_date)}</div>
+                  </button>`;
+                }).join('');
+            // Siklus Inspeksi Aktif
+            const inspList = (inspAktif.data || []);
+            $('#dash-inspeksi').innerHTML = inspList.length === 0
+              ? '<div class="text-slate-400 text-sm">Tidak ada rig yang sedang dalam siklus inspeksi.</div>'
+              : inspList.map(r => {
+                  const durH = (Date.now() - new Date(r.mulai).getTime()) / 3600000;
+                  const durTxt = durH < 48 ? `${Math.round(durH)} jam` : `${(durH / 24).toFixed(1)} hari`;
+                  const urgColor = r.open_count > 5 ? 'border-red-300 bg-red-50' : r.open_count > 0 ? 'border-amber-200 bg-amber-50' : 'border-green-200 bg-green-50';
+                  return `<button onclick="navigate('inspections')" class="w-full text-left flex items-center justify-between border ${urgColor} rounded-lg px-3 py-2 hover:opacity-80 transition">
+                    <div class="min-w-0">
+                      <div class="font-semibold text-navy text-sm truncate">${escapeHtml(r.rig || '—')} <span class="font-mono text-xs text-purple-600">${escapeHtml(r.inspection_code)}</span></div>
+                      <div class="text-xs text-slate-500 mt-0.5">Mulai ${fmtDate(r.mulai)} · sudah ${durTxt}</div>
+                    </div>
+                    <div class="text-right flex-shrink-0 ml-3">
+                      <div class="text-sm font-bold ${r.open_count > 0 ? 'text-red-600' : 'text-green-600'}">${r.open_count} open</div>
+                      <div class="text-[10px] text-slate-400">temuan</div>
+                    </div>
                   </button>`;
                 }).join('');
             // By unit
@@ -3171,6 +3198,7 @@
                 </div>
                 <div class="flex gap-2 flex-wrap mt-2 mb-1">
                   <button onclick='openInspectionFormModal(${JSON.stringify(insp).replace(/'/g, "&apos;")})' class="px-3 py-1.5 rounded-lg bg-navy hover:bg-navy-700 text-white text-xs font-semibold">✏ Edit Siklus</button>
+                  <button onclick="cetakInspeksiReport('${insp.id}')" class="px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold">🖨 Cetak Laporan</button>
                   ${state.profile.role === 'admin' ? `<button onclick="confirmDeleteInspection('${insp.id}', '${escapeHtml(insp.inspection_code)}')" class="px-3 py-1.5 rounded-lg bg-red-100 hover:bg-red-200 text-red-700 text-xs font-semibold">🗑 Hapus Siklus</button>` : ''}
                 </div>
                 <p class="text-base text-slate-700 mt-1">🏭 ${escapeHtml(insp.parent_unit?.name || '—')} (${escapeHtml(insp.parent_unit?.type || '—')})</p>
@@ -3558,6 +3586,7 @@
                   </div>
                   <div class="flex items-center gap-2">
                     <div class="text-xs text-slate-500">${fmtDate(f.tgl_ditemukan)}</div>
+                    ${f.status === 'Open' ? `<button onclick="openQuickCloseFinding('${f.id}', '${escapeHtml(f.equipment_name_snapshot).replace(/'/g,"&#39;")}')" class="px-2 py-0.5 rounded bg-green-100 hover:bg-green-200 text-green-700 text-xs font-semibold">✓ Tutup</button>` : ''}
                     <button onclick='openFindingFormModal(${JSON.stringify(f).replace(/'/g, "&apos;")})' class="px-2 py-0.5 rounded bg-navy hover:bg-navy-700 text-white text-xs font-medium">✏</button>
                     ${isAdmin ? `<button onclick="confirmDeleteFinding('${f.id}', '${escapeHtml(f.equipment_name_snapshot).replace(/'/g,'&#39;')}')" class="px-2 py-0.5 rounded bg-red-100 hover:bg-red-200 text-red-700 text-xs font-medium">🗑</button>` : ''}
                   </div>
@@ -3592,6 +3621,187 @@
       `;
     }
     window.renderTemuanList = renderTemuanList;
+
+    // ---- Auto-update progress_akumulatif setelah temuan di-close ----
+    async function autoUpdateInspectionProgress(inspectionId) {
+      try {
+        const { data: all, error } = await state.supabase
+          .from('inspection_findings')
+          .select('id, status')
+          .eq('inspection_id', inspectionId);
+        if (error || !all || all.length === 0) return;
+        const closed = all.filter(f => f.status === 'Closed').length;
+        const progress = Math.round((closed / all.length) * 100);
+        await state.supabase
+          .from('inspections')
+          .update({ progress_akumulatif: progress, updated_by: state.profile?.id })
+          .eq('id', inspectionId);
+      } catch (_) { /* silent — progress update is non-critical */ }
+    }
+
+    // ---- Quick Close Finding ----
+    async function openQuickCloseFinding(findingId, eqName) {
+      const today = new Date().toISOString().slice(0, 10);
+      const body = `
+        <div class="space-y-3">
+          <div class="bg-green-50 border border-green-200 rounded-lg px-3 py-2 text-sm text-green-800">
+            <b>Menutup temuan:</b> ${escapeHtml(eqName)}
+          </div>
+          <div>
+            <label class="text-xs font-semibold text-slate-500 uppercase">Tanggal Closing *</label>
+            <input id="qc-tgl" type="date" value="${today}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy">
+          </div>
+          <div>
+            <label class="text-xs font-semibold text-slate-500 uppercase">PIC Perbaikan</label>
+            <input id="qc-pic" type="text" placeholder="Nama mekanik / penanggung jawab" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy">
+          </div>
+          <div>
+            <label class="text-xs font-semibold text-slate-500 uppercase">Catatan (optional)</label>
+            <input id="qc-note" type="text" placeholder="Ringkasan tindakan perbaikan" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy">
+          </div>
+        </div>`;
+      const footer = `
+        <button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
+        <button onclick="submitQuickClose('${findingId}')" class="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-semibold">✓ Tutup Temuan</button>`;
+      openModal({ title: '✓ Tutup Temuan', body, footer, maxWidth: 'max-w-md' });
+    }
+    window.openQuickCloseFinding = openQuickCloseFinding;
+
+    async function submitQuickClose(findingId) {
+      const tgl  = document.getElementById('qc-tgl')?.value;
+      const pic  = document.getElementById('qc-pic')?.value?.trim();
+      const note = document.getElementById('qc-note')?.value?.trim();
+      if (!tgl) { toast('Tanggal closing wajib diisi.', 'warn'); return; }
+      try {
+        const payload = { status: 'Closed', tgl_closed: tgl, updated_by: state.profile?.id };
+        if (pic)  payload.pic_perbaikan = pic;
+        if (note) payload.catatan = note;
+        const res = await updateFinding(findingId, payload);
+        if (res.error) throw res.error;
+        closeModal();
+        toast('Temuan berhasil ditutup.', 'success');
+        // Auto-update progress_akumulatif
+        const inspId = state.currentInspectionId;
+        if (inspId) await autoUpdateInspectionProgress(inspId);
+        // Reload detail agar progress bar & count diperbarui
+        if (inspId) {
+          const [insp, findings] = await Promise.all([
+            fetchInspection(inspId),
+            fetchFindingsByInspection(inspId),
+          ]);
+          window.__currentInspection = insp;
+          window.__currentFindings = findings;
+          navigate('inspections');
+        }
+      } catch (err) {
+        toast('Gagal tutup temuan: ' + err.message, 'error');
+      }
+    }
+    window.submitQuickClose = submitQuickClose;
+
+    // ---- Cetak Laporan Inspeksi per Siklus ----
+    async function cetakInspeksiReport(inspId) {
+      let insp, findings;
+      try {
+        [insp, findings] = await Promise.all([
+          fetchInspection(inspId),
+          fetchFindingsByInspection(inspId),
+        ]);
+      } catch (e) { toast('Gagal load data: ' + e.message, 'error'); return; }
+
+      const counts = {
+        total:         findings.length,
+        critical_open: findings.filter(f => f.status==='Open' && f.category==='Critical').length,
+        major_open:    findings.filter(f => f.status==='Open' && f.category==='Major').length,
+        na_open:       findings.filter(f => f.status==='Open' && f.category==='N/A').length,
+        closed:        findings.filter(f => f.status==='Closed').length,
+      };
+      const rigName = insp.parent_unit?.name || getParentUnitName(insp.parent_unit_id);
+      const fmtD = d => d ? new Date(d).toLocaleDateString('id-ID', { day:'2-digit', month:'long', year:'numeric' }) : '—';
+
+      const catOrder = ['Critical', 'Major', 'N/A'];
+      const groupedRows = catOrder.flatMap(cat => {
+        const group = findings.filter(f => f.category === cat);
+        if (!group.length) return [];
+        return [
+          `<tr><td colspan="6" style="background:#f1f5f9;font-weight:700;font-size:12px;padding:6px 8px;color:#334155">${cat === 'N/A' ? 'N/A (Diperiksa, No Deficiency)' : cat + ' Findings'} — ${group.length} temuan</td></tr>`,
+          ...group.map(f => {
+            const statusStyle = f.status === 'Closed' ? 'color:#16a34a;font-weight:bold' : (f.category === 'Critical' ? 'color:#dc2626;font-weight:bold' : 'color:#d97706;font-weight:bold');
+            return `<tr style="border-bottom:1px solid #e2e8f0">
+              <td style="padding:5px 8px;text-align:center;font-size:11px">${f.no_urut}</td>
+              <td style="padding:5px 8px;font-size:11px">${escapeHtml(f.equipment_name_snapshot)}${f.bagian ? '<br><span style="color:#6b7280;font-size:10px">Bagian: '+escapeHtml(f.bagian)+'</span>' : ''}</td>
+              <td style="padding:5px 8px;font-size:11px">${escapeHtml(f.finding || '—')}</td>
+              <td style="padding:5px 8px;font-size:11px">${escapeHtml(f.recommendation || '—')}</td>
+              <td style="padding:5px 8px;font-size:11px;text-align:center;${statusStyle}">${f.status}</td>
+              <td style="padding:5px 8px;font-size:11px;text-align:center">${f.tgl_closed ? fmtD(f.tgl_closed) : '—'}</td>
+            </tr>`;
+          }),
+        ];
+      }).join('');
+
+      const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
+        <title>Laporan Inspeksi ${insp.inspection_code}</title>
+        <style>
+          body { font-family: Arial, sans-serif; font-size: 12px; color: #1e293b; margin: 0; padding: 20px; }
+          h1 { font-size: 16px; margin: 0 0 4px 0; color: #11335d; }
+          h2 { font-size: 13px; margin: 0 0 12px 0; color: #475569; font-weight: normal; }
+          .cards { display: flex; gap: 10px; flex-wrap: wrap; margin: 12px 0; }
+          .card { border-radius: 8px; padding: 10px 14px; min-width: 90px; text-align: center; }
+          .card .num { font-size: 22px; font-weight: 800; }
+          .card .lbl { font-size: 10px; margin-top: 2px; }
+          .red   { background: #fee2e2; color: #dc2626; }
+          .amber { background: #fef3c7; color: #d97706; }
+          .green { background: #dcfce7; color: #16a34a; }
+          .slate { background: #f1f5f9; color: #475569; }
+          .navy  { background: #e0e7ff; color: #11335d; }
+          table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+          thead tr { background: #11335d; color: white; }
+          th { padding: 7px 8px; font-size: 11px; text-align: left; }
+          td { vertical-align: top; }
+          .info-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px 16px; margin: 10px 0; font-size: 11px; }
+          .info-grid .lbl { color: #64748b; }
+          .progress-bar { background: #e2e8f0; border-radius: 4px; height: 8px; overflow: hidden; margin-top: 4px; }
+          .progress-fill { background: #22c55e; height: 100%; }
+          @media print { body { padding: 0; } }
+        </style>
+      </head><body>
+        <h1>Laporan Inspeksi — ${escapeHtml(insp.inspection_code)}</h1>
+        <h2>🏭 ${escapeHtml(rigName)} &nbsp;|&nbsp; ${escapeHtml(insp.kategori_inspeksi)} &nbsp;|&nbsp; ${fmtD(insp.start_date)}${insp.end_date ? ' → ' + fmtD(insp.end_date) : ' (on progress)'}</h2>
+        <div class="info-grid">
+          <div><span class="lbl">PI Company:</span> <b>${escapeHtml(insp.pi_company)}</b></div>
+          <div><span class="lbl">Inspector:</span> <b>${escapeHtml(insp.rig_inspector)}</b></div>
+          <div><span class="lbl">Lokasi:</span> <b>${escapeHtml(insp.place_of_inspection || '—')}</b></div>
+          <div><span class="lbl">Client:</span> ${escapeHtml(insp.client || '—')}</div>
+          <div><span class="lbl">Service:</span> ${escapeHtml(insp.service || '—')}</div>
+          <div><span class="lbl">Progress:</span> <b>${insp.progress_akumulatif || 0}%</b>
+            <div class="progress-bar"><div class="progress-fill" style="width:${insp.progress_akumulatif || 0}%"></div></div>
+          </div>
+        </div>
+        <div class="cards">
+          <div class="card slate"><div class="num">${counts.total}</div><div class="lbl">Total Temuan</div></div>
+          <div class="card ${counts.critical_open ? 'red' : 'green'}"><div class="num">${counts.critical_open}</div><div class="lbl">Critical Open</div></div>
+          <div class="card ${counts.major_open ? 'amber' : 'green'}"><div class="num">${counts.major_open}</div><div class="lbl">Major Open</div></div>
+          <div class="card slate"><div class="num">${counts.na_open}</div><div class="lbl">N/A Open</div></div>
+          <div class="card green"><div class="num">${counts.closed}</div><div class="lbl">Closed</div></div>
+        </div>
+        <table>
+          <thead><tr>
+            <th style="width:4%">No</th><th style="width:20%">Equipment / Bagian</th>
+            <th style="width:28%">Finding</th><th style="width:28%">Rekomendasi</th>
+            <th style="width:8%;text-align:center">Status</th><th style="width:12%;text-align:center">Tgl Closed</th>
+          </tr></thead>
+          <tbody>${groupedRows || '<tr><td colspan="6" style="text-align:center;padding:12px;color:#94a3b8">Belum ada temuan.</td></tr>'}</tbody>
+        </table>
+        <div style="margin-top:20px;font-size:10px;color:#94a3b8">Dicetak dari RigBase Station — ${new Date().toLocaleString('id-ID')}</div>
+      </body></html>`;
+
+      const win = window.open('', '_blank');
+      if (!win) { toast('Pop-up diblokir browser. Aktifkan pop-up untuk mencetak.', 'warn'); return; }
+      win.document.write(html);
+      win.document.close();
+      win.onload = () => win.print();
+    }
+    window.cetakInspeksiReport = cetakInspeksiReport;
 
     // ---- Import Temuan dari PDF inspeksi (format PT PJ-Tek Mandiri) ----
     function parseInspeksiFindings(text) {
@@ -4260,6 +4470,8 @@
           //    supaya tidak dobel & menangkap semua jalur insert.
           //    Lihat supabase_critical_finding_trigger.sql
         }
+        // Auto-update progress_akumulatif setiap kali temuan berubah status / ditambah
+        autoUpdateInspectionProgress(insp.id);
         closeModal();
         // Refresh detail view
         setInspectionView('detail', insp.id, 'temuan');
@@ -8943,10 +9155,12 @@
     // 10v. AVAILABILITY — downtime tracking & uptime % (analisa Sr Mekanik+)
     // ============================================================
     const DT_CAT = {
-      breakdown: 'Breakdown', troubleshoot: 'Troubleshoot', tunggu_spare: 'Tunggu Spare', pm: 'PM', mobilisasi: 'Mobilisasi', gejala: '🟡 Gejala (Investigasi)', lainnya: 'Lainnya',
+      breakdown: 'Breakdown', troubleshoot: 'Troubleshoot', tunggu_spare: 'Tunggu Spare', pm: 'PM', gejala: '🟡 Gejala (Investigasi)', lainnya: 'Lainnya', inspeksi_terjadwal: '🔒 Inspeksi Terjadwal',
     };
     // Kategori yang dihitung sebagai KEJADIAN kerusakan (penyebut MTBF). Tunggu spare = durasi saja, bukan event baru.
     const FAILURE_CATS = ['breakdown', 'troubleshoot'];
+    // Planned downtime: potong Ao tapi TIDAK potong Ai (Inherent Availability).
+    const TERENCANA_CATS = ['pm', 'inspeksi_terjadwal'];
     // Gejala = early warning; alat MASIH JALAN. Tidak masuk perhitungan availability/MTBF/MTTR.
     const GEJALA_CAT = 'gejala';
     let availPeriodDays = 365;
@@ -9221,55 +9435,119 @@
     window.renderKelayakanPage = renderKelayakanPage;
 
     async function renderAvailabilityPage(host) {
-      let eqAll = [];
+      let eqAll = [], inspData = [];
       try {
-        const [dt, eq] = await Promise.all([
+        const [dt, eq, insp] = await Promise.all([
           state.supabase.from('downtime_events').select('*').order('start_at', { ascending: false }),
           state.supabase.from('equipment').select('id, tag_number, nama_equipment, assigned_unit_id'),
+          state.supabase.from('v_inspection_downtime').select('*').order('mulai', { ascending: false }),
         ]);
         if (dt.error) throw dt.error; if (eq.error) throw eq.error;
         availData = dt.data || []; eqAll = eq.data || [];
+        inspData = insp.data || []; // graceful: kalau view belum ada, lanjut tanpa error
       } catch (e) {
         host.innerHTML = `<div class="bg-red-50 text-red-700 p-4 rounded-xl text-sm">Gagal memuat: ${escapeHtml(e.message)}</div>`;
         return;
       }
       const dataAll = availFilteredData();
-      // GEJALA = early warning, alat masih jalan → DIPISAH dari perhitungan
-      const data = dataAll.filter(d => d.category !== GEJALA_CAT);
+      // GEJALA = alat masih jalan → dikecualikan dari perhitungan
+      const data      = dataAll.filter(d => d.category !== GEJALA_CAT);
       const gejalaAll = dataAll.filter(d => d.category === GEJALA_CAT);
       const now = Date.now(), start = now - availPeriodDays * 86400000, periodH = availPeriodDays * 24;
       // agregasi downtime per equipment (TANPA gejala)
       const agg = {};
       data.forEach(d => {
-        const k = d.equipment_id; if (!agg[k]) agg[k] = { events: 0, downH: 0, dur: [] };
+        const k = d.equipment_id;
+        if (!agg[k]) agg[k] = { events: 0, downH: 0, downH_unplanned: 0, failEvents: 0, failDur: [] };
         agg[k].events++;
         const s = new Date(d.start_at).getTime(), e = d.end_at ? new Date(d.end_at).getTime() : now;
-        agg[k].downH += Math.max(0, Math.min(e, now) - Math.max(s, start)) / 3600000;
-        if (d.end_at) agg[k].dur.push((e - s) / 3600000);
+        const clippedH = Math.max(0, Math.min(e, now) - Math.max(s, start)) / 3600000;
+        agg[k].downH += clippedH;
+        if (!TERENCANA_CATS.includes(d.category)) agg[k].downH_unplanned += clippedH;
+        // MTBF/MTTR hanya dari failure events (bukan PM / Tunggu Spare / dll)
+        if (FAILURE_CATS.includes(d.category)) {
+          agg[k].failEvents++;
+          if (d.end_at) agg[k].failDur.push((new Date(d.end_at) - new Date(d.start_at)) / 3600000);
+        }
       });
       // SEMUA equipment (filter rig) digabung dgn downtime → yang tak pernah down = 100%
       const eqList = eqAll
         .filter(x => !availFilter.unit_id || String(x.assigned_unit_id) === String(availFilter.unit_id))
         .map(x => {
-          const a = agg[x.id] || { events: 0, downH: 0, dur: [] };
+          const a = agg[x.id] || { events: 0, downH: 0, downH_unplanned: 0, failEvents: 0, failDur: [] };
           return { id: x.id, tag: x.tag_number, name: x.nama_equipment, events: a.events, downH: a.downH,
-            avail: Math.max(0, Math.min(100, (periodH - a.downH) / periodH * 100)),
-            mttr: a.dur.length ? a.dur.reduce((p, q) => p + q, 0) / a.dur.length : null };
+            failEvents: a.failEvents,
+            avail:   Math.max(0, Math.min(100, (periodH - a.downH)           / periodH * 100)),
+            availAi: Math.max(0, Math.min(100, (periodH - a.downH_unplanned) / periodH * 100)),
+            mttr: a.failDur.length ? a.failDur.reduce((p, q) => p + q, 0) / a.failDur.length : null };
         }).sort((a, b) => a.avail - b.avail);
       const ongoing = data.filter(d => !d.end_at);
       const gejalaOngoing = gejalaAll.filter(d => !d.end_at);
-      const allDur = data.filter(d => d.end_at).map(d => Number(d.duration_hours) || 0);
+      // Inspeksi Terjadwal — dari v_inspection_downtime, read-only
+      const inspOngoing = inspData.filter(r => r.is_holding);
+      const inspRows = inspOngoing.map(r => {
+        const durH = (now - new Date(r.mulai).getTime()) / 3600000;
+        return `<tr class="border-b border-slate-100 bg-purple-50/40">
+          <td class="px-3 py-2 text-sm font-bold text-navy">${escapeHtml(r.rig || '—')} <span class="ml-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-100 text-purple-700">🔒 Siklus</span></td>
+          <td class="px-3 py-2 text-sm">Inspeksi Terjadwal <span class="ml-1 font-mono text-[11px] text-purple-600">${escapeHtml(r.inspection_code)}</span></td>
+          <td class="px-3 py-2 text-sm">${r.mulai ? new Date(r.mulai).toLocaleString('id-ID') : '—'}</td>
+          <td class="px-3 py-2 text-sm text-red-600 font-semibold">${fmtH(durH)}</td>
+          <td class="px-3 py-2 text-right text-xs text-slate-400 italic">${r.open_count} temuan open · tutup di Modul Inspeksi</td>
+        </tr>`;
+      }).join('');
+      // MTTR & MTBF hanya dari FAILURE_CATS (Breakdown + Troubleshoot)
+      const failData = data.filter(d => FAILURE_CATS.includes(d.category));
+      const allDur = failData.filter(d => d.end_at).map(d => (new Date(d.end_at) - new Date(d.start_at)) / 3600000);
       const mttr = allDur.length ? allDur.reduce((a, b) => a + b, 0) / allDur.length : null;
-      const totalFail = data.length;
-      // MTBF baku: PER alat = jam operasi (uptime) ÷ jumlah kerusakan alat itu,
-      // lalu dirata-rata HANYA dari alat yang pernah rusak (≥1 event).
-      // Tidak dibagi seluruh armada → KPI tidak membengkak.
-      const failedEq = eqList.filter(o => o.events > 0);
+      const totalFail = failData.length;
+      // MTBF baku: PER alat = jam operasi (uptime) ÷ jumlah failure events alat itu,
+      // lalu dirata-rata HANYA dari alat yang pernah failure (≥1 event).
+      const failedEq = eqList.filter(o => o.failEvents > 0);
       const mtbf = failedEq.length
-        ? failedEq.reduce((sum, o) => sum + (periodH - o.downH) / o.events, 0) / failedEq.length
+        ? failedEq.reduce((sum, o) => sum + (periodH - o.downH) / o.failEvents, 0) / failedEq.length
         : null;
-      const fleetAvail = eqList.length ? eqList.reduce((a, b) => a + b.avail, 0) / eqList.length : 100;
+      const fleetAvail = eqList.length ? eqList.reduce((a, b) => a + b.avail,   0) / eqList.length : 100;
+      const fleetAi    = eqList.length ? eqList.reduce((a, b) => a + b.availAi, 0) / eqList.length : 100;
       const cat = {}; dataAll.forEach(d => { const c = DT_CAT[d.category] || 'Lainnya'; if (!cat[c]) cat[c] = { n: 0, h: 0 }; cat[c].n++; cat[c].h += Number(d.duration_hours) || 0; });
+
+      // Rekap RAM per rig — group eqList (sudah ada agg) berdasarkan assigned_unit_id
+      const rigMap = {};
+      eqAll.forEach(x => {
+        if (availFilter.unit_id && String(x.assigned_unit_id) !== String(availFilter.unit_id)) return;
+        const uid = String(x.assigned_unit_id || '');
+        const uname = (state.parentUnits || []).find(u => String(u.id) === uid)?.name || 'Tanpa Rig';
+        if (!rigMap[uid]) rigMap[uid] = { name: uname, ids: [] };
+        rigMap[uid].ids.push(x.id);
+      });
+      const rigRows = Object.values(rigMap).sort((a, b) => a.name.localeCompare(b.name)).map(r => {
+        const re = eqList.filter(o => r.ids.includes(o.id));
+        const rAo   = re.length ? re.reduce((s, o) => s + o.avail,   0) / re.length : 100;
+        const rAi   = re.length ? re.reduce((s, o) => s + o.availAi, 0) / re.length : 100;
+        const rFail = re.reduce((s, o) => s + o.failEvents, 0);
+        const rMttrEq  = re.filter(o => o.mttr != null);
+        const rMttr    = rMttrEq.length ? rMttrEq.reduce((s, o) => s + o.mttr, 0) / rMttrEq.length : null;
+        const rFailedEq = re.filter(o => o.failEvents > 0);
+        const rMtbf    = rFailedEq.length ? rFailedEq.reduce((s, o) => s + (periodH - o.downH) / o.failEvents, 0) / rFailedEq.length : null;
+        // Cek apakah ada inspeksi aktif di rig ini
+        const inspActive = inspOngoing.filter(i => i.rig === r.name);
+        const inspBadge = inspActive.length ? ` <span class="px-1.5 py-0.5 rounded text-[10px] bg-purple-100 text-purple-700 font-semibold">🔒 Inspeksi</span>` : '';
+        return `<tr class="border-b border-slate-100 hover:bg-slate-50">
+          <td class="px-3 py-2.5 text-sm font-bold text-navy">${escapeHtml(r.name)}${inspBadge}</td>
+          <td class="px-3 py-2.5 text-sm text-slate-500 text-center">${re.length}</td>
+          <td class="px-3 py-2.5">${availPct(rAo)}</td>
+          <td class="px-3 py-2.5">${availPct(rAi)}</td>
+          <td class="px-3 py-2.5 text-sm font-semibold text-slate-700 text-center">${rFail}</td>
+          <td class="px-3 py-2.5 text-sm font-semibold text-slate-700">${rMttr != null ? fmtH(rMttr) : '—'}</td>
+          <td class="px-3 py-2.5 text-sm font-semibold text-slate-700">${rMtbf != null ? fmtH(rMtbf) : '—'}</td>
+        </tr>`;
+      }).join('');
+      const rigSection = Object.keys(rigMap).length > 1 ? `
+        <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div class="px-4 py-3 border-b border-slate-100 font-semibold text-slate-800 text-sm">📊 Rekap RAM per Rig (${availPeriodDays} hari) <span class="ml-2 text-xs font-normal text-slate-400">rata² availability semua equipment di rig tersebut</span></div>
+          <div class="overflow-x-auto"><table class="w-full"><thead class="bg-slate-50"><tr class="text-left text-xs font-bold text-slate-600">
+            <th class="px-3 py-2">Rig</th><th class="px-3 py-2 text-center">Alat</th><th class="px-3 py-2">Ao</th><th class="px-3 py-2">Ai</th><th class="px-3 py-2 text-center">Failure</th><th class="px-3 py-2">MTTR</th><th class="px-3 py-2">MTBF</th>
+          </tr></thead><tbody>${rigRows || '<tr><td colspan="7" class="px-3 py-4 text-center text-slate-400 text-sm">Tidak ada data.</td></tr>'}</tbody></table></div>
+        </div>` : '';
 
       const kpi = (label, val, sub) => `<div class="bg-white rounded-xl border border-slate-200 p-4"><div class="text-xs text-slate-500 mb-1">${label}</div><div class="text-2xl font-extrabold text-slate-900">${val}</div>${sub ? `<div class="text-[11px] text-slate-400 mt-0.5">${sub}</div>` : ''}</div>`;
       const ongoingRows = ongoing.map(d => `<tr class="border-b border-slate-100">
@@ -9294,7 +9572,8 @@
         <td class="px-3 py-2 text-sm font-mono font-bold text-navy">${escapeHtml(o.tag || '—')}</td>
         <td class="px-3 py-2 text-sm font-semibold text-slate-700">${escapeHtml(o.name || '')}</td>
         <td class="px-3 py-2">${availPct(o.avail)}</td>
-        <td class="px-3 py-2 text-sm font-semibold text-slate-700">${o.events}x</td>
+        <td class="px-3 py-2">${availPct(o.availAi)}</td>
+        <td class="px-3 py-2 text-sm font-semibold text-slate-700">${o.failEvents}x</td>
         <td class="px-3 py-2 text-sm font-semibold text-slate-700">${fmtH(o.downH)}</td>
         <td class="px-3 py-2 text-sm font-semibold text-slate-700">${o.mttr != null ? fmtH(o.mttr) : '—'}</td>
       </tr>`).join('');
@@ -9324,16 +9603,17 @@
             <button onclick="cetakAvailReport()" class="px-4 py-2.5 rounded-lg border border-slate-300 hover:bg-slate-50 text-sm font-semibold text-slate-700 whitespace-nowrap">🖨 Cetak</button>
           </div>
         </div>
-        <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
-          ${kpi('Availability rata-rata', eqList.length ? fleetAvail.toFixed(1) + '%' : '—')}
-          ${kpi('🔴 Sedang Down', ongoing.length)}
+        <div class="grid grid-cols-2 md:grid-cols-6 gap-3">
+          ${kpi('Ao — Operational', eqList.length ? fleetAvail.toFixed(1) + '%' : '—', 'Semua downtime termasuk planned')}
+          ${kpi('Ai — Inherent', eqList.length ? fleetAi.toFixed(1) + '%' : '—', 'Hanya unplanned · Δ +' + (fleetAi - fleetAvail).toFixed(1) + '% vs Ao')}
+          ${kpi('🔴 Sedang Down', ongoing.length + inspOngoing.length, inspOngoing.length ? `${inspOngoing.length} dari siklus inspeksi` : '')}
           ${kpi('🟡 Sedang Diselidiki', gejalaOngoing.length, 'gejala awal, alat masih jalan')}
           ${kpi('MTTR (rata² perbaikan)', mttr != null ? fmtH(mttr) : '—', allDur.length ? `dari ${allDur.length} perbaikan` : 'belum ada perbaikan selesai')}
           ${kpi('MTBF (rata² antar rusak)', mtbf != null ? fmtH(mtbf) : '—', mtbf != null ? `dari ${totalFail} kerusakan · ${failedEq.length} alat` : 'belum ada kerusakan')}
         </div>
-        ${ongoing.length ? `<div class="bg-white rounded-xl border border-red-200 overflow-hidden">
-          <div class="px-4 py-3 border-b border-slate-100 font-semibold text-red-700 text-sm">🔴 Sedang Down (${ongoing.length})</div>
-          <div class="overflow-x-auto"><table class="w-full"><thead><tr class="bg-slate-50 text-left text-xs font-bold text-slate-600"><th class="px-3 py-2">Equipment</th><th class="px-3 py-2">Penyebab</th><th class="px-3 py-2">Mulai</th><th class="px-3 py-2">Lama</th><th class="px-3 py-2"></th></tr></thead><tbody>${ongoingRows}</tbody></table></div>
+        ${(ongoing.length || inspOngoing.length) ? `<div class="bg-white rounded-xl border border-red-200 overflow-hidden">
+          <div class="px-4 py-3 border-b border-slate-100 font-semibold text-red-700 text-sm">🔴 Sedang Down (${ongoing.length + inspOngoing.length}) <span class="ml-2 text-xs font-normal text-slate-400">🔒 = dari Siklus Inspeksi, read-only</span></div>
+          <div class="overflow-x-auto"><table class="w-full"><thead><tr class="bg-slate-50 text-left text-xs font-bold text-slate-600"><th class="px-3 py-2">Equipment / Rig</th><th class="px-3 py-2">Penyebab</th><th class="px-3 py-2">Mulai</th><th class="px-3 py-2">Lama</th><th class="px-3 py-2"></th></tr></thead><tbody>${inspRows}${ongoingRows}</tbody></table></div>
         </div>` : ''}
         ${gejalaOngoing.length ? `<div class="bg-amber-50 rounded-xl border border-amber-300 overflow-hidden">
           <div class="px-4 py-3 border-b border-amber-200 font-semibold text-amber-800 text-sm flex items-center justify-between">
@@ -9342,10 +9622,11 @@
           </div>
           <div class="overflow-x-auto"><table class="w-full"><thead><tr class="bg-amber-100/60 text-left text-xs font-bold text-amber-900"><th class="px-3 py-2">Equipment</th><th class="px-3 py-2">Gejala</th><th class="px-3 py-2">Mulai</th><th class="px-3 py-2">Sudah</th><th class="px-3 py-2"></th></tr></thead><tbody>${gejalaRows}</tbody></table></div>
         </div>` : ''}
+        ${rigSection}
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div class="lg:col-span-2 bg-white rounded-xl border border-slate-200 overflow-hidden">
             <div class="px-4 py-3 border-b border-slate-100 font-semibold text-slate-800 text-sm">Availability per Equipment (${availPeriodDays} hari) <span class="text-slate-400 font-normal">— klik buka detail</span></div>
-            <div class="overflow-x-auto max-h-96 overflow-y-auto"><table class="w-full"><thead class="sticky top-0 bg-slate-50"><tr class="text-left text-xs font-bold text-slate-600"><th class="px-3 py-2">Tag</th><th class="px-3 py-2">Nama</th><th class="px-3 py-2">Availability</th><th class="px-3 py-2">Down</th><th class="px-3 py-2">Total</th><th class="px-3 py-2">MTTR</th></tr></thead><tbody>${eqRows || '<tr><td colspan="6" class="px-3 py-6 text-center text-slate-400 text-sm">Tidak ada equipment.</td></tr>'}</tbody></table></div>
+            <div class="overflow-x-auto max-h-96 overflow-y-auto"><table class="w-full"><thead class="sticky top-0 bg-slate-50"><tr class="text-left text-xs font-bold text-slate-600"><th class="px-3 py-2">Tag</th><th class="px-3 py-2">Nama</th><th class="px-3 py-2">Ao</th><th class="px-3 py-2">Ai</th><th class="px-3 py-2">Failure</th><th class="px-3 py-2">Total Down</th><th class="px-3 py-2">MTTR</th></tr></thead><tbody>${eqRows || '<tr><td colspan="7" class="px-3 py-6 text-center text-slate-400 text-sm">Tidak ada equipment.</td></tr>'}</tbody></table></div>
           </div>
           <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
             <div class="px-4 py-3 border-b border-slate-100 font-semibold text-slate-800 text-sm">Penyebab Down</div>
@@ -12522,34 +12803,45 @@
 
     function cetakAvailReport() {
       const dataAll = availFilteredData();
-      // GEJALA dipisah, tidak ikut perhitungan availability
       const data = dataAll.filter(d => d.category !== GEJALA_CAT);
       const now = Date.now(), start = now - availPeriodDays * 86400000, periodH = availPeriodDays * 24;
       const byEq = {};
       data.forEach(d => {
-        const k = d.equipment_id; if (!byEq[k]) byEq[k] = { tag: d.equipment_tag, name: d.equipment_name, events: 0, downH: 0, dur: [] };
+        const k = d.equipment_id;
+        if (!byEq[k]) byEq[k] = { tag: d.equipment_tag, name: d.equipment_name, events: 0, downH: 0, downH_unplanned: 0, failEvents: 0, failDur: [] };
         byEq[k].events++;
         const s = new Date(d.start_at).getTime(), e = d.end_at ? new Date(d.end_at).getTime() : now;
         byEq[k].downH += Math.max(0, Math.min(e, now) - Math.max(s, start)) / 3600000;
-        if (d.end_at) byEq[k].dur.push((e - s) / 3600000);
+        if (!TERENCANA_CATS.includes(d.category)) byEq[k].downH_unplanned += Math.max(0, Math.min(e, now) - Math.max(s, start)) / 3600000;
+        if (FAILURE_CATS.includes(d.category)) {
+          byEq[k].failEvents++;
+          if (d.end_at) byEq[k].failDur.push((new Date(d.end_at) - new Date(d.start_at)) / 3600000);
+        }
       });
-      const eqList = Object.values(byEq).map(o => ({ ...o, avail: Math.max(0, Math.min(100, (periodH - o.downH) / periodH * 100)), mttr: o.dur.length ? o.dur.reduce((a, b) => a + b, 0) / o.dur.length : null })).sort((a, b) => a.avail - b.avail);
+      const eqList = Object.values(byEq).map(o => ({
+        ...o,
+        avail:   Math.max(0, Math.min(100, (periodH - o.downH)           / periodH * 100)),
+        availAi: Math.max(0, Math.min(100, (periodH - o.downH_unplanned) / periodH * 100)),
+        mttr: o.failDur.length ? o.failDur.reduce((a, b) => a + b, 0) / o.failDur.length : null,
+      })).sort((a, b) => a.avail - b.avail);
       const ongoing = data.filter(d => !d.end_at).length;
-      const allDur = data.filter(d => d.end_at).map(d => Number(d.duration_hours) || 0);
+      const failData = data.filter(d => FAILURE_CATS.includes(d.category) && d.end_at);
+      const allDur = failData.map(d => (new Date(d.end_at) - new Date(d.start_at)) / 3600000);
       const mttr = allDur.length ? allDur.reduce((a, b) => a + b, 0) / allDur.length : null;
-      const fleetAvail = eqList.length ? eqList.reduce((a, b) => a + b.avail, 0) / eqList.length : 100;
+      const fleetAo = eqList.length ? eqList.reduce((a, b) => a + b.avail,   0) / eqList.length : 100;
+      const fleetAi = eqList.length ? eqList.reduce((a, b) => a + b.availAi, 0) / eqList.length : 100;
       const fmtH = (h) => h == null ? '—' : (h < 24 ? h.toFixed(1) + ' jam' : (h / 24).toFixed(1) + ' hari');
       const summary = `<div class="cards">
-        <div class="card ${fleetAvail >= 95 ? 'green' : fleetAvail >= 85 ? 'amber' : 'red'}"><div class="num">${fleetAvail.toFixed(1)}%</div><div class="lbl">Availability rata²</div></div>
+        <div class="card ${fleetAo >= 95 ? 'green' : fleetAo >= 85 ? 'amber' : 'red'}"><div class="num">${fleetAo.toFixed(1)}%</div><div class="lbl">Ao — Operational</div></div>
+        <div class="card ${fleetAi >= 95 ? 'green' : fleetAi >= 85 ? 'amber' : 'red'}"><div class="num">${fleetAi.toFixed(1)}%</div><div class="lbl">Ai — Inherent</div></div>
         <div class="card ${ongoing ? 'red' : 'green'}"><div class="num">${ongoing}</div><div class="lbl">Sedang Down</div></div>
         <div class="card navy"><div class="num">${fmtH(mttr)}</div><div class="lbl">MTTR</div></div>
-        <div class="card navy"><div class="num">${availPeriodDays} hari</div><div class="lbl">Periode</div></div>
       </div>`;
-      const intro = `<p>Ringkasan ketersediaan (Availability) equipment dalam ${availPeriodDays} hari terakhir, berdasarkan catatan downtime di sistem RAM.</p>`;
+      const intro = `<p>Ringkasan ketersediaan equipment dalam ${availPeriodDays} hari terakhir. <b>Ao</b> (Operational) = semua downtime; <b>Ai</b> (Inherent) = hanya unplanned downtime (PM &amp; Inspeksi Terjadwal dikecualikan).</p>`;
       const availCell = (p) => { const st = p >= 95 ? 'color:#16a34a' : p >= 85 ? 'background:#fffbeb;color:#d97706' : 'background:#fef2f2;color:#dc2626'; return `<td style="text-align:center;font-weight:bold;${st}">${p.toFixed(1)}%</td>`; };
-      const rows = eqList.slice(0, 300).map((o, i) => `<tr><td style="text-align:center">${i + 1}</td><td>${escapeHtml(o.tag || '-')}<br><span style="color:#6b7280">${escapeHtml(o.name || '')}</span></td>${availCell(o.avail)}<td style="text-align:center">${o.events}</td><td style="text-align:center">${fmtH(o.downH)}</td><td style="text-align:center">${fmtH(o.mttr)}</td></tr>`).join('');
-      const table = `<table><thead><tr><th>No</th><th>Equipment</th><th>Availability</th><th>Jml Down</th><th>Total Down</th><th>MTTR</th></tr></thead><tbody>${rows || '<tr><td colspan="6" style="text-align:center">Belum ada catatan downtime</td></tr>'}</tbody></table>`;
-      const kesimpulan = `<b style="color:#dc2626">⚠️ Dampak:</b> equipment dengan availability rendah / sedang down berpotensi menghambat operasi.<br><br><b style="color:#16a34a">✅ Permohonan:</b> mohon dukungan mempercepat perbaikan (suku cadang/SPK) pada equipment availability terendah di atas guna memulihkan kesiapan operasi.`;
+      const rows = eqList.slice(0, 300).map((o, i) => `<tr><td style="text-align:center">${i + 1}</td><td>${escapeHtml(o.tag || '-')}<br><span style="color:#6b7280">${escapeHtml(o.name || '')}</span></td>${availCell(o.avail)}${availCell(o.availAi)}<td style="text-align:center">${o.failEvents}</td><td style="text-align:center">${fmtH(o.downH)}</td><td style="text-align:center">${fmtH(o.mttr)}</td></tr>`).join('');
+      const table = `<table><thead><tr><th>No</th><th>Equipment</th><th>Ao</th><th>Ai</th><th>Failure</th><th>Total Down</th><th>MTTR</th></tr></thead><tbody>${rows || '<tr><td colspan="7" style="text-align:center">Belum ada catatan downtime</td></tr>'}</tbody></table>`;
+      const kesimpulan = `<b style="color:#dc2626">⚠️ Dampak:</b> equipment dengan availability rendah / sedang down berpotensi menghambat operasi.<br><br><b style="color:#16a34a">✅ Permohonan:</b> mohon dukungan mempercepat perbaikan (suku cadang/SPK) pada equipment Ao terendah di atas guna memulihkan kesiapan operasi.`;
       const catMap = {}; dataAll.forEach(d2 => { const c = DT_CAT[d2.category] || 'Lainnya'; catMap[c] = (catMap[c] || 0) + (Number(d2.duration_hours) || 0); });
       const chart = chartBars('Jam Downtime per Penyebab', Object.entries(catMap).map(([k, v]) => ({ label: k, value: Math.round(v), color: '#11335d' })));
       openSignDialog({ title: 'Laporan Availability Equipment', type: 'AVAIL', summary, chart, intro, table, kesimpulan });
