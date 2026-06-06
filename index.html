@@ -1562,6 +1562,99 @@
     }
     window.sendTelegramAlert = sendTelegramAlert;
 
+    // ============================================================
+    // DAILY ALERT — PM critical, SKPI, Findings open
+    // Dedup via localStorage (key: rb_daily_YYYY-MM-DD)
+    // Dipanggil otomatis saat dashboard dibuka, max 1x per hari.
+    // ============================================================
+    async function runDailyAlerts() {
+      if (!state.supabase || !state.user) return;
+      const today = new Date().toISOString().slice(0, 10);
+      const lsKey = `rb_daily_${today}`;
+      if (localStorage.getItem(lsKey) === '1') return;
+
+      try {
+        const alerts = [];
+
+        // 1. PM Critical (≤ 50 HM atau sudah lewat)
+        const pmCritical = await fetchPMDueByHours(50).catch(() => []);
+        if (pmCritical.length) {
+          const lines = pmCritical.map(e => {
+            const rem = e._remaining;
+            const status = rem <= 0
+              ? `⛔ LEWAT ${Math.abs(Math.round(rem))} HM`
+              : `⚠️ Sisa ${Math.round(rem)} HM`;
+            return `  • <b>${escapeHtml(e.tag_number)}</b> [${escapeHtml(getParentUnitName(e.assigned_unit_id))}] — ${status}`;
+          }).join('\n');
+          alerts.push(`🔧 <b>PM CRITICAL — ${pmCritical.length} Equipment</b>\n${lines}\n📦 Siapkan part &amp; jadwalkan PM segera.`);
+        }
+
+        // 2. SKPI / Sertifikat ≤ 30 hari
+        const skpiCritical = await fetchExpiringSkpi(30).catch(() => []);
+        if (skpiCritical.length) {
+          const lines = skpiCritical.map(e => {
+            const exp = e.skpi_end_date || e.tgl_expired_sertifikat;
+            const d = daysUntil(exp);
+            const status = d < 0 ? `⛔ EXPIRED ${Math.abs(d)} hari lalu` : `⚠️ ${d} hari lagi`;
+            return `  • <b>${escapeHtml(e.tag_number)}</b> — ${status}`;
+          }).join('\n');
+          alerts.push(`📜 <b>SERTIFIKAT ALERT — ${skpiCritical.length} Equipment</b>\n${lines}\n🔔 Segera perpanjang SKPI/sertifikat.`);
+        }
+
+        // 3. Open findings inspeksi (rig masih ditahan)
+        const { data: openInsp } = await state.supabase
+          .from('v_inspection_downtime').select('rig,inspection_code,open_count')
+          .eq('is_holding', true).order('mulai')
+          .then(r => r).catch(() => ({ data: null }));
+        if (openInsp && openInsp.length) {
+          const lines = openInsp.map(r =>
+            `  • <b>${escapeHtml(r.rig || '—')}</b> [${escapeHtml(r.inspection_code)}] — ${r.open_count} temuan Open`
+          ).join('\n');
+          alerts.push(`🔒 <b>INSPEKSI — ${openInsp.length} RIG DITAHAN</b>\n${lines}\n✅ Tutup semua temuan agar rig bisa beroperasi.`);
+        }
+
+        if (!alerts.length) { localStorage.setItem(lsKey, '1'); return; }
+
+        const date = new Date().toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+        const sep = '━'.repeat(28);
+        const msg = `📢 <b>RIGBASE DAILY ALERT</b>\n${date}\n${sep}\n\n` +
+                    alerts.join(`\n\n${sep}\n\n`) +
+                    `\n\n${sep}\n⏰ eRAMHoist — auto alert harian`;
+        await sendTelegramAlert(msg);
+        localStorage.setItem(lsKey, '1');
+      } catch (err) {
+        console.warn('[runDailyAlerts]', err.message);
+      }
+    }
+    window.runDailyAlerts = runDailyAlerts;
+
+    // Test kirim pesan langsung ke Telegram (dari Alert Settings)
+    async function testTelegramDirect() {
+      toast('Mengirim test ke Telegram…', 'info');
+      try {
+        await sendTelegramAlert(
+          `✅ <b>TEST TELEGRAM — eRAMHoist</b>\n` +
+          `Bot sudah terhubung dan berjalan normal.\n` +
+          `👤 Ditest oleh: <b>${escapeHtml(state.profile?.full_name || state.profile?.email || '—')}</b>\n` +
+          `⏰ ${new Date().toLocaleString('id-ID')}`
+        );
+        toast('Test dikirim! Cek grup Telegram.', 'success');
+      } catch (e) {
+        toast('Gagal kirim: ' + e.message, 'error');
+      }
+    }
+    window.testTelegramDirect = testTelegramDirect;
+
+    // Force kirim daily alert (reset dedup lalu jalankan ulang)
+    async function triggerDailyAlerts() {
+      const today = new Date().toISOString().slice(0, 10);
+      localStorage.removeItem(`rb_daily_${today}`);
+      toast('Mengirim daily alert…', 'info');
+      await runDailyAlerts();
+      toast('Daily alert selesai. Cek grup Telegram.', 'success');
+    }
+    window.triggerDailyAlerts = triggerDailyAlerts;
+
     async function logout() {
       await state.supabase.auth.signOut();
       state.user = null;
@@ -2021,6 +2114,8 @@
           } catch (err) {
             toast('Gagal memuat dashboard: ' + err.message, 'error');
           }
+          // Daily Telegram alerts — max 1x per hari, non-blocking
+          setTimeout(() => runDailyAlerts(), 3000);
         })();
 
         return div;
@@ -10211,7 +10306,32 @@
           weekly_recap:       { icon: '📊', name: 'Weekly Recap Senin 07:00', desc: 'Recap minggu lalu + plan minggu ini (strategic)' },
           quiet_hours:        { icon: '🌙', name: 'Quiet Hours',           desc: 'Skip real-time alerts antara jam 22:00 - 06:00 WIB' },
         };
-        host.innerHTML = (settings || []).map(s => {
+        const telegramCard = `
+          <div class="bg-emerald-50 border-2 border-emerald-400 rounded-xl p-4 space-y-3">
+            <div class="font-extrabold text-emerald-900 text-base flex items-center gap-2">🤖 Bot Telegram</div>
+            <p class="text-xs text-emerald-800">Alert dikirim ke grup Telegram tim via Supabase Edge Function <code class="bg-emerald-100 px-1 rounded">send-telegram-alert</code>.</p>
+            <div class="flex gap-2 flex-wrap">
+              <button onclick="testTelegramDirect()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-extrabold tracking-wide shadow">📤 TEST KIRIM SEKARANG</button>
+              <button onclick="triggerDailyAlerts()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-extrabold tracking-wide shadow">📋 FORCE DAILY ALERT</button>
+            </div>
+            <details class="text-xs text-emerald-800">
+              <summary class="cursor-pointer font-bold text-emerald-900 select-none">📋 Cara Setup Edge Function (klik untuk expand)</summary>
+              <ol class="mt-2 space-y-1 list-decimal list-inside">
+                <li>Buka <b>Supabase Dashboard → Edge Functions → New Function</b></li>
+                <li>Nama: <code class="bg-white px-1 rounded border">send-telegram-alert</code></li>
+                <li>Paste kode dari file <code class="bg-white px-1 rounded border">send-telegram-alert.ts</code> di folder project</li>
+                <li>Klik <b>Deploy</b></li>
+                <li>Masuk ke <b>Edge Functions → Secrets</b>, tambah dua secret:<br>
+                  <code class="bg-white px-1 rounded border ml-4">TELEGRAM_BOT_TOKEN</code> = token dari @BotFather<br>
+                  <code class="bg-white px-1 rounded border ml-4">TELEGRAM_CHAT_ID</code> = ID group (mulai -100...)</li>
+                <li>Cara dapat Chat ID: tambah bot ke group → kirim pesan → buka<br>
+                  <code class="bg-white px-1 rounded border ml-4">api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code><br>
+                  → cari <code>"chat": {"id": -100xxxxxxx}</code></li>
+              </ol>
+            </details>
+            <p class="text-[11px] text-emerald-700">Daily alert otomatis dikirim 1x per hari saat dashboard dibuka. Alert: PM ≤50 HM, Sertifikat ≤30 hari, Findings Open.</p>
+          </div>`;
+        host.innerHTML = telegramCard + (settings || []).map(s => {
           const meta = labels[s.setting_key] || { icon: '⚙️', name: s.setting_key, desc: s.description || '' };
           const enabled = s.setting_value?.enabled !== false;
           return `<div class="bg-white border border-slate-200 rounded-xl p-4 flex items-start gap-3">
