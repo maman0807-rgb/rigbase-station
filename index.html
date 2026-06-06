@@ -346,6 +346,7 @@
       { id: 'alert-config', label: 'Alert Settings', icon: '⚙️', group: 'Administrasi', adminOnly: true },
       { id: 'panduan',     label: 'Panduan e<span class="text-safety">RAM</span>Hoist',  icon: '📖', group: 'Administrasi', srOnly: true },
       { id: 'slides',      label: 'Slide Presentasi',  icon: '🎞️', group: 'Administrasi', srOnly: true, externalUrl: '/PANDUAN_eRAMHoist_slides.html' },
+      { id: 'payroll',     label: 'Payroll',      icon: '💰', group: 'Payroll', payrollOnly: true },
       { id: 'settings',    label: 'Pengaturan',   icon: '⚙️', bottomNav: true },
     ];
 
@@ -1792,8 +1793,9 @@
 
     function visibleNavItems() {
       return NAV_ITEMS.filter(item =>
-        (!item.adminOnly || state.profile?.role === 'admin') &&
-        (!item.srOnly || isSrMekanikOrAbove())
+        (!item.adminOnly  || state.profile?.role === 'admin') &&
+        (!item.srOnly     || isSrMekanikOrAbove()) &&
+        (!item.payrollOnly || state.profile?.can_payroll)
       );
     }
 
@@ -1842,6 +1844,10 @@
       }
       if (item.srOnly && !isSrMekanikOrAbove()) {
         toast('Halaman ini khusus Sr Mekanik ke atas.', 'warn');
+        return;
+      }
+      if (item.payrollOnly && !state.profile?.can_payroll) {
+        toast('Halaman ini hanya untuk pengguna yang berwenang.', 'warn');
         return;
       }
       // External URL handler — buka di tab baru, tidak ganti halaman
@@ -2493,6 +2499,31 @@
             <button onclick="changePassword()" class="bg-safety hover:bg-safety-700 text-white px-5 py-2 rounded-lg font-semibold text-sm">Ganti Password</button>
           </div>
         `;
+        return div;
+      },
+
+      // ============================================================
+      // PAYROLL — hanya untuk can_payroll user
+      // ============================================================
+      payroll: () => {
+        if (!state.profile?.can_payroll) {
+          const d = document.createElement('div');
+          d.innerHTML = '<div class="p-8 text-center text-red-500 font-semibold">Akses ditolak.</div>';
+          return d;
+        }
+        const div = document.createElement('div');
+        div.className = 'page space-y-4';
+        const tabs = [['karyawan','👤 Karyawan'],['komponen','💵 Komponen Gaji'],['lembur','⏱ Lembur'],['kasbon','💳 Kasbon'],['proses','⚙️ Proses Payroll'],['laporan','📄 Laporan & Slip']];
+        if (!state.payrollTab) state.payrollTab = 'karyawan';
+        div.innerHTML = `
+          <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+            <div class="flex border-b border-slate-200 overflow-x-auto">
+              ${tabs.map(([id,lbl])=>`<button onclick="setPayrollTab('${id}')" data-ptab="${id}"
+                class="px-4 py-3 text-sm font-semibold whitespace-nowrap ${state.payrollTab===id?'border-b-2 border-green-500 text-green-700 bg-green-50':'text-slate-600 hover:text-navy'}">${lbl}</button>`).join('')}
+            </div>
+          </div>
+          <div id="payroll-content"></div>`;
+        setTimeout(() => renderPayrollTab(), 0);
         return div;
       },
     };
@@ -8112,6 +8143,872 @@
     // ============================================================
     // 9h. SETTINGS ACTIONS
     // ============================================================
+    // ============================================================
+    // PAYROLL — KALKULASI (port dari proyek-1)
+    // ============================================================
+
+    // TER rates (PMK 168/2023) — Kategori A (TK/0, TK/1)
+    const TER_A = [
+      {upper:5400000,rate:0},{upper:5650000,rate:0.005},{upper:6050000,rate:0.01},
+      {upper:7050000,rate:0.015},{upper:7550000,rate:0.02},{upper:8550000,rate:0.025},
+      {upper:9650000,rate:0.03},{upper:10050000,rate:0.035},{upper:10350000,rate:0.04},
+      {upper:10700000,rate:0.045},{upper:11050000,rate:0.05},{upper:11600000,rate:0.055},
+      {upper:12500000,rate:0.06},{upper:13750000,rate:0.07},{upper:15100000,rate:0.08},
+      {upper:16950000,rate:0.09},{upper:19750000,rate:0.10},{upper:24150000,rate:0.11},
+      {upper:26450000,rate:0.12},{upper:28000000,rate:0.13},{upper:30050000,rate:0.14},
+      {upper:32400000,rate:0.15},{upper:35400000,rate:0.16},{upper:39100000,rate:0.17},
+      {upper:43850000,rate:0.18},{upper:47800000,rate:0.19},{upper:51400000,rate:0.20},
+      {upper:56300000,rate:0.21},{upper:62200000,rate:0.22},{upper:74900000,rate:0.23},
+      {upper:Infinity,rate:0.24},
+    ];
+    // TER B (K/0, TK/2, TK/3)
+    const TER_B = [
+      {upper:6200000,rate:0},{upper:6500000,rate:0.005},{upper:6850000,rate:0.01},
+      {upper:7800000,rate:0.015},{upper:8850000,rate:0.02},{upper:9800000,rate:0.025},
+      {upper:10950000,rate:0.03},{upper:11200000,rate:0.035},{upper:12050000,rate:0.04},
+      {upper:12950000,rate:0.045},{upper:14150000,rate:0.05},{upper:15300000,rate:0.055},
+      {upper:16700000,rate:0.06},{upper:18900000,rate:0.07},{upper:21900000,rate:0.08},
+      {upper:25600000,rate:0.09},{upper:31000000,rate:0.10},{upper:35000000,rate:0.11},
+      {upper:39900000,rate:0.12},{upper:45800000,rate:0.13},{upper:52100000,rate:0.14},
+      {upper:59900000,rate:0.15},{upper:69100000,rate:0.16},{upper:Infinity,rate:0.17},
+    ];
+    // TER C (K/1, K/2, K/3)
+    const TER_C = [
+      {upper:6600000,rate:0},{upper:6950000,rate:0.005},{upper:7350000,rate:0.01},
+      {upper:8200000,rate:0.015},{upper:9350000,rate:0.02},{upper:10900000,rate:0.025},
+      {upper:11900000,rate:0.03},{upper:13150000,rate:0.035},{upper:14300000,rate:0.04},
+      {upper:15950000,rate:0.045},{upper:17550000,rate:0.05},{upper:19850000,rate:0.055},
+      {upper:22700000,rate:0.06},{upper:26600000,rate:0.07},{upper:31600000,rate:0.08},
+      {upper:37100000,rate:0.09},{upper:44100000,rate:0.10},{upper:53600000,rate:0.11},
+      {upper:62500000,rate:0.12},{upper:74500000,rate:0.13},{upper:Infinity,rate:0.14},
+    ];
+    const PTKP = { TK0:54000000,TK1:58500000,TK2:63000000,TK3:67500000,K0:58500000,K1:63000000,K2:67500000,K3:72000000 };
+    const TER_MAP = { TK0:'A',TK1:'A',K0:'B',TK2:'B',TK3:'B',K1:'C',K2:'C',K3:'C' };
+    const JKK_RATE = { SANGAT_RENDAH:0.0024,RENDAH:0.0054,SEDANG:0.0089,TINGGI:0.0127,SANGAT_TINGGI:0.0174 };
+    const PASAL17 = [
+      {upper:60000000,rate:0.05},{upper:250000000,rate:0.15},
+      {upper:500000000,rate:0.25},{upper:5000000000,rate:0.30},{upper:Infinity,rate:0.35}
+    ];
+
+    function findTerRate(bruto, statusPtkp) {
+      const cat = TER_MAP[statusPtkp] || 'A';
+      const table = cat==='A'?TER_A:cat==='B'?TER_B:TER_C;
+      for (const b of table) { if (bruto <= b.upper) return b.rate; }
+      return table[table.length-1].rate;
+    }
+    function pph21Bulanan(bruto, statusPtkp) {
+      if (bruto <= 0) return 0;
+      return Math.round(bruto * findTerRate(bruto, statusPtkp));
+    }
+    function hitungPasal17(pkp) {
+      if (pkp <= 0) return 0;
+      let pph = 0, rem = pkp, prev = 0;
+      for (const b of PASAL17) {
+        if (rem <= 0) break;
+        const slice = Math.min(rem, b.upper - prev);
+        pph += slice * b.rate; rem -= slice; prev = b.upper;
+      }
+      return pph;
+    }
+    function pph21Desember(brutoSetahun, iuranKaryawanSetahun, statusPtkp, totalJanNov) {
+      const biayaJabatan = Math.min(brutoSetahun * 0.05, 6000000);
+      const neto = Math.max(0, brutoSetahun - biayaJabatan - iuranKaryawanSetahun);
+      const pkpRaw = Math.max(0, neto - (PTKP[statusPtkp] || 54000000));
+      const pkp = Math.floor(pkpRaw / 1000) * 1000;
+      const pphSetahun = hitungPasal17(pkp);
+      const selisih = pphSetahun - totalJanNov;
+      return { pphDesember: Math.max(0, selisih), lebihBayar: selisih < 0 ? -selisih : 0, pphSetahun, pkp };
+    }
+    function hitungBpjs(gajiPokok, tunjTetap, tingkatJkk, capKes, capJp, kesAktif, tkAktif) {
+      const upah = gajiPokok + tunjTetap;
+      const dasarKes = kesAktif ? Math.min(upah, capKes) : 0;
+      const dasarTk  = tkAktif  ? upah : 0;
+      const dasarJp  = tkAktif  ? Math.min(upah, capJp) : 0;
+      return {
+        bpjsKesKaryawan:   Math.round(dasarKes * 0.01),
+        bpjsKesPerusahaan: Math.round(dasarKes * 0.04),
+        bpjsJhtKaryawan:   Math.round(dasarTk  * 0.02),
+        bpjsJhtPerusahaan: Math.round(dasarTk  * 0.037),
+        bpjsJpKaryawan:    Math.round(dasarJp  * 0.01),
+        bpjsJpPerusahaan:  Math.round(dasarJp  * 0.02),
+        bpjsJkkPerusahaan: Math.round(dasarTk  * (JKK_RATE[tingkatJkk] || 0.0174)),
+        bpjsJkmPerusahaan: Math.round(dasarTk  * 0.003),
+      };
+    }
+    function hitungLembur(gajiPokok, jamKerja, jamLibur) {
+      const tarifJam = gajiPokok / 173;
+      // Hari kerja: jam 1 = 1.5×, jam 2+ = 2×
+      let lembur = 0;
+      if (jamKerja >= 1) lembur += tarifJam * 1.5;
+      if (jamKerja > 1)  lembur += tarifJam * 2 * (jamKerja - 1);
+      // Hari libur: jam 1-8 = 2×, jam 9 = 3×, jam 10+ = 4×
+      if (jamLibur > 0) {
+        const j8 = Math.min(jamLibur, 8);
+        lembur += tarifJam * 2 * j8;
+        if (jamLibur > 8) lembur += tarifJam * 3;
+        if (jamLibur > 9) lembur += tarifJam * 4 * (jamLibur - 9);
+      }
+      return Math.round(lembur);
+    }
+    function fmtRp(n) { return 'Rp ' + Math.round(n||0).toLocaleString('id-ID'); }
+    function terbilang(n) {
+      const s=['','satu','dua','tiga','empat','lima','enam','tujuh','delapan','sembilan',
+               'sepuluh','sebelas','dua belas','tiga belas','empat belas','lima belas',
+               'enam belas','tujuh belas','delapan belas','sembilan belas'];
+      const rbg=n=>{if(n<20)return s[n];if(n<100)return s[Math.floor(n/10)*10>0?0:0]+(['','','dua ','tiga ','empat ','lima ','enam ','tujuh ','delapan ','sembilan '][Math.floor(n/10)])+'puluh'+(n%10?' '+s[n%10]:'');return '';};
+      if(n<0)return 'minus '+terbilang(-n);
+      if(n===0)return 'nol';
+      n=Math.round(n);
+      let r='';
+      if(n>=1e12){r+=terbilang(Math.floor(n/1e12))+' triliun ';n%=1e12;}
+      if(n>=1e9){r+=terbilang(Math.floor(n/1e9))+' miliar ';n%=1e9;}
+      if(n>=1e6){r+=terbilang(Math.floor(n/1e6))+' juta ';n%=1e6;}
+      if(n>=1e3){const rb=Math.floor(n/1e3);r+=(rb===1?'se':terbilang(rb)+' ')+'ribu ';n%=1e3;}
+      if(n>=100){const r2=Math.floor(n/100);r+=(r2===1?'se':s[r2]+' ')+'ratus ';n%=100;}
+      if(n>0)r+=rbg(n)+' ';
+      return r.trim()+' rupiah';
+    }
+
+    // ============================================================
+    // PAYROLL — STATE
+    // ============================================================
+    let payrollState = {
+      tab: 'karyawan',
+      employees: [],
+      config: null,
+      selectedPeriode: (() => { const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; })(),
+    };
+
+    function setPayrollTab(t) {
+      payrollState.tab = t;
+      state.payrollTab = t;
+      // update tab highlight
+      document.querySelectorAll('[data-ptab]').forEach(b => {
+        const active = b.dataset.ptab === t;
+        b.className = `px-4 py-3 text-sm font-semibold whitespace-nowrap ${active?'border-b-2 border-green-500 text-green-700 bg-green-50':'text-slate-600 hover:text-navy'}`;
+      });
+      renderPayrollTab();
+    }
+    window.setPayrollTab = setPayrollTab;
+
+    async function renderPayrollTab() {
+      const host = document.getElementById('payroll-content');
+      if (!host) return;
+      host.innerHTML = '<div class="text-center text-slate-400 py-10">Memuat…</div>';
+      const t = payrollState.tab;
+      if (t === 'karyawan')  { await renderPayrollKaryawan(host); return; }
+      if (t === 'komponen')  { await renderPayrollKomponen(host); return; }
+      if (t === 'lembur')    { await renderPayrollLembur(host); return; }
+      if (t === 'kasbon')    { await renderPayrollKasbon(host); return; }
+      if (t === 'proses')    { await renderPayrollProses(host); return; }
+      if (t === 'laporan')   { await renderPayrollLaporan(host); return; }
+    }
+    window.renderPayrollTab = renderPayrollTab;
+
+    // --- helper load config ---
+    async function loadPayrollConfig() {
+      if (payrollState.config) return payrollState.config;
+      const { data } = await state.supabase.from('payroll_config').select('*').eq('id','default').single().then(r=>r).catch(()=>({data:null}));
+      payrollState.config = data || { cap_bpjs_kesehatan:12000000, cap_bpjs_jp:10547400 };
+      return payrollState.config;
+    }
+
+    // ============================================================
+    // TAB: KARYAWAN
+    // ============================================================
+    async function renderPayrollKaryawan(host) {
+      const { data: emps, error } = await state.supabase.from('payroll_employees').select('*').order('nama');
+      if (error) { host.innerHTML = `<div class="bg-red-50 text-red-700 p-4 rounded-xl">${escapeHtml(error.message)}</div>`; return; }
+      payrollState.employees = emps || [];
+      host.innerHTML = `
+        <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <span class="text-sm text-slate-500">${emps.length} karyawan terdaftar</span>
+          <button onclick="openPayrollEmpForm()" class="btn-cetak btn-cetak-sm">+ Tambah Karyawan</button>
+        </div>
+        <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="bg-slate-50 text-xs text-slate-500 uppercase">
+                <tr>
+                  <th class="px-4 py-3 text-left">NIK</th>
+                  <th class="px-4 py-3 text-left">Nama</th>
+                  <th class="px-4 py-3 text-left">Jabatan</th>
+                  <th class="px-4 py-3 text-left">PTKP</th>
+                  <th class="px-4 py-3 text-right">Gaji Pokok</th>
+                  <th class="px-4 py-3 text-center">Status</th>
+                  <th class="px-4 py-3 text-center">Aksi</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${(emps||[]).map(e => `
+                  <tr class="border-b border-slate-100 hover:bg-slate-50">
+                    <td class="px-4 py-3 font-mono text-xs">${escapeHtml(e.nik)}</td>
+                    <td class="px-4 py-3 font-semibold">${escapeHtml(e.nama)}</td>
+                    <td class="px-4 py-3 text-slate-600">${escapeHtml(e.jabatan||'')}</td>
+                    <td class="px-4 py-3 text-slate-600">${escapeHtml(e.status_ptkp)}</td>
+                    <td class="px-4 py-3 text-right font-semibold">${fmtRp(e.gaji_pokok)}</td>
+                    <td class="px-4 py-3 text-center">
+                      <span class="text-xs px-2 py-0.5 rounded-full font-semibold ${e.aktif?'bg-green-100 text-green-700':'bg-slate-100 text-slate-500'}">${e.aktif?'Aktif':'Nonaktif'}</span>
+                    </td>
+                    <td class="px-4 py-3 text-center">
+                      <button onclick="openPayrollEmpForm('${e.id}')" class="text-xs text-navy hover:underline font-semibold mr-2">Edit</button>
+                      <button onclick="deletePayrollEmp('${e.id}','${escapeHtml(e.nama)}')" class="text-xs text-red-500 hover:underline">Hapus</button>
+                    </td>
+                  </tr>`).join('') || '<tr><td colspan="7" class="px-4 py-8 text-center text-slate-400">Belum ada karyawan.</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+        </div>`;
+    }
+
+    function openPayrollEmpForm(id) {
+      const emp = id ? payrollState.employees.find(e=>e.id===id) : null;
+      const v = (f,def='') => emp ? (emp[f]??def) : def;
+      const fld = (lbl,name,type='text',extra='') =>
+        `<div><label class="block text-xs font-semibold text-slate-600 mb-1">${lbl}</label>
+         <input type="${type}" id="pef-${name}" value="${escapeHtml(String(v(name)))}" ${extra}
+           class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-green-400" /></div>`;
+      const sel = (lbl,name,opts) =>
+        `<div><label class="block text-xs font-semibold text-slate-600 mb-1">${lbl}</label>
+         <select id="pef-${name}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-green-400">
+           ${opts.map(([val,lab])=>`<option value="${val}" ${v(name)===val?'selected':''}>${lab}</option>`).join('')}
+         </select></div>`;
+      const html = `
+        <div class="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+          <div class="grid grid-cols-2 gap-3">
+            ${fld('NIK *','nik')} ${fld('Nama Lengkap *','nama')}
+            ${fld('Jabatan *','jabatan')} ${fld('Departemen','departemen')}
+            ${fld('Tanggal Masuk *','tanggal_masuk','date')}
+            ${sel('Status Kerja','status_kerja',[['TETAP','Tetap'],['KONTRAK','Kontrak'],['HARIAN','Harian']])}
+            ${sel('Status PTKP','status_ptkp',[['TK0','TK/0'],['TK1','TK/1'],['TK2','TK/2'],['TK3','TK/3'],['K0','K/0'],['K1','K/1'],['K2','K/2'],['K3','K/3']])}
+            ${fld('NPWP','npwp')}
+          </div>
+          <div class="border-t pt-3"><p class="text-xs font-bold text-slate-700 mb-2">💵 Komponen Gaji</p>
+            <div class="grid grid-cols-2 gap-3">
+              ${fld('Gaji Pokok','gaji_pokok','number')} ${fld('Tunj. Jabatan','tunj_jabatan','number')}
+              ${fld('Tunj. Transport','tunj_transport','number')} ${fld('Tunj. Makan','tunj_makan','number')}
+              ${fld('Tunj. Lainnya','tunj_lainnya','number')}
+            </div>
+          </div>
+          <div class="border-t pt-3"><p class="text-xs font-bold text-slate-700 mb-2">🏥 BPJS</p>
+            <div class="grid grid-cols-2 gap-3">
+              ${fld('No. BPJS Kesehatan','bpjs_kes_nomor')} ${fld('No. BPJS TK','bpjs_tk_nomor')}
+              ${sel('Tingkat Risiko JKK','tingkat_risiko_jkk',[['SANGAT_RENDAH','Sangat Rendah (0.24%)'],['RENDAH','Rendah (0.54%)'],['SEDANG','Sedang (0.89%)'],['TINGGI','Tinggi (1.27%)'],['SANGAT_TINGGI','Sangat Tinggi (1.74%)']])}
+            </div>
+            <div class="flex gap-4 mt-2">
+              <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="pef-bpjs_kes_aktif" ${v('bpjs_kes_aktif',true)?'checked':''} /> BPJS Kesehatan Aktif</label>
+              <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="pef-bpjs_tk_aktif" ${v('bpjs_tk_aktif',true)?'checked':''} /> BPJS TK Aktif</label>
+            </div>
+          </div>
+          <div class="border-t pt-3"><p class="text-xs font-bold text-slate-700 mb-2">🏦 Bank</p>
+            <div class="grid grid-cols-2 gap-3">
+              ${fld('Nama Bank','nama_bank')} ${fld('No. Rekening','no_rekening')}
+            </div>
+          </div>
+          <div class="border-t pt-3">
+            <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="pef-aktif" ${v('aktif',true)?'checked':''} /> Karyawan Aktif</label>
+          </div>
+        </div>
+        <div class="flex justify-end gap-2 mt-4">
+          <button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 text-sm font-semibold text-slate-700 hover:bg-slate-50">Batal</button>
+          <button onclick="savePayrollEmp('${id||''}')" class="px-5 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-bold">💾 Simpan</button>
+        </div>`;
+      openModal(emp ? 'Edit Karyawan' : 'Tambah Karyawan', html);
+    }
+    window.openPayrollEmpForm = openPayrollEmpForm;
+
+    async function savePayrollEmp(id) {
+      const g = name => document.getElementById('pef-'+name);
+      const payload = {
+        nik: g('nik')?.value.trim(), nama: g('nama')?.value.trim(),
+        jabatan: g('jabatan')?.value.trim(), departemen: g('departemen')?.value.trim(),
+        tanggal_masuk: g('tanggal_masuk')?.value, status_kerja: g('status_kerja')?.value,
+        status_ptkp: g('status_ptkp')?.value, npwp: g('npwp')?.value.trim(),
+        gaji_pokok: Number(g('gaji_pokok')?.value)||0,
+        tunj_jabatan: Number(g('tunj_jabatan')?.value)||0,
+        tunj_transport: Number(g('tunj_transport')?.value)||0,
+        tunj_makan: Number(g('tunj_makan')?.value)||0,
+        tunj_lainnya: Number(g('tunj_lainnya')?.value)||0,
+        bpjs_kes_nomor: g('bpjs_kes_nomor')?.value.trim(),
+        bpjs_tk_nomor: g('bpjs_tk_nomor')?.value.trim(),
+        tingkat_risiko_jkk: g('tingkat_risiko_jkk')?.value,
+        bpjs_kes_aktif: g('bpjs_kes_aktif')?.checked ?? true,
+        bpjs_tk_aktif: g('bpjs_tk_aktif')?.checked ?? true,
+        nama_bank: g('nama_bank')?.value.trim(),
+        no_rekening: g('no_rekening')?.value.trim(),
+        aktif: g('aktif')?.checked ?? true,
+      };
+      if (!payload.nik || !payload.nama || !payload.jabatan) { toast('NIK, Nama, dan Jabatan wajib diisi.','warn'); return; }
+      try {
+        if (id) { const { error } = await state.supabase.from('payroll_employees').update(payload).eq('id',id); if(error)throw error; }
+        else { payload.created_by = state.user.id; const { error } = await state.supabase.from('payroll_employees').insert(payload); if(error)throw error; }
+        toast('Karyawan tersimpan.','success'); closeModal();
+        payrollState.employees = [];
+        renderPayrollTab();
+      } catch(e) { toast('Gagal: '+e.message,'error'); }
+    }
+    window.savePayrollEmp = savePayrollEmp;
+
+    async function deletePayrollEmp(id, nama) {
+      const ok = await confirmDialog({ title:'Hapus Karyawan?', message:`Hapus <b>${escapeHtml(nama)}</b>? Data payroll terkait ikut terhapus.`, confirmText:'Hapus', cancelText:'Batal' });
+      if (!ok) return;
+      const { error } = await state.supabase.from('payroll_employees').delete().eq('id',id);
+      if (error) { toast('Gagal: '+error.message,'error'); return; }
+      toast('Karyawan dihapus.','success'); renderPayrollTab();
+    }
+    window.deletePayrollEmp = deletePayrollEmp;
+
+    // ============================================================
+    // TAB: KOMPONEN GAJI (view komponen per karyawan)
+    // ============================================================
+    async function renderPayrollKomponen(host) {
+      const { data: emps } = await state.supabase.from('payroll_employees').select('*').eq('aktif',true).order('nama');
+      host.innerHTML = `
+        <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="bg-slate-50 text-xs text-slate-500 uppercase">
+                <tr>
+                  <th class="px-4 py-3 text-left">Nama</th>
+                  <th class="px-4 py-3 text-right">Gaji Pokok</th>
+                  <th class="px-4 py-3 text-right">Tunj. Jabatan</th>
+                  <th class="px-4 py-3 text-right">Tunj. Transport</th>
+                  <th class="px-4 py-3 text-right">Tunj. Makan</th>
+                  <th class="px-4 py-3 text-right">Tunj. Lainnya</th>
+                  <th class="px-4 py-3 text-right font-bold">Total Bruto Tetap</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${(emps||[]).map(e => {
+                  const total = (e.gaji_pokok||0)+(e.tunj_jabatan||0)+(e.tunj_transport||0)+(e.tunj_makan||0)+(e.tunj_lainnya||0);
+                  return `<tr class="border-b border-slate-100 hover:bg-slate-50">
+                    <td class="px-4 py-3 font-semibold">${escapeHtml(e.nama)}<div class="text-xs text-slate-400">${escapeHtml(e.jabatan||'')}</div></td>
+                    <td class="px-4 py-3 text-right">${fmtRp(e.gaji_pokok)}</td>
+                    <td class="px-4 py-3 text-right">${fmtRp(e.tunj_jabatan)}</td>
+                    <td class="px-4 py-3 text-right">${fmtRp(e.tunj_transport)}</td>
+                    <td class="px-4 py-3 text-right">${fmtRp(e.tunj_makan)}</td>
+                    <td class="px-4 py-3 text-right">${fmtRp(e.tunj_lainnya)}</td>
+                    <td class="px-4 py-3 text-right font-bold text-navy">${fmtRp(total)}</td>
+                  </tr>`;
+                }).join('') || '<tr><td colspan="7" class="px-4 py-8 text-center text-slate-400">Belum ada data.</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <p class="text-xs text-slate-400 mt-2">* Edit komponen gaji via tab Karyawan → Edit.</p>`;
+    }
+
+    // ============================================================
+    // TAB: LEMBUR
+    // ============================================================
+    async function renderPayrollLembur(host) {
+      const { data: emps } = await state.supabase.from('payroll_employees').select('id,nama,jabatan,gaji_pokok').eq('aktif',true).order('nama');
+      const { data: ots  } = await state.supabase.from('payroll_overtime').select('*').eq('periode', payrollState.selectedPeriode);
+      const otMap = {};
+      (ots||[]).forEach(o => { otMap[o.employee_id] = o; });
+      const periodeOptions = [];
+      for (let i=0; i<12; i++) {
+        const d = new Date(); d.setDate(1); d.setMonth(d.getMonth()-i);
+        periodeOptions.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
+      }
+      host.innerHTML = `
+        <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex items-center gap-3 flex-wrap mb-3">
+          <span class="text-sm font-semibold text-slate-700">Periode:</span>
+          <select onchange="payrollState.selectedPeriode=this.value;renderPayrollTab()"
+            class="px-3 py-1.5 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-green-400">
+            ${periodeOptions.map(p=>`<option value="${p}" ${p===payrollState.selectedPeriode?'selected':''}>${p}</option>`).join('')}
+          </select>
+          <span class="text-xs text-slate-400">Input jam lembur masing-masing karyawan</span>
+        </div>
+        <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <table class="w-full text-sm">
+            <thead class="bg-slate-50 text-xs text-slate-500 uppercase">
+              <tr>
+                <th class="px-4 py-3 text-left">Nama</th>
+                <th class="px-4 py-3 text-right">Gaji Pokok</th>
+                <th class="px-4 py-3 text-center">Jam Lembur<br><span class="normal-case font-normal">Hari Kerja</span></th>
+                <th class="px-4 py-3 text-center">Jam Lembur<br><span class="normal-case font-normal">Hari Libur</span></th>
+                <th class="px-4 py-3 text-right">Est. Upah Lembur</th>
+                <th class="px-4 py-3 text-center">Aksi</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${(emps||[]).map(e => {
+                const ot = otMap[e.id] || {};
+                const jk = ot.jam_lembur_kerja||0, jl = ot.jam_lembur_libur||0;
+                const est = hitungLembur(e.gaji_pokok||0, jk, jl);
+                return `<tr class="border-b border-slate-100" id="ot-row-${e.id}">
+                  <td class="px-4 py-3 font-semibold">${escapeHtml(e.nama)}</td>
+                  <td class="px-4 py-3 text-right">${fmtRp(e.gaji_pokok)}</td>
+                  <td class="px-4 py-2 text-center"><input type="number" min="0" step="0.5" value="${jk}"
+                    class="w-20 px-2 py-1 border border-slate-300 rounded text-center text-sm outline-none focus:ring-1 focus:ring-green-400"
+                    id="ot-k-${e.id}" /></td>
+                  <td class="px-4 py-2 text-center"><input type="number" min="0" step="0.5" value="${jl}"
+                    class="w-20 px-2 py-1 border border-slate-300 rounded text-center text-sm outline-none focus:ring-1 focus:ring-green-400"
+                    id="ot-l-${e.id}" /></td>
+                  <td class="px-4 py-3 text-right text-green-700 font-semibold" id="ot-est-${e.id}">${fmtRp(est)}</td>
+                  <td class="px-4 py-2 text-center">
+                    <button onclick="savePayrollOvertime('${e.id}','${escapeHtml(e.nama)}',${e.gaji_pokok||0})"
+                      class="px-3 py-1 bg-green-600 hover:bg-green-700 text-white rounded text-xs font-bold">Simpan</button>
+                  </td>
+                </tr>`;
+              }).join('') || '<tr><td colspan="6" class="px-4 py-8 text-center text-slate-400">Belum ada karyawan aktif.</td></tr>'}
+            </tbody>
+          </table>
+        </div>`;
+
+      // Live estimate update
+      (emps||[]).forEach(e => {
+        const ik = document.getElementById('ot-k-'+e.id);
+        const il = document.getElementById('ot-l-'+e.id);
+        const updateEst = () => {
+          const est = hitungLembur(e.gaji_pokok||0, Number(ik?.value)||0, Number(il?.value)||0);
+          const el = document.getElementById('ot-est-'+e.id);
+          if (el) el.textContent = fmtRp(est);
+        };
+        ik?.addEventListener('input', updateEst);
+        il?.addEventListener('input', updateEst);
+      });
+    }
+
+    async function savePayrollOvertime(empId, nama, gajiPokok) {
+      const jk = Number(document.getElementById('ot-k-'+empId)?.value)||0;
+      const jl = Number(document.getElementById('ot-l-'+empId)?.value)||0;
+      const payload = { employee_id:empId, periode:payrollState.selectedPeriode, jam_lembur_kerja:jk, jam_lembur_libur:jl };
+      const { error } = await state.supabase.from('payroll_overtime').upsert(payload, { onConflict:'employee_id,periode' });
+      if (error) { toast('Gagal: '+error.message,'error'); return; }
+      toast(`Lembur ${nama} tersimpan.`,'success');
+    }
+    window.savePayrollOvertime = savePayrollOvertime;
+
+    // ============================================================
+    // TAB: KASBON
+    // ============================================================
+    async function renderPayrollKasbon(host) {
+      const { data: kasbon } = await state.supabase.from('payroll_kasbon')
+        .select('*, payroll_employees(nama,jabatan)').order('created_at', {ascending:false});
+      host.innerHTML = `
+        <div class="flex justify-end mb-3">
+          <button onclick="openKasbonForm()" class="btn-cetak btn-cetak-sm">+ Tambah Kasbon</button>
+        </div>
+        <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <table class="w-full text-sm">
+            <thead class="bg-slate-50 text-xs text-slate-500 uppercase">
+              <tr>
+                <th class="px-4 py-3 text-left">Karyawan</th>
+                <th class="px-4 py-3 text-left">Tanggal</th>
+                <th class="px-4 py-3 text-right">Jumlah</th>
+                <th class="px-4 py-3 text-right">Cicilan/Bln</th>
+                <th class="px-4 py-3 text-right">Sisa</th>
+                <th class="px-4 py-3 text-center">Status</th>
+                <th class="px-4 py-3 text-center">Aksi</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${(kasbon||[]).map(k => `
+                <tr class="border-b border-slate-100 hover:bg-slate-50">
+                  <td class="px-4 py-3 font-semibold">${escapeHtml(k.payroll_employees?.nama||'—')}<div class="text-xs text-slate-400">${escapeHtml(k.payroll_employees?.jabatan||'')}</div></td>
+                  <td class="px-4 py-3">${fmtDate(k.tanggal)}</td>
+                  <td class="px-4 py-3 text-right">${fmtRp(k.jumlah)}</td>
+                  <td class="px-4 py-3 text-right">${fmtRp(k.cicilan_per_bulan)}</td>
+                  <td class="px-4 py-3 text-right font-bold ${k.sisa_pinjaman>0?'text-red-600':'text-green-600'}">${fmtRp(k.sisa_pinjaman)}</td>
+                  <td class="px-4 py-3 text-center"><span class="text-xs px-2 py-0.5 rounded-full font-semibold ${k.status==='Aktif'?'bg-red-100 text-red-700':'bg-green-100 text-green-700'}">${k.status}</span></td>
+                  <td class="px-4 py-3 text-center">
+                    <button onclick="lunasiKasbon('${k.id}')" class="text-xs text-green-600 hover:underline font-semibold ${k.status==='Lunas'?'opacity-30 pointer-events-none':''}">Lunas</button>
+                  </td>
+                </tr>`).join('') || '<tr><td colspan="7" class="px-4 py-8 text-center text-slate-400">Belum ada data kasbon.</td></tr>'}
+            </tbody>
+          </table>
+        </div>`;
+    }
+
+    function openKasbonForm() {
+      const emps = payrollState.employees.filter(e=>e.aktif);
+      const html = `
+        <div class="space-y-3">
+          <div><label class="block text-xs font-semibold text-slate-600 mb-1">Karyawan *</label>
+            <select id="kb-emp" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-green-400">
+              <option value="">Pilih karyawan…</option>
+              ${emps.map(e=>`<option value="${e.id}">${escapeHtml(e.nama)}</option>`).join('')}
+            </select></div>
+          <div class="grid grid-cols-2 gap-3">
+            <div><label class="block text-xs font-semibold text-slate-600 mb-1">Tanggal *</label>
+              <input type="date" id="kb-tgl" value="${new Date().toISOString().slice(0,10)}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-green-400" /></div>
+            <div><label class="block text-xs font-semibold text-slate-600 mb-1">Jumlah *</label>
+              <input type="number" id="kb-jumlah" placeholder="0" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-green-400" /></div>
+            <div><label class="block text-xs font-semibold text-slate-600 mb-1">Cicilan/Bulan *</label>
+              <input type="number" id="kb-cicilan" placeholder="0" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-green-400" /></div>
+          </div>
+          <div><label class="block text-xs font-semibold text-slate-600 mb-1">Keterangan</label>
+            <input type="text" id="kb-ket" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-green-400" /></div>
+        </div>
+        <div class="flex justify-end gap-2 mt-4">
+          <button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 text-sm font-semibold text-slate-700 hover:bg-slate-50">Batal</button>
+          <button onclick="saveKasbon()" class="px-5 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-bold">💾 Simpan</button>
+        </div>`;
+      openModal('Tambah Kasbon', html);
+    }
+    window.openKasbonForm = openKasbonForm;
+
+    async function saveKasbon() {
+      const empId = document.getElementById('kb-emp')?.value;
+      const jumlah = Number(document.getElementById('kb-jumlah')?.value)||0;
+      const cicilan = Number(document.getElementById('kb-cicilan')?.value)||0;
+      const tgl = document.getElementById('kb-tgl')?.value;
+      if (!empId||!jumlah||!cicilan||!tgl) { toast('Semua field wajib diisi.','warn'); return; }
+      const { error } = await state.supabase.from('payroll_kasbon').insert({
+        employee_id:empId, tanggal:tgl, jumlah, cicilan_per_bulan:cicilan,
+        sisa_pinjaman:jumlah, keterangan:document.getElementById('kb-ket')?.value||null,
+      });
+      if (error) { toast('Gagal: '+error.message,'error'); return; }
+      toast('Kasbon tersimpan.','success'); closeModal(); renderPayrollTab();
+    }
+    window.saveKasbon = saveKasbon;
+
+    async function lunasiKasbon(id) {
+      const { error } = await state.supabase.from('payroll_kasbon').update({ status:'Lunas', sisa_pinjaman:0 }).eq('id',id);
+      if (error) { toast('Gagal: '+error.message,'error'); return; }
+      toast('Kasbon dilunasi.','success'); renderPayrollTab();
+    }
+    window.lunasiKasbon = lunasiKasbon;
+
+    // ============================================================
+    // TAB: PROSES PAYROLL
+    // ============================================================
+    async function renderPayrollProses(host) {
+      const periodeOptions = [];
+      for (let i=0; i<24; i++) {
+        const d = new Date(); d.setDate(1); d.setMonth(d.getMonth()-i);
+        periodeOptions.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
+      }
+      // Cek status periode
+      const { data: period } = await state.supabase.from('payroll_periods').select('*').eq('periode', payrollState.selectedPeriode).single().then(r=>r).catch(()=>({data:null}));
+      const isFinal = period?.status === 'Final';
+
+      host.innerHTML = `
+        <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex items-center gap-3 flex-wrap mb-3">
+          <span class="text-sm font-semibold text-slate-700">Periode:</span>
+          <select onchange="payrollState.selectedPeriode=this.value;renderPayrollTab()"
+            class="px-3 py-1.5 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-green-400">
+            ${periodeOptions.map(p=>`<option value="${p}" ${p===payrollState.selectedPeriode?'selected':''}>${p}</option>`).join('')}
+          </select>
+          <span class="ml-auto text-xs px-3 py-1 rounded-full font-bold ${isFinal?'bg-green-100 text-green-700':'bg-yellow-100 text-yellow-700'}">${isFinal?'✅ Final':'🟡 Draft'}</span>
+        </div>
+        <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-3 text-sm text-amber-800">
+          <b>⚙️ Cara kerja:</b> Klik <b>Hitung Payroll</b> → sistem kalkulasi PPh21 TER, BPJS, lembur, kasbon untuk semua karyawan aktif. Hasilnya bisa dilihat di tab Laporan & Slip.
+          ${isFinal ? '<br><b class="text-red-600">⚠️ Periode ini sudah Final — tidak bisa dihitung ulang.</b>' : ''}
+        </div>
+        <div class="flex gap-3 flex-wrap">
+          <button onclick="prosesPayroll(false)" ${isFinal?'disabled':''} class="px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl font-extrabold text-sm shadow ${isFinal?'opacity-40 cursor-not-allowed':''}">⚙️ Hitung Payroll</button>
+          <button onclick="prosesPayroll(true)" ${isFinal?'disabled':''} class="px-6 py-3 bg-navy hover:bg-navy/90 text-white rounded-xl font-extrabold text-sm shadow ${isFinal?'opacity-40 cursor-not-allowed':''}">🔒 Hitung & Final</button>
+        </div>
+        <div id="payroll-proses-result" class="mt-4"></div>`;
+    }
+
+    async function prosesPayroll(finalize) {
+      const resultEl = document.getElementById('payroll-proses-result');
+      if (resultEl) resultEl.innerHTML = '<div class="text-slate-400 text-sm">Menghitung…</div>';
+      try {
+        const cfg = await loadPayrollConfig();
+        const [{ data: emps }, { data: ots }, { data: kasbons }] = await Promise.all([
+          state.supabase.from('payroll_employees').select('*').eq('aktif',true),
+          state.supabase.from('payroll_overtime').select('*').eq('periode', payrollState.selectedPeriode),
+          state.supabase.from('payroll_kasbon').select('*').eq('status','Aktif'),
+        ]);
+        const otMap = {}; (ots||[]).forEach(o=>{ otMap[o.employee_id]=o; });
+        const kasbonMap = {}; (kasbons||[]).forEach(k=>{
+          if (!kasbonMap[k.employee_id]) kasbonMap[k.employee_id] = [];
+          kasbonMap[k.employee_id].push(k);
+        });
+
+        // Upsert periode
+        const { data: period } = await state.supabase.from('payroll_periods')
+          .upsert({ periode: payrollState.selectedPeriode, status: finalize?'Final':'Draft', processed_by: state.user.id, processed_at: new Date().toISOString() }, { onConflict:'periode' })
+          .select().single().then(r=>r).catch(()=>({data:null}));
+        const periodId = period?.id;
+        if (!periodId) throw new Error('Gagal buat periode');
+
+        const isDesember = payrollState.selectedPeriode.endsWith('-12');
+
+        const entries = await Promise.all((emps||[]).map(async emp => {
+          const ot = otMap[emp.id] || {};
+          const jk = ot.jam_lembur_kerja||0, jl = ot.jam_lembur_libur||0;
+          const upahLembur = hitungLembur(emp.gaji_pokok||0, jk, jl);
+          const tunjTetap = (emp.tunj_jabatan||0)+(emp.tunj_transport||0)+(emp.tunj_makan||0)+(emp.tunj_lainnya||0);
+          const totalBruto = (emp.gaji_pokok||0)+tunjTetap+upahLembur;
+
+          const bpjs = hitungBpjs(emp.gaji_pokok||0, tunjTetap,
+            emp.tingkat_risiko_jkk||'SANGAT_TINGGI',
+            cfg.cap_bpjs_kesehatan||12000000, cfg.cap_bpjs_jp||10547400,
+            emp.bpjs_kes_aktif!==false, emp.bpjs_tk_aktif!==false);
+
+          // PPh21
+          let pph21 = 0, lebihBayarPph = 0;
+          if (isDesember) {
+            // Ambil total PPh Jan-Nov
+            const { data: prevEntries } = await state.supabase
+              .from('payroll_entries').select('pph21, total_bruto, bpjs_jht, bpjs_jp')
+              .eq('employee_id', emp.id)
+              .not('period_id', 'eq', periodId);
+            const totalJanNov = (prevEntries||[]).reduce((s,r)=>s+(r.pph21||0),0);
+            const brutoSetahun = (prevEntries||[]).reduce((s,r)=>s+(r.total_bruto||0),0)+totalBruto;
+            const iuranKaryawan = (prevEntries||[]).reduce((s,r)=>s+(r.bpjs_jht||0)+(r.bpjs_jp||0),0)+bpjs.bpjsJhtKaryawan+bpjs.bpjsJpKaryawan;
+            const des = pph21Desember(brutoSetahun, iuranKaryawan, emp.status_ptkp||'TK0', totalJanNov);
+            pph21 = des.pphDesember; lebihBayarPph = des.lebihBayar;
+          } else {
+            pph21 = pph21Bulanan(totalBruto, emp.status_ptkp||'TK0');
+          }
+
+          // Kasbon
+          const empKasbons = kasbonMap[emp.id]||[];
+          const kasbonCicilan = empKasbons.reduce((s,k)=>s+(k.cicilan_per_bulan||0),0);
+
+          const totalPotongan = bpjs.bpjsKesKaryawan+bpjs.bpjsJhtKaryawan+bpjs.bpjsJpKaryawan+pph21+kasbonCicilan;
+          const thp = Math.max(0, totalBruto - totalPotongan + lebihBayarPph);
+
+          return {
+            period_id: periodId, employee_id: emp.id,
+            nama_snapshot: emp.nama, jabatan_snapshot: emp.jabatan,
+            gaji_pokok: emp.gaji_pokok||0, tunj_jabatan: emp.tunj_jabatan||0,
+            tunj_transport: emp.tunj_transport||0, tunj_makan: emp.tunj_makan||0,
+            tunj_lainnya: emp.tunj_lainnya||0,
+            jam_lembur_kerja: jk, jam_lembur_libur: jl, upah_lembur: upahLembur,
+            total_bruto: totalBruto,
+            bpjs_kes: bpjs.bpjsKesKaryawan, bpjs_jht: bpjs.bpjsJhtKaryawan,
+            bpjs_jp: bpjs.bpjsJpKaryawan, pph21, lebih_bayar_pph: lebihBayarPph,
+            kasbon_cicilan: kasbonCicilan, total_potongan: totalPotongan,
+            bpjs_kes_perusahaan: bpjs.bpjsKesPerusahaan,
+            bpjs_jkk_perusahaan: bpjs.bpjsJkkPerusahaan,
+            bpjs_jkm_perusahaan: bpjs.bpjsJkmPerusahaan,
+            bpjs_jht_perusahaan: bpjs.bpjsJhtPerusahaan,
+            bpjs_jp_perusahaan: bpjs.bpjsJpPerusahaan,
+            thp,
+            total_beban_perusahaan: totalBruto + bpjs.bpjsKesPerusahaan + bpjs.bpjsJkkPerusahaan + bpjs.bpjsJkmPerusahaan + bpjs.bpjsJhtPerusahaan + bpjs.bpjsJpPerusahaan + pph21,
+          };
+        }));
+
+        const { error: uErr } = await state.supabase.from('payroll_entries')
+          .upsert(entries, { onConflict:'period_id,employee_id' });
+        if (uErr) throw uErr;
+
+        // Update sisa kasbon
+        for (const emp of (emps||[])) {
+          const empKasbons = kasbonMap[emp.id]||[];
+          for (const k of empKasbons) {
+            const sisa = Math.max(0, (k.sisa_pinjaman||0)-(k.cicilan_per_bulan||0));
+            await state.supabase.from('payroll_kasbon').update({ sisa_pinjaman:sisa, status:sisa<=0?'Lunas':'Aktif' }).eq('id',k.id);
+          }
+        }
+
+        const totalTHP = entries.reduce((s,e)=>s+e.thp,0);
+        const totalBruto = entries.reduce((s,e)=>s+e.total_bruto,0);
+        if (resultEl) resultEl.innerHTML = `
+          <div class="bg-green-50 border border-green-200 rounded-xl p-4 text-sm space-y-1">
+            <div class="font-bold text-green-800 text-base">✅ Payroll ${finalize?'Final':'Draft'} berhasil dihitung!</div>
+            <div class="text-green-700">${entries.length} karyawan · Total Bruto: <b>${fmtRp(totalBruto)}</b> · Total THP: <b>${fmtRp(totalTHP)}</b></div>
+            <button onclick="setPayrollTab('laporan')" class="mt-2 px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-bold hover:bg-green-700">📄 Lihat Laporan & Slip →</button>
+          </div>`;
+        toast(`Payroll ${payrollState.selectedPeriode} berhasil!`,'success');
+      } catch(err) {
+        toast('Gagal proses payroll: '+err.message,'error');
+        if (resultEl) resultEl.innerHTML = `<div class="bg-red-50 text-red-700 p-4 rounded-xl text-sm">${escapeHtml(err.message)}</div>`;
+      }
+    }
+    window.prosesPayroll = prosesPayroll;
+
+    // ============================================================
+    // TAB: LAPORAN & SLIP
+    // ============================================================
+    async function renderPayrollLaporan(host) {
+      const periodeOptions = [];
+      for (let i=0; i<24; i++) {
+        const d = new Date(); d.setDate(1); d.setMonth(d.getMonth()-i);
+        periodeOptions.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
+      }
+      const { data: period } = await state.supabase.from('payroll_periods').select('*').eq('periode', payrollState.selectedPeriode).single().then(r=>r).catch(()=>({data:null}));
+      const { data: entries } = await state.supabase.from('payroll_entries')
+        .select('*').eq('period_id', period?.id||'').order('nama_snapshot');
+
+      host.innerHTML = `
+        <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex items-center gap-3 flex-wrap mb-3">
+          <span class="text-sm font-semibold text-slate-700">Periode:</span>
+          <select onchange="payrollState.selectedPeriode=this.value;renderPayrollTab()"
+            class="px-3 py-1.5 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-green-400">
+            ${periodeOptions.map(p=>`<option value="${p}" ${p===payrollState.selectedPeriode?'selected':''}>${p}</option>`).join('')}
+          </select>
+          ${period ? `<span class="text-xs px-2 py-0.5 rounded-full font-bold ${period.status==='Final'?'bg-green-100 text-green-700':'bg-yellow-100 text-yellow-700'}">${period.status}</span>` : ''}
+          ${entries?.length ? `<button onclick="cetakPayrollRekap()" class="btn-cetak btn-cetak-sm ml-auto">🖨 Cetak Rekap</button>` : ''}
+        </div>
+        ${!entries?.length ? `<div class="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-400">Belum ada data payroll untuk periode ini. Proses payroll dulu di tab ⚙️ Proses Payroll.</div>` : `
+        <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden mb-4">
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="bg-slate-50 text-xs text-slate-500 uppercase">
+                <tr>
+                  <th class="px-3 py-3 text-left">Nama</th>
+                  <th class="px-3 py-3 text-right">Bruto</th>
+                  <th class="px-3 py-3 text-right">BPJS</th>
+                  <th class="px-3 py-3 text-right">PPh21</th>
+                  <th class="px-3 py-3 text-right">Kasbon</th>
+                  <th class="px-3 py-3 text-right font-bold text-navy">THP</th>
+                  <th class="px-3 py-3 text-center">Slip</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${entries.map(e => {
+                  const totalBpjs = (e.bpjs_kes||0)+(e.bpjs_jht||0)+(e.bpjs_jp||0);
+                  return `<tr class="border-b border-slate-100 hover:bg-slate-50">
+                    <td class="px-3 py-3 font-semibold">${escapeHtml(e.nama_snapshot||'')}<div class="text-xs text-slate-400">${escapeHtml(e.jabatan_snapshot||'')}</div></td>
+                    <td class="px-3 py-3 text-right">${fmtRp(e.total_bruto)}</td>
+                    <td class="px-3 py-3 text-right">${fmtRp(totalBpjs)}</td>
+                    <td class="px-3 py-3 text-right">${fmtRp(e.pph21)}</td>
+                    <td class="px-3 py-3 text-right">${fmtRp(e.kasbon_cicilan)}</td>
+                    <td class="px-3 py-3 text-right font-bold text-navy">${fmtRp(e.thp)}</td>
+                    <td class="px-3 py-3 text-center">
+                      <button onclick="cetakSlipGaji('${e.id}')" class="text-xs text-navy hover:underline font-semibold">🖨 Slip</button>
+                    </td>
+                  </tr>`;
+                }).join('')}
+                <tr class="bg-slate-50 font-bold">
+                  <td class="px-3 py-3">TOTAL</td>
+                  <td class="px-3 py-3 text-right">${fmtRp(entries.reduce((s,e)=>s+(e.total_bruto||0),0))}</td>
+                  <td class="px-3 py-3 text-right">${fmtRp(entries.reduce((s,e)=>s+(e.bpjs_kes||0)+(e.bpjs_jht||0)+(e.bpjs_jp||0),0))}</td>
+                  <td class="px-3 py-3 text-right">${fmtRp(entries.reduce((s,e)=>s+(e.pph21||0),0))}</td>
+                  <td class="px-3 py-3 text-right">${fmtRp(entries.reduce((s,e)=>s+(e.kasbon_cicilan||0),0))}</td>
+                  <td class="px-3 py-3 text-right text-navy">${fmtRp(entries.reduce((s,e)=>s+(e.thp||0),0))}</td>
+                  <td></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>`}`;
+    }
+
+    async function cetakSlipGaji(entryId) {
+      const { data: e } = await state.supabase.from('payroll_entries').select('*').eq('id',entryId).single().then(r=>r).catch(()=>({data:null}));
+      const cfg = await loadPayrollConfig();
+      if (!e) { toast('Data tidak ditemukan.','error'); return; }
+      const bulan = new Date(payrollState.selectedPeriode+'-01').toLocaleDateString('id-ID',{month:'long',year:'numeric'});
+      const totalBpjs = (e.bpjs_kes||0)+(e.bpjs_jht||0)+(e.bpjs_jp||0);
+      const html = `<!doctype html><html><head><meta charset="utf-8"><title>Slip Gaji ${escapeHtml(e.nama_snapshot||'')} ${bulan}</title>
+        <style>
+          *{box-sizing:border-box}body{font-family:Arial,sans-serif;font-size:12px;color:#111;padding:24px;max-width:600px;margin:auto;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+          @page{size:A5;margin:12mm}
+          .kop{border-bottom:3px solid #11335d;padding-bottom:8px;margin-bottom:12px}
+          .brand{font-size:18px;font-weight:800;color:#11335d}.ram{color:#f97316}
+          h2{font-size:13px;text-align:center;font-weight:800;text-transform:uppercase;margin:10px 0 2px;color:#11335d}
+          .meta{text-align:center;font-size:10px;color:#666;margin-bottom:12px}
+          table{width:100%;border-collapse:collapse;margin:6px 0}
+          td{padding:4px 8px;font-size:11px}
+          .lbl{color:#555;width:55%}.val{text-align:right;font-weight:600}
+          .section{background:#f8fafc;font-weight:700;font-size:10px;text-transform:uppercase;color:#11335d;padding:5px 8px;letter-spacing:.05em}
+          .total-row td{border-top:2px solid #11335d;font-weight:800;font-size:13px;padding-top:6px}
+          .thp td{background:#11335d;color:#fff;font-weight:800;font-size:14px;padding:8px}
+          .terbilang{font-style:italic;font-size:10px;color:#555;text-align:center;margin:6px 0 12px;border:1px dashed #e2e8f0;padding:6px;border-radius:4px}
+          .foot{margin-top:16px;font-size:9px;color:#94a3b8;text-align:center}
+          @media print{button{display:none}}
+        </style></head><body>
+        <div class="kop">
+          <div class="brand">eRAM<span class="ram">Hoist</span> <span style="font-size:12px;font-weight:400;color:#666">— ${escapeHtml(cfg.nama_perusahaan||'')}</span></div>
+        </div>
+        <h2>Slip Gaji Karyawan</h2>
+        <div class="meta">${bulan} &nbsp;|&nbsp; ${escapeHtml(e.nama_snapshot||'')} &nbsp;|&nbsp; ${escapeHtml(e.jabatan_snapshot||'')}</div>
+        <table>
+          <tr><td colspan="2" class="section">Pendapatan</td></tr>
+          <tr><td class="lbl">Gaji Pokok</td><td class="val">${fmtRp(e.gaji_pokok)}</td></tr>
+          ${e.tunj_jabatan>0?`<tr><td class="lbl">Tunjangan Jabatan</td><td class="val">${fmtRp(e.tunj_jabatan)}</td></tr>`:''}
+          ${e.tunj_transport>0?`<tr><td class="lbl">Tunjangan Transport</td><td class="val">${fmtRp(e.tunj_transport)}</td></tr>`:''}
+          ${e.tunj_makan>0?`<tr><td class="lbl">Tunjangan Makan</td><td class="val">${fmtRp(e.tunj_makan)}</td></tr>`:''}
+          ${e.tunj_lainnya>0?`<tr><td class="lbl">Tunjangan Lainnya</td><td class="val">${fmtRp(e.tunj_lainnya)}</td></tr>`:''}
+          ${e.upah_lembur>0?`<tr><td class="lbl">Upah Lembur (${e.jam_lembur_kerja||0}j kerja + ${e.jam_lembur_libur||0}j libur)</td><td class="val">${fmtRp(e.upah_lembur)}</td></tr>`:''}
+          <tr class="total-row"><td class="lbl">Total Pendapatan</td><td class="val">${fmtRp(e.total_bruto)}</td></tr>
+
+          <tr><td colspan="2" class="section">Potongan</td></tr>
+          <tr><td class="lbl">BPJS Kesehatan (1%)</td><td class="val">(${fmtRp(e.bpjs_kes)})</td></tr>
+          <tr><td class="lbl">BPJS JHT (2%)</td><td class="val">(${fmtRp(e.bpjs_jht)})</td></tr>
+          <tr><td class="lbl">BPJS JP (1%)</td><td class="val">(${fmtRp(e.bpjs_jp)})</td></tr>
+          <tr><td class="lbl">PPh 21</td><td class="val">(${fmtRp(e.pph21)})</td></tr>
+          ${e.kasbon_cicilan>0?`<tr><td class="lbl">Cicilan Kasbon</td><td class="val">(${fmtRp(e.kasbon_cicilan)})</td></tr>`:''}
+          ${e.lebih_bayar_pph>0?`<tr><td class="lbl" style="color:#16a34a">Lebih Bayar PPh21</td><td class="val" style="color:#16a34a">+${fmtRp(e.lebih_bayar_pph)}</td></tr>`:''}
+          <tr class="total-row"><td class="lbl">Total Potongan</td><td class="val">(${fmtRp(e.total_potongan)})</td></tr>
+        </table>
+        <table><tr class="thp"><td>TAKE HOME PAY</td><td class="val" style="text-align:right">${fmtRp(e.thp)}</td></tr></table>
+        <div class="terbilang">Terbilang: ${terbilang(e.thp)}</div>
+        <div class="foot">Slip ini dicetak dari eRAMHoist • ${new Date().toLocaleString('id-ID')}</div>
+        <script>window.onload=()=>window.print()<\/script>
+      </body></html>`;
+      const w = window.open('','_blank','width=700,height=600');
+      if (w) { w.document.write(html); w.document.close(); }
+    }
+    window.cetakSlipGaji = cetakSlipGaji;
+
+    async function cetakPayrollRekap() {
+      const { data: period } = await state.supabase.from('payroll_periods').select('*').eq('periode', payrollState.selectedPeriode).single().then(r=>r).catch(()=>({data:null}));
+      const { data: entries } = await state.supabase.from('payroll_entries').select('*').eq('period_id', period?.id||'').order('nama_snapshot');
+      const cfg = await loadPayrollConfig();
+      const bulan = new Date(payrollState.selectedPeriode+'-01').toLocaleDateString('id-ID',{month:'long',year:'numeric'});
+      const tgl = new Date().toLocaleDateString('id-ID',{day:'numeric',month:'long',year:'numeric'});
+      const rows = (entries||[]).map(e=>{
+        const totalBpjs = (e.bpjs_kes||0)+(e.bpjs_jht||0)+(e.bpjs_jp||0);
+        return `<tr><td>${escapeHtml(e.nama_snapshot||'')}</td><td>${escapeHtml(e.jabatan_snapshot||'')}</td>
+          <td style="text-align:right">${fmtRp(e.gaji_pokok)}</td>
+          <td style="text-align:right">${fmtRp(e.total_bruto)}</td>
+          <td style="text-align:right">${fmtRp(totalBpjs)}</td>
+          <td style="text-align:right">${fmtRp(e.pph21)}</td>
+          <td style="text-align:right">${fmtRp(e.kasbon_cicilan)}</td>
+          <td style="text-align:right;font-weight:700">${fmtRp(e.thp)}</td></tr>`;
+      }).join('');
+      const totals = {
+        bruto: entries?.reduce((s,e)=>s+(e.total_bruto||0),0)||0,
+        bpjs: entries?.reduce((s,e)=>s+(e.bpjs_kes||0)+(e.bpjs_jht||0)+(e.bpjs_jp||0),0)||0,
+        pph: entries?.reduce((s,e)=>s+(e.pph21||0),0)||0,
+        kasbon: entries?.reduce((s,e)=>s+(e.kasbon_cicilan||0),0)||0,
+        thp: entries?.reduce((s,e)=>s+(e.thp||0),0)||0,
+      };
+      const html = `<!doctype html><html><head><meta charset="utf-8"><title>Rekap Payroll ${bulan}</title>
+        <style>
+          *{box-sizing:border-box}body{font-family:Arial,sans-serif;font-size:11px;color:#111;padding:20px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+          @page{size:A4 landscape;margin:12mm}
+          .kop{border-bottom:3px solid #11335d;padding-bottom:8px;margin-bottom:12px}
+          .brand{font-size:18px;font-weight:800;color:#11335d}.ram{color:#f97316}
+          h2{font-size:13px;text-align:center;font-weight:800;text-transform:uppercase;margin:10px 0 4px;color:#11335d}
+          .meta{text-align:center;font-size:10px;color:#666;margin-bottom:12px}
+          table{width:100%;border-collapse:collapse}
+          th{background:#11335d;color:#fff;padding:6px 8px;text-align:left;font-size:10px;text-transform:uppercase}
+          td{padding:5px 8px;border-bottom:1px solid #e5e7eb;font-size:11px}
+          tr:nth-child(even) td{background:#f8fafc}
+          .tot td{border-top:2px solid #11335d;font-weight:800;background:#f0f4ff!important}
+          .foot{margin-top:12px;font-size:9px;color:#94a3b8;text-align:center}
+          @media print{button{display:none}}
+        </style></head><body>
+        <div class="kop"><div class="brand">eRAM<span class="ram">Hoist</span> <span style="font-size:12px;font-weight:400;color:#666">— ${escapeHtml(cfg.nama_perusahaan||'')}</span></div></div>
+        <h2>Rekap Payroll — ${bulan}</h2>
+        <div class="meta">Dicetak: ${tgl} &nbsp;|&nbsp; Status: ${escapeHtml(period?.status||'-')}</div>
+        <table>
+          <thead><tr>
+            <th>Nama</th><th>Jabatan</th><th style="text-align:right">Gaji Pokok</th>
+            <th style="text-align:right">Total Bruto</th><th style="text-align:right">BPJS</th>
+            <th style="text-align:right">PPh21</th><th style="text-align:right">Kasbon</th>
+            <th style="text-align:right">THP</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+          <tfoot><tr class="tot">
+            <td colspan="3" style="font-weight:800">TOTAL (${entries?.length||0} karyawan)</td>
+            <td style="text-align:right">${fmtRp(totals.bruto)}</td>
+            <td style="text-align:right">${fmtRp(totals.bpjs)}</td>
+            <td style="text-align:right">${fmtRp(totals.pph)}</td>
+            <td style="text-align:right">${fmtRp(totals.kasbon)}</td>
+            <td style="text-align:right">${fmtRp(totals.thp)}</td>
+          </tr></tfoot>
+        </table>
+        <div class="foot">eRAMHoist Payroll • ${new Date().toLocaleString('id-ID')}</div>
+        <script>window.onload=()=>window.print()<\/script>
+      </body></html>`;
+      const w = window.open('','_blank','width=1100,height=750');
+      if (w) { w.document.write(html); w.document.close(); }
+    }
+    window.cetakPayrollRekap = cetakPayrollRekap;
+
     async function saveSettings() {
       const name = $('#settings-name').value.trim();
       const tg = $('#settings-tg').value.trim();
