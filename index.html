@@ -9159,7 +9159,7 @@
       if (!state.reliabilityTab) state.reliabilityTab = 'overview';
       const div = document.createElement('div');
       div.className = 'page space-y-4';
-      const pillars = [['reliability', '🛡️ Reliability'], ['availability', '🟢 Availability'], ['maintenance', '🛠️ Maintenance'], ['kelayakan', '📋 Kelayakan']];
+      const pillars = [['reliability', '🛡️ Reliability'], ['availability', '🟢 Availability'], ['trend', '📈 Trend RAM'], ['maintenance', '🛠️ Maintenance'], ['kelayakan', '📋 Kelayakan']];
       div.innerHTML = `
         <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           <div class="flex border-b border-slate-200 overflow-x-auto" id="ram-tabs">
@@ -9176,6 +9176,7 @@
       if (!host) return;
       const t = state.ramTab;
       if (t === 'availability') { host.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat…</div>'; renderAvailabilityPage(host); return; }
+      if (t === 'trend')        { host.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat data trend…</div>'; renderRamTrendPage(host); return; }
       if (t === 'maintenance') { host.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat…</div>'; renderRamMaintenance(host); return; }
       if (t === 'kelayakan') { host.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat…</div>'; renderKelayakanPage(host); return; }
       // Pilar Reliability → sub-tab Overview / Stress / FMEA / CSPP
@@ -9541,6 +9542,182 @@
         </div>`;
     }
     window.renderKelayakanPage = renderKelayakanPage;
+
+    // ============================================================
+    // RAM TREND — SVG line chart Ao & Ai per bulan (12 bulan)
+    // ============================================================
+    function renderRamTrendSvg(months, aoData, aiData, target = 95) {
+      const W = 700, H = 220, padL = 42, padR = 50, padT = 15, padB = 36;
+      const chartW = W - padL - padR, chartH = H - padT - padB;
+      const n = months.length;
+      if (n < 2) return '<p class="text-slate-400 text-sm text-center py-8">Data kurang dari 2 bulan.</p>';
+      const xPos = i => padL + (i / (n - 1)) * chartW;
+      const yPos = v => padT + chartH - ((Math.min(100, Math.max(60, v)) - 60) / 40) * chartH;
+      const gridVals = [65, 70, 75, 80, 85, 90, 95, 100];
+      const grids = gridVals.map(v => {
+        const y = yPos(v).toFixed(1);
+        return `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="${v === 95 ? '#fca5a5' : '#f1f5f9'}" stroke-width="${v === 95 ? 1.5 : 1}" stroke-dasharray="${v === 95 ? '6,3' : ''}" />
+          <text x="${padL - 5}" y="${(+y + 4).toFixed(1)}" text-anchor="end" font-size="9" fill="#94a3b8">${v}</text>`;
+      }).join('');
+      const aoFill = aoData.map((v, i) => `${i === 0 ? 'M' : 'L'}${xPos(i).toFixed(1)},${yPos(v).toFixed(1)}`).join(' ')
+        + ` L${xPos(n - 1).toFixed(1)},${(padT + chartH).toFixed(1)} L${xPos(0).toFixed(1)},${(padT + chartH).toFixed(1)} Z`;
+      const aoLine = aoData.map((v, i) => `${i === 0 ? 'M' : 'L'}${xPos(i).toFixed(1)},${yPos(v).toFixed(1)}`).join(' ');
+      const aiLine = aiData.map((v, i) => `${i === 0 ? 'M' : 'L'}${xPos(i).toFixed(1)},${yPos(v).toFixed(1)}`).join(' ');
+      const aoPoints = aoData.map((v, i) =>
+        `<circle cx="${xPos(i).toFixed(1)}" cy="${yPos(v).toFixed(1)}" r="4" fill="#11335d" stroke="white" stroke-width="1.5"><title>${months[i]}: Ao ${v}%</title></circle>`
+      ).join('');
+      const aiPoints = aiData.map((v, i) =>
+        `<circle cx="${xPos(i).toFixed(1)}" cy="${yPos(v).toFixed(1)}" r="3.5" fill="#16a34a" stroke="white" stroke-width="1.5"><title>${months[i]}: Ai ${v}%</title></circle>`
+      ).join('');
+      const xLabels = months.map((m, i) =>
+        `<text x="${xPos(i).toFixed(1)}" y="${(H - padB + 14).toFixed(1)}" text-anchor="middle" font-size="9" fill="#64748b">${m}</text>`
+      ).join('');
+      const ty = yPos(target).toFixed(1);
+      return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;max-height:260px">
+        <defs><linearGradient id="aoGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#11335d" stop-opacity="0.12"/>
+          <stop offset="100%" stop-color="#11335d" stop-opacity="0.01"/>
+        </linearGradient></defs>
+        ${grids}
+        <text x="${(W - padR + 4).toFixed(1)}" y="${(+ty + 4).toFixed(1)}" font-size="9" fill="#ef4444" font-weight="bold">95%</text>
+        <path d="${aoFill}" fill="url(#aoGrad)"/>
+        <path d="${aoLine}" fill="none" stroke="#11335d" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+        <path d="${aiLine}" fill="none" stroke="#16a34a" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="6,3"/>
+        ${aoPoints}${aiPoints}${xLabels}
+        <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${H - padB}" stroke="#cbd5e1" stroke-width="1"/>
+        <line x1="${padL}" y1="${H - padB}" x2="${W - padR}" y2="${H - padB}" stroke="#cbd5e1" stroke-width="1"/>
+        <circle cx="${padL}" cy="${H - 8}" r="5" fill="#11335d"/>
+        <text x="${padL + 8}" y="${H - 4}" font-size="10" fill="#11335d" font-weight="bold">Ao</text>
+        <line x1="${padL + 30}" y1="${H - 8}" x2="${padL + 46}" y2="${H - 8}" stroke="#16a34a" stroke-width="2" stroke-dasharray="5,2"/>
+        <text x="${padL + 50}" y="${H - 4}" font-size="10" fill="#16a34a" font-weight="bold">Ai</text>
+        <line x1="${padL + 76}" y1="${H - 8}" x2="${padL + 90}" y2="${H - 8}" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="5,2"/>
+        <text x="${padL + 94}" y="${H - 4}" font-size="10" fill="#ef4444">Target 95%</text>
+      </svg>`;
+    }
+
+    async function renderRamTrendPage(host) {
+      host.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat data trend…</div>';
+      try {
+        const since = new Date(); since.setMonth(since.getMonth() - 11); since.setDate(1); since.setHours(0,0,0,0);
+        const [dtRes, eqRes] = await Promise.all([
+          state.supabase.from('downtime_events').select('equipment_id,start_at,end_at,category').gte('start_at', since.toISOString()),
+          state.supabase.from('equipment').select('id,assigned_unit_id'),
+        ]);
+        if (dtRes.error) throw dtRes.error;
+        const events = dtRes.data || [];
+        const eqAll  = eqRes.data || [];
+
+        const filteredEqIds = new Set(
+          eqAll.filter(x => !availFilter.unit_id || String(x.assigned_unit_id) === String(availFilter.unit_id)).map(x => x.id)
+        );
+        const eqCount = filteredEqIds.size || 1;
+
+        // 12-month buckets (oldest → newest)
+        const months = Array.from({ length: 12 }, (_, i) => {
+          const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - (11 - i));
+          return {
+            label: d.toLocaleDateString('id-ID', { month: 'short', year: '2-digit' }),
+            start: new Date(d.getFullYear(), d.getMonth(), 1).getTime(),
+            end:   new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999).getTime(),
+            days:  new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate(),
+          };
+        });
+
+        const monthData = months.map(m => {
+          const periodH = m.days * 24 * eqCount;
+          let downH = 0, downH_unplanned = 0, failures = 0;
+          events.forEach(e => {
+            if (!filteredEqIds.has(e.equipment_id) || e.category === GEJALA_CAT) return;
+            const s   = new Date(e.start_at).getTime();
+            const end = e.end_at ? new Date(e.end_at).getTime() : Date.now();
+            if (s >= m.end || end <= m.start) return;
+            const clipped = Math.max(0, Math.min(end, m.end) - Math.max(s, m.start)) / 3600000;
+            downH += clipped;
+            if (!TERENCANA_CATS.includes(e.category)) downH_unplanned += clipped;
+            if (FAILURE_CATS.includes(e.category)) failures++;
+          });
+          const Ao = +Math.max(0, Math.min(100, (periodH - downH)           / periodH * 100)).toFixed(1);
+          const Ai = +Math.max(0, Math.min(100, (periodH - downH_unplanned) / periodH * 100)).toFixed(1);
+          return { ...m, Ao, Ai, downH, failures };
+        });
+
+        const aoData = monthData.map(m => m.Ao);
+        const aiData = monthData.map(m => m.Ai);
+        const labels = monthData.map(m => m.label);
+        const avgAo  = (aoData.reduce((a, b) => a + b, 0) / aoData.length).toFixed(1);
+        const avgAi  = (aiData.reduce((a, b) => a + b, 0) / aiData.length).toFixed(1);
+        const maxAo  = Math.max(...aoData).toFixed(1);
+        const minAo  = Math.min(...aoData).toFixed(1);
+        const unitName = availFilter.unit_id
+          ? (state.parentUnits || []).find(u => String(u.id) === String(availFilter.unit_id))?.name || 'Unit'
+          : 'Semua Fleet';
+
+        host.innerHTML = `<div class="space-y-4">
+          <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex items-center gap-3 flex-wrap">
+            <span class="text-sm font-semibold text-slate-700">Filter Unit:</span>
+            <select onchange="setAvailFilter('unit_id',this.value);renderRamTrendPage(document.getElementById('ram-content'))"
+              class="px-3 py-1.5 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy">
+              <option value="" ${!availFilter.unit_id?'selected':''}>Semua Fleet</option>
+              ${(state.parentUnits||[]).map(u=>`<option value="${u.id}" ${String(availFilter.unit_id)===String(u.id)?'selected':''}>${escapeHtml(u.name)}</option>`).join('')}
+            </select>
+            <span class="text-xs text-slate-400">12 bulan terakhir · ${escapeHtml(unitName)}</span>
+          </div>
+
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+            ${statCard('Ao Rata-rata',  avgAo + '%', '📊', 'bg-blue-100 text-blue-800')}
+            ${statCard('Ai Rata-rata',  avgAi + '%', '⚡', 'bg-green-100 text-green-700')}
+            ${statCard('Ao Terbaik',    maxAo + '%', '🏆', 'bg-yellow-100 text-yellow-700')}
+            ${statCard('Ao Terburuk',   minAo + '%', '⚠️', 'bg-red-100 text-red-700')}
+          </div>
+
+          <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+            <h4 class="font-bold text-slate-800 mb-1">📈 Trend Ketersediaan — 12 Bulan Terakhir</h4>
+            <p class="text-xs text-slate-400 mb-4">
+              <span class="inline-block w-3 h-2 bg-navy rounded mr-1"></span>Ao = semua downtime &nbsp;
+              <span class="inline-block w-4 border-t-2 border-dashed border-green-600 mr-1 align-middle"></span>Ai = unplanned only &nbsp;
+              <span class="text-red-400">— — Target 95%</span>
+            </p>
+            ${renderRamTrendSvg(labels, aoData, aiData)}
+          </div>
+
+          <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+            <div class="px-5 py-3 border-b border-slate-100"><h4 class="font-bold text-slate-800">📋 Data per Bulan</h4></div>
+            <div class="overflow-x-auto">
+              <table class="w-full text-sm">
+                <thead class="bg-slate-50 text-xs text-slate-500 uppercase tracking-wide">
+                  <tr>
+                    <th class="px-4 py-3 text-left">Bulan</th>
+                    <th class="px-4 py-3 text-right">Ao (%)</th>
+                    <th class="px-4 py-3 text-right">Ai (%)</th>
+                    <th class="px-4 py-3 text-right">Downtime (jam)</th>
+                    <th class="px-4 py-3 text-right">Failure</th>
+                    <th class="px-4 py-3 text-center">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${monthData.map(m => {
+                    const sc = m.Ao >= 95 ? 'text-green-700 bg-green-50' : m.Ao >= 85 ? 'text-amber-700 bg-amber-50' : 'text-red-700 bg-red-50';
+                    const sl = m.Ao >= 95 ? '✅ Target' : m.Ao >= 85 ? '⚠️ Warning' : '🔴 Below';
+                    const ac = m.Ao >= 95 ? 'text-green-600 font-bold' : m.Ao >= 85 ? 'text-amber-600 font-bold' : 'text-red-600 font-bold';
+                    return `<tr class="border-b border-slate-100 hover:bg-slate-50">
+                      <td class="px-4 py-3 font-semibold text-slate-700">${m.label}</td>
+                      <td class="px-4 py-3 text-right ${ac}">${m.Ao}%</td>
+                      <td class="px-4 py-3 text-right text-green-700">${m.Ai}%</td>
+                      <td class="px-4 py-3 text-right text-slate-600">${m.downH.toFixed(1)}</td>
+                      <td class="px-4 py-3 text-right text-slate-600">${m.failures}</td>
+                      <td class="px-4 py-3 text-center"><span class="text-xs px-2 py-0.5 rounded-full font-semibold ${sc}">${sl}</span></td>
+                    </tr>`;
+                  }).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>`;
+      } catch (err) {
+        host.innerHTML = `<div class="bg-red-50 text-red-700 p-4 rounded-xl text-sm">Gagal memuat trend: ${escapeHtml(err.message)}</div>`;
+      }
+    }
+    window.renderRamTrendPage = renderRamTrendPage;
 
     async function renderAvailabilityPage(host) {
       let eqAll = [], inspData = [];
