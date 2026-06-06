@@ -9303,7 +9303,13 @@
         return true;
       });
     }
-    function setAvailFilter(k, v) { availFilter[k] = v; renderAvailabilityPage(document.getElementById('ram-content')); }
+    function setAvailFilter(k, v) {
+      availFilter[k] = v;
+      const host = document.getElementById('ram-content');
+      if (!host) return;
+      if (state.ramTab === 'trend') { renderRamTrendPage(host); }
+      else { renderAvailabilityPage(host); }
+    }
     window.setAvailFilter = setAvailFilter;
 
     function availPct(p) { p = Number(p) || 0; const cls = p >= 95 ? 'bg-green-100 text-green-700' : p >= 85 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'; return `<span class="px-2 py-0.5 rounded-full text-xs font-semibold ${cls}">${p.toFixed(1)}%</span>`; }
