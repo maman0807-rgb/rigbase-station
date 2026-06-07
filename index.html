@@ -8868,11 +8868,10 @@
                   <th class="px-3 py-3 text-left">Nama</th>
                   <th class="px-3 py-3 text-right">Bruto</th>
                   <th class="px-3 py-3 text-right">BPJS Kary.</th>
-                  <th class="px-3 py-3 text-right">BPJS Perus.</th>
-                  <th class="px-3 py-3 text-right">Total BPJS</th>
                   <th class="px-3 py-3 text-right">PPh21</th>
                   <th class="px-3 py-3 text-right">Kasbon</th>
                   <th class="px-3 py-3 text-right font-bold text-navy">THP</th>
+                  <th class="px-3 py-3 text-right text-blue-600">BPJS Perus.</th>
                   <th class="px-3 py-3 text-center">Slip</th>
                 </tr>
               </thead>
@@ -8880,30 +8879,27 @@
                 ${entries.map(e => {
                   const bpjsKary  = (e.bpjs_kes||0)+(e.bpjs_jht||0)+(e.bpjs_jp||0);
                   const bpjsPerus = (e.bpjs_kes_perusahaan||0)+(e.bpjs_jkk_perusahaan||0)+(e.bpjs_jkm_perusahaan||0)+(e.bpjs_jht_perusahaan||0)+(e.bpjs_jp_perusahaan||0);
-                  const totalBpjs = bpjsKary + bpjsPerus;
                   return `<tr class="border-b border-slate-100 hover:bg-slate-50">
                     <td class="px-3 py-3 font-semibold">${escapeHtml(e.nama_snapshot||'')}<div class="text-xs text-slate-400">${escapeHtml(e.jabatan_snapshot||'')}</div></td>
                     <td class="px-3 py-3 text-right">${fmtRp(e.total_bruto)}</td>
-                    <td class="px-3 py-3 text-right text-slate-600">${fmtRp(bpjsKary)}</td>
-                    <td class="px-3 py-3 text-right text-blue-700">${fmtRp(bpjsPerus)}</td>
-                    <td class="px-3 py-3 text-right font-semibold">${fmtRp(totalBpjs)}</td>
+                    <td class="px-3 py-3 text-right text-slate-700">${fmtRp(bpjsKary)}</td>
                     <td class="px-3 py-3 text-right">${fmtRp(e.pph21)}</td>
                     <td class="px-3 py-3 text-right">${fmtRp(e.kasbon_cicilan)}</td>
-                    <td class="px-3 py-3 text-right font-bold text-navy">${fmtRp(e.thp)}</td>
+                    <td class="px-3 py-3 text-right font-bold text-navy text-base">${fmtRp(e.thp)}</td>
+                    <td class="px-3 py-3 text-right text-blue-600 text-xs">${fmtRp(bpjsPerus)}</td>
                     <td class="px-3 py-3 text-center">
                       <button onclick="cetakSlipGaji('${e.id}')" class="text-xs text-navy hover:underline font-semibold">🖨 Slip</button>
                     </td>
                   </tr>`;
                 }).join('')}
-                <tr class="bg-slate-50 font-bold">
+                <tr class="bg-slate-50 font-bold border-t-2 border-slate-300">
                   <td class="px-3 py-3">TOTAL</td>
                   <td class="px-3 py-3 text-right">${fmtRp(entries.reduce((s,e)=>s+(e.total_bruto||0),0))}</td>
-                  <td class="px-3 py-3 text-right text-slate-600">${fmtRp(entries.reduce((s,e)=>s+(e.bpjs_kes||0)+(e.bpjs_jht||0)+(e.bpjs_jp||0),0))}</td>
-                  <td class="px-3 py-3 text-right text-blue-700">${fmtRp(entries.reduce((s,e)=>s+(e.bpjs_kes_perusahaan||0)+(e.bpjs_jkk_perusahaan||0)+(e.bpjs_jkm_perusahaan||0)+(e.bpjs_jht_perusahaan||0)+(e.bpjs_jp_perusahaan||0),0))}</td>
-                  <td class="px-3 py-3 text-right">${fmtRp(entries.reduce((s,e)=>s+(e.bpjs_kes||0)+(e.bpjs_jht||0)+(e.bpjs_jp||0)+(e.bpjs_kes_perusahaan||0)+(e.bpjs_jkk_perusahaan||0)+(e.bpjs_jkm_perusahaan||0)+(e.bpjs_jht_perusahaan||0)+(e.bpjs_jp_perusahaan||0),0))}</td>
+                  <td class="px-3 py-3 text-right">${fmtRp(entries.reduce((s,e)=>s+(e.bpjs_kes||0)+(e.bpjs_jht||0)+(e.bpjs_jp||0),0))}</td>
                   <td class="px-3 py-3 text-right">${fmtRp(entries.reduce((s,e)=>s+(e.pph21||0),0))}</td>
                   <td class="px-3 py-3 text-right">${fmtRp(entries.reduce((s,e)=>s+(e.kasbon_cicilan||0),0))}</td>
                   <td class="px-3 py-3 text-right text-navy">${fmtRp(entries.reduce((s,e)=>s+(e.thp||0),0))}</td>
+                  <td class="px-3 py-3 text-right text-blue-600">${fmtRp(entries.reduce((s,e)=>s+(e.bpjs_kes_perusahaan||0)+(e.bpjs_jkk_perusahaan||0)+(e.bpjs_jkm_perusahaan||0)+(e.bpjs_jht_perusahaan||0)+(e.bpjs_jp_perusahaan||0),0))}</td>
                   <td></td>
                 </tr>
               </tbody>
@@ -8988,11 +8984,10 @@
           <td style="text-align:right">${fmtRp(e.gaji_pokok)}</td>
           <td style="text-align:right">${fmtRp(e.total_bruto)}</td>
           <td style="text-align:right">${fmtRp(bpjsKary)}</td>
-          <td style="text-align:right">${fmtRp(bpjsPerus)}</td>
-          <td style="text-align:right;font-weight:700">${fmtRp(bpjsKary+bpjsPerus)}</td>
           <td style="text-align:right">${fmtRp(e.pph21)}</td>
           <td style="text-align:right">${fmtRp(e.kasbon_cicilan)}</td>
-          <td style="text-align:right;font-weight:700">${fmtRp(e.thp)}</td></tr>`;
+          <td style="text-align:right;font-weight:700">${fmtRp(e.thp)}</td>
+          <td style="text-align:right;color:#1d4ed8">${fmtRp(bpjsPerus)}</td></tr>`;
       }).join('');
       const totals = {
         bruto:      entries?.reduce((s,e)=>s+(e.total_bruto||0),0)||0,
@@ -9026,21 +9021,20 @@
             <th>Nama</th><th>Jabatan</th><th style="text-align:right">Gaji Pokok</th>
             <th style="text-align:right">Total Bruto</th>
             <th style="text-align:right">BPJS Kary.</th>
-            <th style="text-align:right">BPJS Perus.</th>
-            <th style="text-align:right">Total BPJS</th>
-            <th style="text-align:right">PPh21</th><th style="text-align:right">Kasbon</th>
+            <th style="text-align:right">PPh21</th>
+            <th style="text-align:right">Kasbon</th>
             <th style="text-align:right">THP</th>
+            <th style="text-align:right">BPJS Perus.</th>
           </tr></thead>
           <tbody>${rows}</tbody>
           <tfoot><tr class="tot">
             <td colspan="3" style="font-weight:800">TOTAL (${entries?.length||0} karyawan)</td>
             <td style="text-align:right">${fmtRp(totals.bruto)}</td>
             <td style="text-align:right">${fmtRp(totals.bpjsKary)}</td>
-            <td style="text-align:right">${fmtRp(totals.bpjsPerus)}</td>
-            <td style="text-align:right;font-weight:800">${fmtRp(totals.bpjsKary+totals.bpjsPerus)}</td>
             <td style="text-align:right">${fmtRp(totals.pph)}</td>
             <td style="text-align:right">${fmtRp(totals.kasbon)}</td>
             <td style="text-align:right">${fmtRp(totals.thp)}</td>
+            <td style="text-align:right;color:#1d4ed8">${fmtRp(totals.bpjsPerus)}</td>
           </tr></tfoot>
         </table>
         <div class="foot">eRAMHoist Payroll • ${new Date().toLocaleString('id-ID')}</div>
