@@ -9530,8 +9530,9 @@
       w.document.open();
       w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Bukti Potong A1 - ${emp.nama}</title>
       <style>
-        body{font-family:Arial,sans-serif;font-size:11px;color:#000;margin:0;padding:20px}
-        .page{max-width:780px;margin:0 auto}
+        @page{size:A4 landscape;margin:12mm}
+        body{font-family:Arial,sans-serif;font-size:11px;color:#000;margin:0;padding:16px}
+        .page{max-width:100%;margin:0 auto}
         h2{text-align:center;font-size:14px;margin:0 0 2px}
         h3{text-align:center;font-size:12px;margin:0 0 12px;font-weight:normal}
         table{width:100%;border-collapse:collapse;margin-bottom:10px}
@@ -9649,8 +9650,9 @@
       w.document.open();
       w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>SPT Masa 1721 - ${bulanNamaArr[bulanInt]} ${tahun}</title>
       <style>
-        body{font-family:Arial,sans-serif;font-size:11px;color:#000;margin:0;padding:20px}
-        .page{max-width:860px;margin:0 auto}
+        @page{size:A4 landscape;margin:12mm}
+        body{font-family:Arial,sans-serif;font-size:11px;color:#000;margin:0;padding:16px}
+        .page{max-width:100%;margin:0 auto}
         h2{text-align:center;font-size:14px;margin:0 0 4px}
         table{width:100%;border-collapse:collapse;margin-bottom:10px}
         td,th{padding:3px 6px;border:1px solid #999;font-size:11px}
