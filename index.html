@@ -8527,8 +8527,74 @@
             </table>
           </div>
         </div>
-        <p class="text-xs text-slate-400 mt-2">* Edit komponen gaji via tab Karyawan → Edit.</p>`;
+        <p class="text-xs text-slate-400 mt-2">* Edit komponen gaji via tab Karyawan → Edit.</p>
+
+        <div class="bg-white rounded-xl border border-slate-200 shadow-sm mt-5">
+          <div class="px-5 py-3 border-b border-slate-100 flex items-center gap-2">
+            <span class="text-sm font-bold text-slate-800">⚙️ Pengaturan Perusahaan & Tagihan</span>
+          </div>
+          <div class="p-5" id="payroll-config-form">Memuat…</div>
+        </div>`;
+      await renderPayrollConfigForm();
     }
+
+    async function renderPayrollConfigForm() {
+      const cfg = await loadPayrollConfig();
+      const el = document.getElementById('payroll-config-form');
+      if (!el) return;
+      const inp = (label, key, val, type='text', hint='') =>
+        `<div><label class="text-xs font-semibold text-slate-600 mb-1 block">${label}</label>
+         <input type="${type}" id="cfg-${key}" value="${escapeHtml(String(val||''))}"
+           class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-green-400">
+         ${hint?`<p class="text-xs text-slate-400 mt-0.5">${hint}</p>`:''}</div>`;
+      el.innerHTML = `
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+          ${inp('Nama Perusahaan (Vendor/Outsourcing)','nama_perusahaan',cfg.nama_perusahaan)}
+          ${inp('Alamat Perusahaan','alamat_perusahaan',cfg.alamat_perusahaan)}
+          ${inp('NPWP Perusahaan','npwp_perusahaan',cfg.npwp_perusahaan)}
+          ${inp('Nama Penanggung Jawab TTD','nama_ttd',cfg.nama_ttd)}
+          ${inp('Jabatan TTD','jabatan_ttd',cfg.jabatan_ttd)}
+          ${inp('Tanggal Lebaran (untuk THR)','tanggal_lebaran',cfg.tanggal_lebaran||'','date')}
+        </div>
+        <hr class="border-slate-200 mb-4">
+        <p class="text-xs font-bold text-slate-500 uppercase tracking-wide mb-3">🏢 Tagihan ke Induk / Klien</p>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+          ${inp('Nama Perusahaan Induk / Klien','nama_induk',cfg.nama_induk||'PT Pertamina EP','text','Nama yang muncul di dokumen tagihan')}
+          ${inp('Management Fee / Overhead (%)','management_fee_pct',cfg.management_fee_pct||0,'number','Dihitung dari Total Bruto. Contoh: 5 berarti 5%')}
+        </div>
+        <hr class="border-slate-200 mb-4">
+        <p class="text-xs font-bold text-slate-500 uppercase tracking-wide mb-3">🏥 Cap BPJS</p>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
+          ${inp('Cap BPJS Kesehatan (Rp)','cap_bpjs_kesehatan',cfg.cap_bpjs_kesehatan||12000000,'number')}
+          ${inp('Cap BPJS JP (Rp)','cap_bpjs_jp',cfg.cap_bpjs_jp||10547400,'number')}
+        </div>
+        <button onclick="savePayrollConfig()" class="px-6 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-xl font-bold text-sm shadow">💾 Simpan Pengaturan</button>`;
+    }
+    window.renderPayrollConfigForm = renderPayrollConfigForm;
+
+    async function savePayrollConfig() {
+      const g = id => document.getElementById('cfg-'+id)?.value || '';
+      const payload = {
+        id: 'default',
+        nama_perusahaan:   g('nama_perusahaan'),
+        alamat_perusahaan: g('alamat_perusahaan'),
+        npwp_perusahaan:   g('npwp_perusahaan'),
+        nama_ttd:          g('nama_ttd'),
+        jabatan_ttd:       g('jabatan_ttd'),
+        tanggal_lebaran:   g('tanggal_lebaran') || null,
+        nama_induk:        g('nama_induk'),
+        management_fee_pct: parseFloat(g('management_fee_pct'))||0,
+        cap_bpjs_kesehatan: parseFloat(g('cap_bpjs_kesehatan'))||12000000,
+        cap_bpjs_jp:        parseFloat(g('cap_bpjs_jp'))||10547400,
+        updated_at: new Date().toISOString(),
+      };
+      const { error } = await state.supabase.from('payroll_config').upsert(payload, { onConflict:'id' });
+      if (error) { toast('Gagal simpan: '+error.message,'error'); return; }
+      payrollState.config = null; // invalidate cache
+      await loadPayrollConfig();
+      toast('Pengaturan tersimpan.','success');
+    }
+    window.savePayrollConfig = savePayrollConfig;
 
     // ============================================================
     // TAB: LEMBUR
@@ -9106,8 +9172,228 @@
               </tbody>
             </table>
           </div>
-        </div>`}`;
+        </div>
+
+        ${!isThr && entries?.length ? (() => {
+          const feePct = (cfg.management_fee_pct||0) / 100;
+          const namaInduk = cfg.nama_induk || 'PT Pertamina EP';
+          const rows = entries.map(e => {
+            const bpjsKary  = (e.bpjs_kes||0)+(e.bpjs_jht||0)+(e.bpjs_jp||0);
+            const bpjsPerus = (e.bpjs_kes_perusahaan||0)+(e.bpjs_jkk_perusahaan||0)+(e.bpjs_jkm_perusahaan||0)+(e.bpjs_jht_perusahaan||0)+(e.bpjs_jp_perusahaan||0);
+            const bpjsTotal = bpjsKary + bpjsPerus;
+            const subtotal  = e.total_beban_perusahaan || ((e.total_bruto||0)+bpjsPerus+(e.pph21||0));
+            const fee       = Math.round((e.total_bruto||0) * feePct);
+            const tagihan   = subtotal + fee;
+            return { e, bpjsKary, bpjsPerus, bpjsTotal, subtotal, fee, tagihan };
+          });
+          const totBruto   = rows.reduce((s,r)=>s+(r.e.total_bruto||0),0);
+          const totBpjsK   = rows.reduce((s,r)=>s+r.bpjsKary,0);
+          const totBpjsP   = rows.reduce((s,r)=>s+r.bpjsPerus,0);
+          const totBpjsAll = rows.reduce((s,r)=>s+r.bpjsTotal,0);
+          const totPph     = rows.reduce((s,r)=>s+(r.e.pph21||0),0);
+          const totSub     = rows.reduce((s,r)=>s+r.subtotal,0);
+          const totFee     = rows.reduce((s,r)=>s+r.fee,0);
+          const totTagihan = rows.reduce((s,r)=>s+r.tagihan,0);
+          return `
+        <div class="bg-white rounded-xl border-2 border-indigo-200 shadow-sm overflow-hidden mt-1">
+          <div class="bg-indigo-600 px-4 py-3 flex items-center justify-between flex-wrap gap-2">
+            <div>
+              <span class="text-white font-bold text-sm">🧾 Tagihan ke ${escapeHtml(namaInduk)}</span>
+              <span class="text-indigo-200 text-xs ml-2">Fee ${cfg.management_fee_pct||0}% × Bruto</span>
+            </div>
+            <button onclick="cetakTagihanInduk()" class="px-4 py-1.5 bg-white text-indigo-700 rounded-lg text-xs font-bold hover:bg-indigo-50">🖨 Cetak Tagihan</button>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="bg-indigo-50 text-xs text-indigo-700 uppercase">
+                <tr>
+                  <th class="px-3 py-2 text-left">Nama</th>
+                  <th class="px-3 py-2 text-right">Bruto</th>
+                  <th class="px-3 py-2 text-right">BPJS Kary.</th>
+                  <th class="px-3 py-2 text-right">BPJS Perus.</th>
+                  <th class="px-3 py-2 text-right">PPh 21</th>
+                  <th class="px-3 py-2 text-right font-bold">Subtotal</th>
+                  <th class="px-3 py-2 text-right text-indigo-600">Fee ${cfg.management_fee_pct||0}%</th>
+                  <th class="px-3 py-2 text-right font-bold text-indigo-800">Total Tagihan</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rows.map(r=>`<tr class="border-b border-indigo-50 hover:bg-indigo-50">
+                  <td class="px-3 py-2 font-semibold">${escapeHtml(r.e.nama_snapshot||'')}<div class="text-xs text-slate-400">${escapeHtml(r.e.jabatan_snapshot||'')}</div></td>
+                  <td class="px-3 py-2 text-right">${fmtRp(r.e.total_bruto)}</td>
+                  <td class="px-3 py-2 text-right text-slate-600">${fmtRp(r.bpjsKary)}</td>
+                  <td class="px-3 py-2 text-right text-blue-600">${fmtRp(r.bpjsPerus)}</td>
+                  <td class="px-3 py-2 text-right">${fmtRp(r.e.pph21)}</td>
+                  <td class="px-3 py-2 text-right font-semibold">${fmtRp(r.subtotal)}</td>
+                  <td class="px-3 py-2 text-right text-indigo-600">${fmtRp(r.fee)}</td>
+                  <td class="px-3 py-2 text-right font-bold text-indigo-800 text-base">${fmtRp(r.tagihan)}</td>
+                </tr>`).join('')}
+              </tbody>
+              <tfoot class="bg-indigo-100 font-bold text-sm border-t-2 border-indigo-300">
+                <tr>
+                  <td class="px-3 py-3">TOTAL (${rows.length} karyawan)</td>
+                  <td class="px-3 py-3 text-right">${fmtRp(totBruto)}</td>
+                  <td class="px-3 py-3 text-right">${fmtRp(totBpjsK)}</td>
+                  <td class="px-3 py-3 text-right text-blue-600">${fmtRp(totBpjsP)}</td>
+                  <td class="px-3 py-3 text-right">${fmtRp(totPph)}</td>
+                  <td class="px-3 py-3 text-right">${fmtRp(totSub)}</td>
+                  <td class="px-3 py-3 text-right text-indigo-600">${fmtRp(totFee)}</td>
+                  <td class="px-3 py-3 text-right text-indigo-800 text-lg">${fmtRp(totTagihan)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>`;
+        })() : ''}
+        `}`;
     }
+
+    async function cetakTagihanInduk() {
+      const w = window.open('','_blank','width=1100,height=750');
+      if (!w) { toast('Popup diblokir browser. Izinkan popup untuk situs ini lalu coba lagi.','warn'); return; }
+      w.document.write('<html><body style="font-family:Arial;padding:20px;color:#555">Memuat tagihan…</body></html>');
+      const cfg = await loadPayrollConfig();
+      const { data: period } = await state.supabase.from('payroll_periods').select('*').eq('periode', payrollState.selectedPeriode).single().then(r=>r).catch(()=>({data:null}));
+      const { data: entries } = await state.supabase.from('payroll_entries').select('*').eq('period_id', period?.id||'').order('nama_snapshot').then(r=>r).catch(()=>({data:[]}));
+      if (!(entries||[]).length) { w.close(); toast('Tidak ada data untuk periode ini.','warn'); return; }
+
+      const bulan = new Date(payrollState.selectedPeriode+'-01').toLocaleDateString('id-ID',{month:'long',year:'numeric'});
+      const feePct = (cfg.management_fee_pct||0) / 100;
+      const namaInduk = cfg.nama_induk || 'PT Pertamina EP';
+
+      const rows = entries.map(e => {
+        const bpjsKary  = (e.bpjs_kes||0)+(e.bpjs_jht||0)+(e.bpjs_jp||0);
+        const bpjsPerus = (e.bpjs_kes_perusahaan||0)+(e.bpjs_jkk_perusahaan||0)+(e.bpjs_jkm_perusahaan||0)+(e.bpjs_jht_perusahaan||0)+(e.bpjs_jp_perusahaan||0);
+        const subtotal  = e.total_beban_perusahaan || ((e.total_bruto||0)+bpjsPerus+(e.pph21||0));
+        const fee       = Math.round((e.total_bruto||0) * feePct);
+        return { e, bpjsKary, bpjsPerus, subtotal, fee, tagihan: subtotal+fee };
+      });
+      const totBruto   = rows.reduce((s,r)=>s+(r.e.total_bruto||0),0);
+      const totBpjsK   = rows.reduce((s,r)=>s+r.bpjsKary,0);
+      const totBpjsP   = rows.reduce((s,r)=>s+r.bpjsPerus,0);
+      const totPph     = rows.reduce((s,r)=>s+(r.e.pph21||0),0);
+      const totSub     = rows.reduce((s,r)=>s+r.subtotal,0);
+      const totFee     = rows.reduce((s,r)=>s+r.fee,0);
+      const totTagihan = rows.reduce((s,r)=>s+r.tagihan,0);
+      const noTagihan  = `INV-${payrollState.selectedPeriode.replace('-','')}-${String(new Date().getDate()).padStart(2,'0')}`;
+
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+      <title>Tagihan ${bulan} ke ${namaInduk}</title>
+      <style>
+        @page{size:A4 landscape;margin:12mm}
+        *{box-sizing:border-box}body{font-family:Arial,sans-serif;font-size:11px;color:#000;margin:0;padding:16px}
+        .page{max-width:100%;margin:0 auto}
+        .kop{display:flex;justify-content:space-between;border-bottom:3px solid #3730a3;padding-bottom:10px;margin-bottom:14px}
+        .kop-left .brand{font-size:18px;font-weight:800;color:#3730a3}
+        .kop-left .brand span{color:#f97316}
+        .kop-right{text-align:right}
+        .kop-right .inv-no{font-size:14px;font-weight:800;color:#3730a3}
+        h2{font-size:13px;font-weight:700;margin:0 0 4px;color:#3730a3}
+        table{width:100%;border-collapse:collapse;margin-bottom:12px}
+        th{background:#eef2ff;color:#3730a3;font-size:10px;padding:6px 8px;border:1px solid #c7d2fe;text-align:left}
+        th.right{text-align:right}
+        td{padding:5px 8px;border:1px solid #e2e8f0;font-size:11px}
+        .right{text-align:right}.bold{font-weight:700}
+        tfoot td{background:#eef2ff;font-weight:700;font-size:12px}
+        .total-box{background:#3730a3;color:#fff;border-radius:8px;padding:10px 16px;display:inline-block;margin-top:10px}
+        .total-box .lbl{font-size:10px;opacity:.7}
+        .total-box .val{font-size:18px;font-weight:800}
+        .info-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}
+        .info-box{border:1px solid #e2e8f0;border-radius:6px;padding:8px 12px}
+        .info-box .lbl{font-size:9px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+        .info-box .val{font-size:12px;font-weight:700;margin-top:2px}
+        .chip{display:inline-block;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600;background:#fef3c7;color:#92400e}
+        @media print{button{display:none}}
+      </style></head><body><div class="page">
+        <div class="kop">
+          <div class="kop-left">
+            <div class="brand">eRAM<span>Hoist</span></div>
+            <div style="font-size:12px;font-weight:700;color:#111;margin-top:2px">${escapeHtml(cfg.nama_perusahaan||'')}</div>
+            <div style="font-size:10px;color:#555">${escapeHtml(cfg.alamat_perusahaan||'')}</div>
+            <div style="font-size:10px;color:#555">NPWP: ${escapeHtml(cfg.npwp_perusahaan||'-')}</div>
+          </div>
+          <div class="kop-right">
+            <div class="inv-no">No: ${noTagihan}</div>
+            <div style="font-size:11px;margin-top:4px">Kepada Yth:</div>
+            <div style="font-size:13px;font-weight:800">${escapeHtml(namaInduk)}</div>
+            <div style="font-size:11px;color:#555">Tagihan Jasa Tenaga Kerja</div>
+          </div>
+        </div>
+
+        <div class="info-grid">
+          <div class="info-box"><div class="lbl">Periode</div><div class="val">${bulan}</div></div>
+          <div class="info-box"><div class="lbl">Jumlah Karyawan</div><div class="val">${rows.length} orang</div></div>
+          <div class="info-box"><div class="lbl">Total Gaji (Bruto)</div><div class="val">${fmtRp(totBruto)}</div></div>
+          <div class="info-box"><div class="lbl">Management Fee</div><div class="val">${cfg.management_fee_pct||0}% × Bruto = ${fmtRp(totFee)}</div></div>
+        </div>
+
+        <h2>RINCIAN TAGIHAN PER KARYAWAN</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>No</th><th>Nama / Jabatan</th>
+              <th class="right">Bruto</th>
+              <th class="right">BPJS Kary.</th>
+              <th class="right">BPJS Perus.</th>
+              <th class="right">Total BPJS</th>
+              <th class="right">PPh 21</th>
+              <th class="right">Subtotal</th>
+              <th class="right">Fee ${cfg.management_fee_pct||0}%</th>
+              <th class="right bold" style="color:#3730a3">Total Tagihan</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map((r,i)=>`<tr>
+              <td style="text-align:center">${i+1}</td>
+              <td><b>${escapeHtml(r.e.nama_snapshot||'')}</b><br><small>${escapeHtml(r.e.jabatan_snapshot||'')}</small></td>
+              <td class="right">${fmtRp(r.e.total_bruto)}</td>
+              <td class="right">${fmtRp(r.bpjsKary)}</td>
+              <td class="right">${fmtRp(r.bpjsPerus)}</td>
+              <td class="right bold">${fmtRp(r.bpjsKary+r.bpjsPerus)}</td>
+              <td class="right">${fmtRp(r.e.pph21)}</td>
+              <td class="right">${fmtRp(r.subtotal)}</td>
+              <td class="right" style="color:#4f46e5">${fmtRp(r.fee)}</td>
+              <td class="right bold" style="color:#3730a3">${fmtRp(r.tagihan)}</td>
+            </tr>`).join('')}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colspan="2" class="bold">TOTAL</td>
+              <td class="right">${fmtRp(totBruto)}</td>
+              <td class="right">${fmtRp(totBpjsK)}</td>
+              <td class="right">${fmtRp(totBpjsP)}</td>
+              <td class="right bold">${fmtRp(totBpjsK+totBpjsP)}</td>
+              <td class="right">${fmtRp(totPph)}</td>
+              <td class="right">${fmtRp(totSub)}</td>
+              <td class="right" style="color:#4f46e5">${fmtRp(totFee)}</td>
+              <td class="right bold" style="color:#3730a3;font-size:13px">${fmtRp(totTagihan)}</td>
+            </tr>
+          </tfoot>
+        </table>
+
+        <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:8px">
+          <div>
+            <div class="total-box">
+              <div class="lbl">TOTAL TAGIHAN ${bulan.toUpperCase()}</div>
+              <div class="val">${fmtRp(totTagihan)}</div>
+            </div>
+            <div style="font-size:10px;color:#555;margin-top:6px;font-style:italic">${terbilang(totTagihan)}</div>
+          </div>
+          <div style="text-align:center;width:220px">
+            <div style="font-size:10px">Hormat kami,</div>
+            <div style="margin:36px 0 2px">___________________________</div>
+            <div style="font-weight:700">${escapeHtml(cfg.nama_ttd||'...')}</div>
+            <div style="font-size:10px">${escapeHtml(cfg.jabatan_ttd||'...')}</div>
+            <div style="font-size:10px">${escapeHtml(cfg.nama_perusahaan||'')}</div>
+          </div>
+        </div>
+        <div style="margin-top:12px;text-align:center">
+          <button onclick="window.print()" style="padding:8px 24px;background:#3730a3;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:bold;cursor:pointer">🖨 Print / Simpan PDF</button>
+        </div>
+      </div></body></html>`;
+      w.document.open(); w.document.write(html); w.document.close();
+    }
+    window.cetakTagihanInduk = cetakTagihanInduk;
 
     async function cetakSlipGaji(entryId) {
       const w = window.open('','_blank','width=700,height=600');
