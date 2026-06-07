@@ -8148,39 +8148,43 @@
     // ============================================================
 
     // TER rates (PMK 168/2023) — Kategori A (TK/0, TK/1)
+    // TER A (TK/0, TK/1) — PMK 168/2023 Lampiran A
     const TER_A = [
-      {upper:5400000,rate:0},{upper:5650000,rate:0.005},{upper:6050000,rate:0.01},
-      {upper:7050000,rate:0.015},{upper:7550000,rate:0.02},{upper:8550000,rate:0.025},
-      {upper:9650000,rate:0.03},{upper:10050000,rate:0.035},{upper:10350000,rate:0.04},
-      {upper:10700000,rate:0.045},{upper:11050000,rate:0.05},{upper:11600000,rate:0.055},
-      {upper:12500000,rate:0.06},{upper:13750000,rate:0.07},{upper:15100000,rate:0.08},
-      {upper:16950000,rate:0.09},{upper:19750000,rate:0.10},{upper:24150000,rate:0.11},
-      {upper:26450000,rate:0.12},{upper:28000000,rate:0.13},{upper:30050000,rate:0.14},
-      {upper:32400000,rate:0.15},{upper:35400000,rate:0.16},{upper:39100000,rate:0.17},
-      {upper:43850000,rate:0.18},{upper:47800000,rate:0.19},{upper:51400000,rate:0.20},
-      {upper:56300000,rate:0.21},{upper:62200000,rate:0.22},{upper:74900000,rate:0.23},
-      {upper:Infinity,rate:0.24},
+      {upper:5400000,rate:0},
+      {upper:5650000,rate:0.0025},{upper:5950000,rate:0.005},{upper:6300000,rate:0.0075},
+      {upper:6750000,rate:0.01},{upper:7500000,rate:0.0125},{upper:8550000,rate:0.015},
+      {upper:9650000,rate:0.0175},{upper:10050000,rate:0.02},{upper:10350000,rate:0.0225},
+      {upper:10700000,rate:0.025},{upper:11050000,rate:0.03},{upper:11600000,rate:0.035},
+      {upper:12500000,rate:0.04},{upper:13750000,rate:0.05},{upper:15100000,rate:0.06},
+      {upper:16950000,rate:0.07},{upper:19750000,rate:0.08},{upper:24150000,rate:0.09},
+      {upper:26450000,rate:0.10},{upper:28000000,rate:0.11},{upper:30050000,rate:0.12},
+      {upper:32400000,rate:0.13},{upper:35400000,rate:0.14},{upper:39100000,rate:0.15},
+      {upper:43850000,rate:0.16},{upper:47800000,rate:0.17},{upper:51400000,rate:0.18},
+      {upper:56300000,rate:0.19},{upper:62200000,rate:0.20},{upper:74900000,rate:0.21},
+      {upper:Infinity,rate:0.22},
     ];
-    // TER B (K/0, TK/2, TK/3)
+    // TER B (K/0, TK/2, TK/3) — PMK 168/2023 Lampiran B
     const TER_B = [
-      {upper:6200000,rate:0},{upper:6500000,rate:0.005},{upper:6850000,rate:0.01},
-      {upper:7800000,rate:0.015},{upper:8850000,rate:0.02},{upper:9800000,rate:0.025},
-      {upper:10950000,rate:0.03},{upper:11200000,rate:0.035},{upper:12050000,rate:0.04},
-      {upper:12950000,rate:0.045},{upper:14150000,rate:0.05},{upper:15300000,rate:0.055},
-      {upper:16700000,rate:0.06},{upper:18900000,rate:0.07},{upper:21900000,rate:0.08},
-      {upper:25600000,rate:0.09},{upper:31000000,rate:0.10},{upper:35000000,rate:0.11},
-      {upper:39900000,rate:0.12},{upper:45800000,rate:0.13},{upper:52100000,rate:0.14},
-      {upper:59900000,rate:0.15},{upper:69100000,rate:0.16},{upper:Infinity,rate:0.17},
+      {upper:6200000,rate:0},
+      {upper:6500000,rate:0.0025},{upper:6850000,rate:0.005},{upper:7800000,rate:0.0075},
+      {upper:8850000,rate:0.01},{upper:9800000,rate:0.0125},{upper:10950000,rate:0.015},
+      {upper:11200000,rate:0.0175},{upper:12050000,rate:0.02},{upper:12950000,rate:0.03},
+      {upper:14150000,rate:0.04},{upper:15300000,rate:0.05},{upper:16700000,rate:0.06},
+      {upper:18900000,rate:0.07},{upper:21900000,rate:0.08},{upper:25600000,rate:0.09},
+      {upper:31000000,rate:0.10},{upper:35000000,rate:0.11},{upper:39900000,rate:0.12},
+      {upper:45800000,rate:0.13},{upper:52100000,rate:0.14},{upper:59900000,rate:0.15},
+      {upper:69100000,rate:0.16},{upper:Infinity,rate:0.17},
     ];
-    // TER C (K/1, K/2, K/3)
+    // TER C (K/1, K/2, K/3) — PMK 168/2023 Lampiran C
     const TER_C = [
-      {upper:6600000,rate:0},{upper:6950000,rate:0.005},{upper:7350000,rate:0.01},
-      {upper:8200000,rate:0.015},{upper:9350000,rate:0.02},{upper:10900000,rate:0.025},
-      {upper:11900000,rate:0.03},{upper:13150000,rate:0.035},{upper:14300000,rate:0.04},
-      {upper:15950000,rate:0.045},{upper:17550000,rate:0.05},{upper:19850000,rate:0.055},
-      {upper:22700000,rate:0.06},{upper:26600000,rate:0.07},{upper:31600000,rate:0.08},
-      {upper:37100000,rate:0.09},{upper:44100000,rate:0.10},{upper:53600000,rate:0.11},
-      {upper:62500000,rate:0.12},{upper:74500000,rate:0.13},{upper:Infinity,rate:0.14},
+      {upper:6600000,rate:0},
+      {upper:6950000,rate:0.0025},{upper:7350000,rate:0.005},{upper:8200000,rate:0.0075},
+      {upper:9350000,rate:0.01},{upper:10900000,rate:0.0125},{upper:11900000,rate:0.015},
+      {upper:13150000,rate:0.0175},{upper:14300000,rate:0.02},{upper:15950000,rate:0.03},
+      {upper:17550000,rate:0.04},{upper:19850000,rate:0.05},{upper:22700000,rate:0.06},
+      {upper:26600000,rate:0.07},{upper:31600000,rate:0.08},{upper:37100000,rate:0.09},
+      {upper:44100000,rate:0.10},{upper:53600000,rate:0.11},{upper:62500000,rate:0.12},
+      {upper:74500000,rate:0.13},{upper:Infinity,rate:0.14},
     ];
     const PTKP = { TK0:54000000,TK1:58500000,TK2:63000000,TK3:67500000,K0:58500000,K1:63000000,K2:67500000,K3:72000000 };
     const TER_MAP = { TK0:'A',TK1:'A',K0:'B',TK2:'B',TK3:'B',K1:'C',K2:'C',K3:'C' };
