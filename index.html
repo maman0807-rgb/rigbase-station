@@ -8226,10 +8226,10 @@
       return { pphDesember: Math.max(0, selisih), lebihBayar: selisih < 0 ? -selisih : 0, pphSetahun, pkp };
     }
     function hitungBpjs(gajiPokok, tunjTetap, tingkatJkk, capKes, capJp, kesAktif, tkAktif) {
-      const upahKes = gajiPokok + tunjTetap;          // BPJS Kesehatan: gaji pokok + tunjangan
-      const dasarKes = kesAktif ? Math.min(upahKes, capKes) : 0;
-      const dasarTk  = tkAktif  ? gajiPokok : 0;      // BPJS TK (JHT/JKK/JKM): gaji pokok saja
-      const dasarJp  = tkAktif  ? Math.min(gajiPokok, capJp) : 0;  // JP: gaji pokok, capped
+      // Dasar BPJS: gaji pokok saja (kebijakan perusahaan — tunjangan dianggap tidak tetap)
+      const dasarKes = kesAktif ? Math.min(gajiPokok, capKes) : 0;
+      const dasarTk  = tkAktif  ? gajiPokok : 0;
+      const dasarJp  = tkAktif  ? Math.min(gajiPokok, capJp) : 0;
       return {
         bpjsKesKaryawan:   Math.round(dasarKes * 0.01),
         bpjsKesPerusahaan: Math.round(dasarKes * 0.04),
