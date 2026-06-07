@@ -9263,7 +9263,9 @@
         state.supabase.from('payroll_periods').select('id,periode,status').in('periode', periodeList).then(r=>r).catch(()=>({data:[]})),
         state.supabase.from('payroll_employees').select('id,nik,nama,npwp,jabatan,status_ptkp,aktif').eq('aktif',true).order('nama').then(r=>r).catch(()=>({data:[]})),
       ]);
-      const periodIds = (periods||[]).filter(p=>p.status==='Final').map(p=>p.id);
+      // Ambil semua periode yang sudah diproses (Draft maupun Final)
+      const periodIds = (periods||[]).map(p=>p.id);
+      const periodStatusMap = Object.fromEntries((periods||[]).map(p=>[p.id,p.status]));
       const periodeMap = Object.fromEntries((periods||[]).map(p=>[p.id,p.periode]));
 
       let allEntries = [];
@@ -9310,9 +9312,12 @@
 
           <!-- SECTION 1: BUKTI POTONG A1 -->
           <div class="bg-white rounded-xl border border-slate-200">
-            <div class="px-5 py-3 border-b border-slate-100 flex items-center justify-between">
+            <div class="px-5 py-3 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2">
               <h3 class="font-bold text-slate-800">📋 Bukti Potong PPh 21 — Form A1 (Tahun ${tahun})</h3>
-              <span class="text-xs text-slate-500">${Object.keys(byEmp).length} karyawan punya data Final</span>
+              <div class="flex items-center gap-2 flex-wrap">
+                ${(periods||[]).map(p=>`<span class="text-xs px-2 py-0.5 rounded-full font-semibold ${p.status==='Final'?'bg-green-100 text-green-700':'bg-yellow-100 text-yellow-700'}">${p.periode} ${p.status}</span>`).join('')}
+                ${!(periods||[]).length ? '<span class="text-xs text-slate-400">Belum ada data diproses</span>' : ''}
+              </div>
             </div>
             <div class="overflow-x-auto">
               <table class="w-full text-sm">
@@ -9382,7 +9387,7 @@
             </div>
             <div class="p-5">
               ${!periodObj
-                ? `<div class="text-center py-6 text-slate-400">Belum ada data payroll Final untuk ${bulanNama[parseInt(bulan)]} ${tahun}</div>`
+                ? `<div class="text-center py-6 text-slate-400">Belum ada data payroll untuk ${bulanNama[parseInt(bulan)]} ${tahun}. Hitung Payroll dulu di tab ⚙️ Proses Payroll.</div>`
                 : `<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
                     <div class="bg-blue-50 rounded-xl p-4 text-center">
                       <div class="text-xs text-blue-600 font-semibold mb-1">Jumlah Pegawai</div>
