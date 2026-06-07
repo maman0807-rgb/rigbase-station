@@ -8200,9 +8200,10 @@
       for (const b of table) { if (bruto <= b.upper) return b.rate; }
       return table[table.length-1].rate;
     }
-    function pph21Bulanan(bruto, statusPtkp) {
+    function pph21Bulanan(bruto, statusPtkp, hasNpwp=true) {
       if (bruto <= 0) return 0;
-      return Math.round(bruto * findTerRate(bruto, statusPtkp));
+      const pph = Math.round(bruto * findTerRate(bruto, statusPtkp));
+      return hasNpwp ? pph : Math.round(pph * 1.2);
     }
     function hitungPasal17(pkp) {
       if (pkp <= 0) return 0;
@@ -8214,12 +8215,13 @@
       }
       return pph;
     }
-    function pph21Desember(brutoSetahun, iuranKaryawanSetahun, statusPtkp, totalJanNov) {
+    function pph21Desember(brutoSetahun, iuranKaryawanSetahun, statusPtkp, totalJanNov, hasNpwp=true) {
       const biayaJabatan = Math.min(brutoSetahun * 0.05, 6000000);
       const neto = Math.max(0, brutoSetahun - biayaJabatan - iuranKaryawanSetahun);
       const pkpRaw = Math.max(0, neto - (PTKP[statusPtkp] || 54000000));
       const pkp = Math.floor(pkpRaw / 1000) * 1000;
-      const pphSetahun = hitungPasal17(pkp);
+      const pphSetahunBase = hitungPasal17(pkp);
+      const pphSetahun = hasNpwp ? pphSetahunBase : Math.round(pphSetahunBase * 1.2);
       const selisih = pphSetahun - totalJanNov;
       return { pphDesember: Math.max(0, selisih), lebihBayar: selisih < 0 ? -selisih : 0, pphSetahun, pkp };
     }
@@ -8752,6 +8754,7 @@
             emp.bpjs_kes_aktif!==false, emp.bpjs_tk_aktif!==false);
 
           // PPh21
+          const hasNpwp = !!(emp.npwp && emp.npwp.trim());
           let pph21 = 0, lebihBayarPph = 0;
           if (isDesember) {
             // Ambil total PPh Jan-Nov
@@ -8762,10 +8765,10 @@
             const totalJanNov = (prevEntries||[]).reduce((s,r)=>s+(r.pph21||0),0);
             const brutoSetahun = (prevEntries||[]).reduce((s,r)=>s+(r.total_bruto||0),0)+totalBruto;
             const iuranKaryawan = (prevEntries||[]).reduce((s,r)=>s+(r.bpjs_jht||0)+(r.bpjs_jp||0),0)+bpjs.bpjsJhtKaryawan+bpjs.bpjsJpKaryawan;
-            const des = pph21Desember(brutoSetahun, iuranKaryawan, emp.status_ptkp||'TK0', totalJanNov);
+            const des = pph21Desember(brutoSetahun, iuranKaryawan, emp.status_ptkp||'TK0', totalJanNov, hasNpwp);
             pph21 = des.pphDesember; lebihBayarPph = des.lebihBayar;
           } else {
-            pph21 = pph21Bulanan(totalBruto, emp.status_ptkp||'TK0');
+            pph21 = pph21Bulanan(totalBruto, emp.status_ptkp||'TK0', hasNpwp);
           }
 
           // Kasbon
