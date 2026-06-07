@@ -8256,6 +8256,28 @@
       }
       return Math.round(lembur);
     }
+    function hitungThr(gajiPokok, tunjTetap, tanggalMasuk, refDate) {
+      const gajiSebulan = (gajiPokok||0) + (tunjTetap||0);
+      const masuk = new Date(tanggalMasuk);
+      const ref   = refDate ? new Date(refDate) : new Date();
+      const bulanKerja = (ref.getFullYear()-masuk.getFullYear())*12 + (ref.getMonth()-masuk.getMonth());
+      if (bulanKerja >= 12) return Math.round(gajiSebulan);
+      if (bulanKerja < 1)  return 0;
+      return Math.round((bulanKerja / 12) * gajiSebulan);
+    }
+    function hitungPphThr(gajiPokok, tunjTetap, thr, iuranBulanKaryawan, statusPtkp, hasNpwp=true) {
+      if (thr <= 0) return 0;
+      const gajiSebulan = (gajiPokok||0) + (tunjTetap||0);
+      const iuranSetahun = (iuranBulanKaryawan||0) * 12;
+      const ptkpVal = PTKP[statusPtkp] || 54000000;
+      const hitPph = bruto => {
+        const bj = Math.min(bruto * 0.05, 6000000);
+        const pkpRaw = Math.max(0, bruto - bj - iuranSetahun - ptkpVal);
+        return hitungPasal17(Math.floor(pkpRaw / 1000) * 1000);
+      };
+      const pphBase = Math.max(0, hitPph(gajiSebulan*12+thr) - hitPph(gajiSebulan*12));
+      return hasNpwp ? pphBase : Math.round(pphBase * 1.2);
+    }
     function fmtRp(n) { return 'Rp ' + Math.round(n||0).toLocaleString('id-ID'); }
     function terbilang(n) {
       const s=['','satu','dua','tiga','empat','lima','enam','tujuh','delapan','sembilan',
@@ -8283,6 +8305,7 @@
       employees: [],
       config: null,
       selectedPeriode: (() => { const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; })(),
+      thrTahun: String(new Date().getFullYear()),
       pajakTahun: new Date().getFullYear(),
       pajakBulan: String(new Date().getMonth()+1).padStart(2,'0'),
     };
@@ -8713,7 +8736,26 @@
           ${isFinal ? `<button onclick="bukaPeriodePayroll()" class="px-5 py-3 bg-red-100 hover:bg-red-200 text-red-700 border border-red-300 rounded-xl font-bold text-sm">🔓 Buka Kunci (Revert ke Draft)</button>
           <span class="text-xs text-slate-500">Gunakan jika ada koreksi atau karyawan baru</span>` : ''}
         </div>
-        <div id="payroll-proses-result" class="mt-4"></div>`;
+        <div id="payroll-proses-result" class="mt-4"></div>
+
+        <hr class="my-5 border-slate-200">
+        <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-3">
+          <div class="flex items-center gap-2 mb-2">
+            <span class="text-base font-extrabold text-amber-800">🎁 THR — Tunjangan Hari Raya</span>
+            <span class="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-semibold">Permenaker 6/2016</span>
+          </div>
+          <p class="text-xs text-amber-700 mb-3">Karyawan ≥ 12 bulan kerja → THR = 1× gaji sebulan. Kurang dari 12 bulan → pro-rata (bulan kerja ÷ 12 × gaji). PPh21 THR dihitung metode analisasi (Pasal 17).</p>
+          <div class="flex items-center gap-3 flex-wrap">
+            <span class="text-sm font-semibold text-amber-800">Tahun THR:</span>
+            <select onchange="payrollState.thrTahun=this.value"
+              class="px-3 py-1.5 border border-amber-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-amber-400 bg-white">
+              ${[0,1,2].map(i => { const y=String(new Date().getFullYear()-i); return `<option value="${y}" ${y===payrollState.thrTahun?'selected':''}>${y}</option>`; }).join('')}
+            </select>
+            <button onclick="prosesThr(false)" class="px-6 py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-extrabold text-sm shadow">⚙️ Hitung THR</button>
+            <button onclick="prosesThr(true)"  class="px-6 py-3 bg-amber-700 hover:bg-amber-800 text-white rounded-xl font-extrabold text-sm shadow">🔒 Hitung THR & Final</button>
+          </div>
+        </div>
+        <div id="payroll-thr-result" class="mt-2"></div>`;
     }
 
     async function prosesPayroll(finalize) {
@@ -8843,16 +8885,144 @@
     }
     window.bukaPeriodePayroll = bukaPeriodePayroll;
 
+    async function prosesThr(finalize) {
+      const resultEl = document.getElementById('payroll-thr-result');
+      if (resultEl) resultEl.innerHTML = '<div class="text-slate-400 text-sm">Menghitung THR…</div>';
+      try {
+        const cfg = await loadPayrollConfig();
+        const periodeThr = `${payrollState.thrTahun}-THR`;
+        // Ref date = lebaran dari config, atau 1 April tahun tersebut jika tidak ada
+        const refDate = cfg.tanggal_lebaran || `${payrollState.thrTahun}-04-01`;
+
+        const { data: emps } = await state.supabase.from('payroll_employees').select('*').eq('aktif',true);
+
+        const { data: period } = await state.supabase.from('payroll_periods')
+          .upsert({ periode: periodeThr, is_thr:true, status: finalize?'Final':'Draft', processed_by: state.user.id, processed_at: new Date().toISOString() }, { onConflict:'periode' })
+          .select().single().then(r=>r).catch(()=>({data:null}));
+        const periodId = period?.id;
+        if (!periodId) throw new Error('Gagal buat periode THR');
+
+        const entries = (emps||[]).map(emp => {
+          const tunjTetap = (emp.tunj_jabatan||0)+(emp.tunj_transport||0)+(emp.tunj_makan||0)+(emp.tunj_lainnya||0);
+          const thr = hitungThr(emp.gaji_pokok||0, tunjTetap, emp.tanggal_masuk, refDate);
+          if (thr <= 0) return null;
+
+          const bpjs = hitungBpjs(emp.gaji_pokok||0, tunjTetap,
+            emp.tingkat_risiko_jkk||'SANGAT_TINGGI',
+            cfg.cap_bpjs_kesehatan||12000000, cfg.cap_bpjs_jp||10547400,
+            emp.bpjs_kes_aktif!==false, emp.bpjs_tk_aktif!==false);
+          const iuranBulan = bpjs.bpjsJhtKaryawan + bpjs.bpjsJpKaryawan;
+
+          const hasNpwp = !!(emp.npwp && emp.npwp.trim());
+          const pphThr = hitungPphThr(emp.gaji_pokok||0, tunjTetap, thr, iuranBulan, emp.status_ptkp||'TK0', hasNpwp);
+          const thp = Math.max(0, thr - pphThr);
+
+          return {
+            period_id: periodId, employee_id: emp.id,
+            nama_snapshot: emp.nama, jabatan_snapshot: emp.jabatan,
+            gaji_pokok: emp.gaji_pokok||0, tunj_jabatan: emp.tunj_jabatan||0,
+            tunj_transport: emp.tunj_transport||0, tunj_makan: emp.tunj_makan||0,
+            tunj_lainnya: emp.tunj_lainnya||0,
+            thr, total_bruto: thr,
+            pph21: pphThr, total_potongan: pphThr,
+            thp,
+            total_beban_perusahaan: thr + pphThr,
+          };
+        }).filter(Boolean);
+
+        const { error: uErr } = await state.supabase.from('payroll_entries')
+          .upsert(entries, { onConflict:'period_id,employee_id' });
+        if (uErr) throw uErr;
+
+        const totalTHR = entries.reduce((s,e)=>s+e.thr,0);
+        const totalPph  = entries.reduce((s,e)=>s+e.pph21,0);
+        if (resultEl) resultEl.innerHTML = `
+          <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm space-y-1">
+            <div class="font-bold text-amber-800 text-base">✅ THR ${payrollState.thrTahun} ${finalize?'Final':'Draft'} berhasil dihitung!</div>
+            <div class="text-amber-700">${entries.length} karyawan · Total THR: <b>${fmtRp(totalTHR)}</b> · Total PPh THR: <b>${fmtRp(totalPph)}</b></div>
+            <button onclick="payrollState.selectedPeriode='${periodeThr}';setPayrollTab('laporan')" class="mt-2 px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-bold hover:bg-amber-700">📄 Lihat Laporan THR →</button>
+          </div>`;
+        toast(`THR ${payrollState.thrTahun} berhasil!`,'success');
+      } catch(err) {
+        toast('Gagal proses THR: '+err.message,'error');
+        if (resultEl) resultEl.innerHTML = `<div class="bg-red-50 text-red-700 p-4 rounded-xl text-sm">${escapeHtml(err.message)}</div>`;
+      }
+    }
+    window.prosesThr = prosesThr;
+
+    async function cetakSlipThr(entryId) {
+      const w = window.open('','_blank','width=700,height=600');
+      if (!w) { toast('Popup diblokir browser. Izinkan popup untuk situs ini lalu coba lagi.','warn'); return; }
+      w.document.write('<html><body style="font-family:Arial;padding:20px;color:#555">Memuat slip THR…</body></html>');
+      const { data: e } = await state.supabase.from('payroll_entries').select('*, payroll_periods(periode,is_thr)').eq('id',entryId).single().then(r=>r).catch(()=>({data:null}));
+      const cfg = await loadPayrollConfig();
+      if (!e) { w.close(); toast('Data tidak ditemukan.','error'); return; }
+      const periodeStr = e.payroll_periods?.periode || payrollState.selectedPeriode;
+      const tahunThr = periodeStr.replace('-THR','');
+      const gajiSebulan = (e.gaji_pokok||0)+(e.tunj_jabatan||0)+(e.tunj_transport||0)+(e.tunj_makan||0)+(e.tunj_lainnya||0);
+      const html = `<!doctype html><html><head><meta charset="utf-8"><title>Slip THR ${escapeHtml(e.nama_snapshot||'')} ${tahunThr}</title>
+        <style>
+          *{box-sizing:border-box}body{font-family:Arial,sans-serif;font-size:12px;color:#111;padding:24px;max-width:600px;margin:auto;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+          @page{size:A5;margin:12mm}
+          .kop{border-bottom:3px solid #11335d;padding-bottom:8px;margin-bottom:12px}
+          .brand{font-size:18px;font-weight:800;color:#11335d}.ram{color:#f97316}
+          h2{font-size:13px;text-align:center;font-weight:800;text-transform:uppercase;margin:10px 0 2px;color:#b45309}
+          .meta{text-align:center;font-size:10px;color:#666;margin-bottom:12px}
+          table{width:100%;border-collapse:collapse;margin:6px 0}
+          td{padding:4px 8px;font-size:11px}
+          .lbl{color:#555;width:55%}.val{text-align:right;font-weight:600}
+          .section{background:#fef3c7;font-weight:700;font-size:10px;text-transform:uppercase;color:#92400e;padding:5px 8px;letter-spacing:.05em}
+          .total-row td{border-top:2px solid #b45309;font-weight:800;font-size:13px;padding-top:6px}
+          .thp td{background:#b45309;color:#fff;font-weight:800;font-size:14px;padding:8px}
+          .terbilang{font-style:italic;font-size:10px;color:#555;text-align:center;margin:6px 0 12px;border:1px dashed #e2e8f0;padding:6px;border-radius:4px}
+          .foot{margin-top:16px;font-size:9px;color:#94a3b8;text-align:center}
+          @media print{button{display:none}}
+        </style></head><body>
+        <div class="kop">
+          <div class="brand">eRAM<span class="ram">Hoist</span> <span style="font-size:12px;font-weight:400;color:#666">— ${escapeHtml(cfg.nama_perusahaan||'')}</span></div>
+        </div>
+        <h2>Slip THR (Tunjangan Hari Raya) ${tahunThr}</h2>
+        <div class="meta">${escapeHtml(e.nama_snapshot||'')} &nbsp;|&nbsp; ${escapeHtml(e.jabatan_snapshot||'')}</div>
+        <table>
+          <tr><td colspan="2" class="section">Dasar Perhitungan</td></tr>
+          <tr><td class="lbl">Gaji Pokok</td><td class="val">${fmtRp(e.gaji_pokok)}</td></tr>
+          ${(e.tunj_jabatan||0)>0?`<tr><td class="lbl">Tunjangan Jabatan</td><td class="val">${fmtRp(e.tunj_jabatan)}</td></tr>`:''}
+          ${(e.tunj_transport||0)>0?`<tr><td class="lbl">Tunjangan Transport</td><td class="val">${fmtRp(e.tunj_transport)}</td></tr>`:''}
+          ${(e.tunj_makan||0)>0?`<tr><td class="lbl">Tunjangan Makan</td><td class="val">${fmtRp(e.tunj_makan)}</td></tr>`:''}
+          ${(e.tunj_lainnya||0)>0?`<tr><td class="lbl">Tunjangan Lainnya</td><td class="val">${fmtRp(e.tunj_lainnya)}</td></tr>`:''}
+          <tr><td class="lbl" style="font-weight:700">Gaji Sebulan</td><td class="val">${fmtRp(gajiSebulan)}</td></tr>
+
+          <tr><td colspan="2" class="section">THR</td></tr>
+          <tr class="total-row"><td class="lbl">THR ${tahunThr}</td><td class="val">${fmtRp(e.thr)}</td></tr>
+
+          <tr><td colspan="2" class="section">Potongan PPh 21 atas THR</td></tr>
+          <tr><td class="lbl">PPh 21 THR (Pasal 17)</td><td class="val">(${fmtRp(e.pph21)})</td></tr>
+        </table>
+        <table><tr class="thp"><td>THR BERSIH DITERIMA</td><td class="val" style="text-align:right">${fmtRp(e.thp)}</td></tr></table>
+        <div class="terbilang">Terbilang: ${terbilang(e.thp)}</div>
+        <div class="foot">Slip ini dicetak dari eRAMHoist • ${new Date().toLocaleString('id-ID')}</div>
+        <script>window.onload=()=>window.print()<\/script>
+      </body></html>`;
+      w.document.open(); w.document.write(html); w.document.close();
+    }
+    window.cetakSlipThr = cetakSlipThr;
+
     // ============================================================
     // TAB: LAPORAN & SLIP
     // ============================================================
     async function renderPayrollLaporan(host) {
+      // Periode reguler (24 bulan)
       const periodeOptions = [];
       for (let i=0; i<24; i++) {
         const d = new Date(); d.setDate(1); d.setMonth(d.getMonth()-i);
         periodeOptions.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
       }
+      // Tambah periode THR yang sudah ada di DB
+      const { data: thrPeriods } = await state.supabase.from('payroll_periods').select('periode').eq('is_thr',true).order('periode',{ascending:false});
+      const thrPeriodeOpts = (thrPeriods||[]).map(p=>p.periode).filter(p=>!periodeOptions.includes(p));
+
       const { data: period } = await state.supabase.from('payroll_periods').select('*').eq('periode', payrollState.selectedPeriode).single().then(r=>r).catch(()=>({data:null}));
+      const isThr = period?.is_thr === true;
       const { data: entries } = await state.supabase.from('payroll_entries')
         .select('*').eq('period_id', period?.id||'').order('nama_snapshot');
 
@@ -8861,29 +9031,48 @@
           <span class="text-sm font-semibold text-slate-700">Periode:</span>
           <select onchange="payrollState.selectedPeriode=this.value;renderPayrollTab()"
             class="px-3 py-1.5 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-green-400">
+            ${thrPeriodeOpts.map(p=>`<option value="${p}" ${p===payrollState.selectedPeriode?'selected':''}>🎁 ${p}</option>`).join('')}
             ${periodeOptions.map(p=>`<option value="${p}" ${p===payrollState.selectedPeriode?'selected':''}>${p}</option>`).join('')}
           </select>
-          ${period ? `<span class="text-xs px-2 py-0.5 rounded-full font-bold ${period.status==='Final'?'bg-green-100 text-green-700':'bg-yellow-100 text-yellow-700'}">${period.status}</span>` : ''}
-          ${entries?.length ? `<button onclick="cetakPayrollRekap()" class="btn-cetak btn-cetak-sm ml-auto">🖨 Cetak Rekap</button>` : ''}
+          ${period ? `<span class="text-xs px-2 py-0.5 rounded-full font-bold ${period.status==='Final'?'bg-green-100 text-green-700':'bg-yellow-100 text-yellow-700'}">${period.status}${isThr?' 🎁 THR':''}</span>` : ''}
+          ${entries?.length && !isThr ? `<button onclick="cetakPayrollRekap()" class="btn-cetak btn-cetak-sm ml-auto">🖨 Cetak Rekap</button>` : ''}
         </div>
-        ${!entries?.length ? `<div class="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-400">Belum ada data payroll untuk periode ini. Proses payroll dulu di tab ⚙️ Proses Payroll.</div>` : `
+        ${!entries?.length ? `<div class="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-400">Belum ada data untuk periode ini.</div>` : `
         <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden mb-4">
           <div class="overflow-x-auto">
             <table class="w-full text-sm">
-              <thead class="bg-slate-50 text-xs text-slate-500 uppercase">
+              <thead class="${isThr?'bg-amber-50':'bg-slate-50'} text-xs text-slate-500 uppercase">
                 <tr>
                   <th class="px-3 py-3 text-left">Nama</th>
-                  <th class="px-3 py-3 text-right">Bruto</th>
-                  <th class="px-3 py-3 text-right">BPJS Kary.</th>
-                  <th class="px-3 py-3 text-right">PPh21</th>
-                  <th class="px-3 py-3 text-right">Kasbon</th>
-                  <th class="px-3 py-3 text-right font-bold text-navy">THP</th>
-                  <th class="px-3 py-3 text-right text-blue-600">BPJS Perus.</th>
+                  ${isThr
+                    ? `<th class="px-3 py-3 text-right text-amber-700">Gaji Sebulan</th>
+                       <th class="px-3 py-3 text-right text-amber-700 font-bold">THR</th>
+                       <th class="px-3 py-3 text-right">PPh21 THR</th>
+                       <th class="px-3 py-3 text-right font-bold text-amber-800">THR Bersih</th>`
+                    : `<th class="px-3 py-3 text-right">Bruto</th>
+                       <th class="px-3 py-3 text-right">BPJS Kary.</th>
+                       <th class="px-3 py-3 text-right">PPh21</th>
+                       <th class="px-3 py-3 text-right">Kasbon</th>
+                       <th class="px-3 py-3 text-right font-bold text-navy">THP</th>
+                       <th class="px-3 py-3 text-right text-blue-600">BPJS Perus.</th>`}
                   <th class="px-3 py-3 text-center">Slip</th>
                 </tr>
               </thead>
               <tbody>
                 ${entries.map(e => {
+                  if (isThr) {
+                    const gajiSebulan = (e.gaji_pokok||0)+(e.tunj_jabatan||0)+(e.tunj_transport||0)+(e.tunj_makan||0)+(e.tunj_lainnya||0);
+                    return `<tr class="border-b border-slate-100 hover:bg-amber-50">
+                      <td class="px-3 py-3 font-semibold">${escapeHtml(e.nama_snapshot||'')}<div class="text-xs text-slate-400">${escapeHtml(e.jabatan_snapshot||'')}</div></td>
+                      <td class="px-3 py-3 text-right text-slate-600">${fmtRp(gajiSebulan)}</td>
+                      <td class="px-3 py-3 text-right font-bold text-amber-700">${fmtRp(e.thr)}</td>
+                      <td class="px-3 py-3 text-right">${fmtRp(e.pph21)}</td>
+                      <td class="px-3 py-3 text-right font-bold text-amber-800 text-base">${fmtRp(e.thp)}</td>
+                      <td class="px-3 py-3 text-center">
+                        <button onclick="cetakSlipThr('${e.id}')" class="text-xs text-amber-700 hover:underline font-semibold">🖨 Slip THR</button>
+                      </td>
+                    </tr>`;
+                  }
                   const bpjsKary  = (e.bpjs_kes||0)+(e.bpjs_jht||0)+(e.bpjs_jp||0);
                   const bpjsPerus = (e.bpjs_kes_perusahaan||0)+(e.bpjs_jkk_perusahaan||0)+(e.bpjs_jkm_perusahaan||0)+(e.bpjs_jht_perusahaan||0)+(e.bpjs_jp_perusahaan||0);
                   return `<tr class="border-b border-slate-100 hover:bg-slate-50">
@@ -8899,14 +9088,19 @@
                     </td>
                   </tr>`;
                 }).join('')}
-                <tr class="bg-slate-50 font-bold border-t-2 border-slate-300">
+                <tr class="${isThr?'bg-amber-50':'bg-slate-50'} font-bold border-t-2 border-slate-300">
                   <td class="px-3 py-3">TOTAL</td>
-                  <td class="px-3 py-3 text-right">${fmtRp(entries.reduce((s,e)=>s+(e.total_bruto||0),0))}</td>
-                  <td class="px-3 py-3 text-right">${fmtRp(entries.reduce((s,e)=>s+(e.bpjs_kes||0)+(e.bpjs_jht||0)+(e.bpjs_jp||0),0))}</td>
-                  <td class="px-3 py-3 text-right">${fmtRp(entries.reduce((s,e)=>s+(e.pph21||0),0))}</td>
-                  <td class="px-3 py-3 text-right">${fmtRp(entries.reduce((s,e)=>s+(e.kasbon_cicilan||0),0))}</td>
-                  <td class="px-3 py-3 text-right text-navy">${fmtRp(entries.reduce((s,e)=>s+(e.thp||0),0))}</td>
-                  <td class="px-3 py-3 text-right text-blue-600">${fmtRp(entries.reduce((s,e)=>s+(e.bpjs_kes_perusahaan||0)+(e.bpjs_jkk_perusahaan||0)+(e.bpjs_jkm_perusahaan||0)+(e.bpjs_jht_perusahaan||0)+(e.bpjs_jp_perusahaan||0),0))}</td>
+                  ${isThr
+                    ? `<td class="px-3 py-3 text-right">${fmtRp(entries.reduce((s,e)=>s+(e.gaji_pokok||0)+(e.tunj_jabatan||0)+(e.tunj_transport||0)+(e.tunj_makan||0)+(e.tunj_lainnya||0),0))}</td>
+                       <td class="px-3 py-3 text-right text-amber-700">${fmtRp(entries.reduce((s,e)=>s+(e.thr||0),0))}</td>
+                       <td class="px-3 py-3 text-right">${fmtRp(entries.reduce((s,e)=>s+(e.pph21||0),0))}</td>
+                       <td class="px-3 py-3 text-right text-amber-800">${fmtRp(entries.reduce((s,e)=>s+(e.thp||0),0))}</td>`
+                    : `<td class="px-3 py-3 text-right">${fmtRp(entries.reduce((s,e)=>s+(e.total_bruto||0),0))}</td>
+                       <td class="px-3 py-3 text-right">${fmtRp(entries.reduce((s,e)=>s+(e.bpjs_kes||0)+(e.bpjs_jht||0)+(e.bpjs_jp||0),0))}</td>
+                       <td class="px-3 py-3 text-right">${fmtRp(entries.reduce((s,e)=>s+(e.pph21||0),0))}</td>
+                       <td class="px-3 py-3 text-right">${fmtRp(entries.reduce((s,e)=>s+(e.kasbon_cicilan||0),0))}</td>
+                       <td class="px-3 py-3 text-right text-navy">${fmtRp(entries.reduce((s,e)=>s+(e.thp||0),0))}</td>
+                       <td class="px-3 py-3 text-right text-blue-600">${fmtRp(entries.reduce((s,e)=>s+(e.bpjs_kes_perusahaan||0)+(e.bpjs_jkk_perusahaan||0)+(e.bpjs_jkm_perusahaan||0)+(e.bpjs_jht_perusahaan||0)+(e.bpjs_jp_perusahaan||0),0))}</td>`}
                   <td></td>
                 </tr>
               </tbody>
