@@ -433,28 +433,26 @@
   </div>
 
   <!-- ═══════════════════════════════════════════
-       CONTOH HITUNGAN LENGKAP — 2 KARYAWAN
+       CONTOH HITUNGAN — GOLONGAN I (BRUTO 6,2 JT)
   ═══════════════════════════════════════════ -->
   <div class="card">
     <div class="card-header">
-      <h2>🧮 Contoh Hitungan Aktual — Gaji Pokok Rp 4.100.000</h2>
-      <span class="badge">Sektor Migas • JKK Sangat Tinggi 1,74%</span>
+      <h2>🧮 Golongan I — Gaji Pokok Rp 4.100.000 + Tunjangan Rp 2.100.000</h2>
+      <span class="badge">Bruto Rp 6.200.000 · Migas JKK 1,74%</span>
     </div>
-    <div class="card-body" style="display:flex;flex-direction:column;gap:20px">
+    <div class="card-body" style="display:flex;flex-direction:column;gap:16px">
 
       <div class="alert alert-info">
-        💡 <div>Dasar semua komponen BPJS = <b>Gaji Pokok Rp 4.100.000</b>.
-        Tunjangan (transport, makan, jabatan, dll.) tidak masuk dasar BPJS namun masuk <b>Total Bruto</b> untuk PPh 21.</div>
+        💡 <div>Dasar BPJS = <b>Gaji Pokok Rp 4.100.000</b>. Tunjangan Rp 2.100.000 tidak masuk dasar BPJS tapi masuk <b>Total Bruto</b> untuk PPh 21. Di level ini TK/0 kena PPh, K/0 tidak.</div>
       </div>
 
-      <!-- Grid 2 slip -->
       <div class="grid2" style="gap:16px;align-items:start">
 
-        <!-- Slip TK/0 -->
+        <!-- G1 TK/0 -->
         <div class="slip">
           <div class="slip-head">
-            Karyawan TK/0 — <span class="chip chip-blue" style="margin-left:6px">Lajang</span>
-            <span>Tabel A · Bruto Rp 6.200.000</span>
+            Status TK/0 — <span class="chip chip-blue" style="margin-left:6px">Lajang / Tidak Kawin</span>
+            <span>TER Tabel A</span>
           </div>
           <div class="slip-body">
             <div class="slip-row section"><span>Komponen Gaji</span><span></span></div>
@@ -462,33 +460,34 @@
             <div class="slip-row"><span>Tunjangan Tetap</span><span>Rp 2.100.000</span></div>
             <div class="slip-row bold"><span>Total Bruto</span><span>Rp 6.200.000</span></div>
 
-            <div class="slip-row section"><span>BPJS Karyawan (dasar Rp 4.100.000)</span><span></span></div>
-            <div class="slip-row"><span>BPJS Kes (1%)</span><span class="neg">(Rp 41.000)</span></div>
-            <div class="slip-row"><span>BPJS JHT (2%)</span><span class="neg">(Rp 82.000)</span></div>
-            <div class="slip-row"><span>BPJS JP (1%)</span><span class="neg">(Rp 41.000)</span></div>
-            <div class="slip-row bold"><span>Total BPJS Karyawan</span><span class="neg">(Rp 164.000)</span></div>
+            <div class="slip-row section"><span>BPJS Karyawan — dasar Rp 4.100.000</span><span></span></div>
+            <div class="slip-row" style="font-size:11px"><span>BPJS Kes 1% × 4.100.000</span><span class="neg">(Rp 41.000)</span></div>
+            <div class="slip-row" style="font-size:11px"><span>BPJS JHT 2% × 4.100.000</span><span class="neg">(Rp 82.000)</span></div>
+            <div class="slip-row" style="font-size:11px"><span>BPJS JP 1% × 4.100.000</span><span class="neg">(Rp 41.000)</span></div>
+            <div class="slip-row bold"><span>Total BPJS Karyawan (4%)</span><span class="neg">(Rp 164.000)</span></div>
 
-            <div class="slip-row section"><span>Pajak PPh 21</span><span></span></div>
-            <div class="slip-row"><span>TER Tabel A, bruto 6,2jt → 0,75%</span><span></span></div>
-            <div class="slip-row bold"><span>PPh 21</span><span class="neg">(Rp 46.500)</span></div>
+            <div class="slip-row section"><span>PPh 21 — TER Tabel A</span><span></span></div>
+            <div class="slip-row" style="font-size:11px"><span>Bruto 6,2jt → bracket ≤ 6.300.000 → rate 0,75%</span><span></span></div>
+            <div class="slip-row" style="font-size:11px"><span>6.200.000 × 0,75%</span><span class="neg">(Rp 46.500)</span></div>
 
             <div class="slip-row thp"><span>TAKE HOME PAY</span><span>Rp 5.989.500</span></div>
 
-            <div class="slip-row section"><span>BPJS Perusahaan (info)</span><span></span></div>
-            <div class="slip-row" style="font-size:11px;color:var(--slate)"><span>BPJS Kes (4%)</span><span>Rp 164.000</span></div>
-            <div class="slip-row" style="font-size:11px;color:var(--slate)"><span>JHT (3,7%)</span><span>Rp 151.700</span></div>
-            <div class="slip-row" style="font-size:11px;color:var(--slate)"><span>JP (2%)</span><span>Rp 82.000</span></div>
-            <div class="slip-row" style="font-size:11px;color:var(--slate)"><span>JKK (1,74%)</span><span>Rp 71.340</span></div>
-            <div class="slip-row" style="font-size:11px;color:var(--slate)"><span>JKM (0,3%)</span><span>Rp 12.300</span></div>
-            <div class="slip-row bold" style="font-size:11px"><span>Total Beban Perusahaan</span><span>Rp 481.340</span></div>
+            <div class="slip-row section" style="background:#f0fdf4;color:#166534"><span>BPJS Perusahaan (beban kantor)</span><span></span></div>
+            <div class="slip-row" style="font-size:11px;color:var(--slate)"><span>BPJS Kes 4% × 4.100.000</span><span>Rp 164.000</span></div>
+            <div class="slip-row" style="font-size:11px;color:var(--slate)"><span>JHT 3,7% × 4.100.000</span><span>Rp 151.700</span></div>
+            <div class="slip-row" style="font-size:11px;color:var(--slate)"><span>JP 2% × 4.100.000</span><span>Rp 82.000</span></div>
+            <div class="slip-row" style="font-size:11px;color:var(--slate)"><span>JKK 1,74% × 4.100.000</span><span>Rp 71.340</span></div>
+            <div class="slip-row" style="font-size:11px;color:var(--slate)"><span>JKM 0,3% × 4.100.000</span><span>Rp 12.300</span></div>
+            <div class="slip-row bold" style="font-size:11px"><span>Total BPJS Perusahaan</span><span style="color:var(--green)">Rp 481.340</span></div>
+            <div class="slip-row bold" style="font-size:12px;background:#f0fdf4"><span>Total Beban Perusahaan</span><span style="color:var(--green)">Rp 6.727.840</span></div>
           </div>
         </div>
 
-        <!-- Slip K/0 -->
+        <!-- G1 K/0 -->
         <div class="slip" style="border-color:var(--green)">
           <div class="slip-head" style="background:var(--green)">
-            Karyawan K/0 — <span class="chip chip-green" style="margin-left:6px">Kawin</span>
-            <span>Tabel B · Bruto Rp 6.200.000</span>
+            Status K/0 — <span class="chip chip-green" style="margin-left:6px">Kawin Belum Punya Anak</span>
+            <span>TER Tabel B</span>
           </div>
           <div class="slip-body">
             <div class="slip-row section"><span>Komponen Gaji</span><span></span></div>
@@ -496,49 +495,214 @@
             <div class="slip-row"><span>Tunjangan Tetap</span><span>Rp 2.100.000</span></div>
             <div class="slip-row bold"><span>Total Bruto</span><span>Rp 6.200.000</span></div>
 
-            <div class="slip-row section"><span>BPJS Karyawan (dasar Rp 4.100.000)</span><span></span></div>
-            <div class="slip-row"><span>BPJS Kes (1%)</span><span class="neg">(Rp 41.000)</span></div>
-            <div class="slip-row"><span>BPJS JHT (2%)</span><span class="neg">(Rp 82.000)</span></div>
-            <div class="slip-row"><span>BPJS JP (1%)</span><span class="neg">(Rp 41.000)</span></div>
-            <div class="slip-row bold"><span>Total BPJS Karyawan</span><span class="neg">(Rp 164.000)</span></div>
+            <div class="slip-row section"><span>BPJS Karyawan — dasar Rp 4.100.000</span><span></span></div>
+            <div class="slip-row" style="font-size:11px"><span>BPJS Kes 1% × 4.100.000</span><span class="neg">(Rp 41.000)</span></div>
+            <div class="slip-row" style="font-size:11px"><span>BPJS JHT 2% × 4.100.000</span><span class="neg">(Rp 82.000)</span></div>
+            <div class="slip-row" style="font-size:11px"><span>BPJS JP 1% × 4.100.000</span><span class="neg">(Rp 41.000)</span></div>
+            <div class="slip-row bold"><span>Total BPJS Karyawan (4%)</span><span class="neg">(Rp 164.000)</span></div>
 
-            <div class="slip-row section"><span>Pajak PPh 21</span><span></span></div>
-            <div class="slip-row"><span>TER Tabel B, bruto 6,2jt → 0%</span><span></span></div>
-            <div class="slip-row bold"><span>PPh 21</span><span class="pos">Rp 0</span></div>
+            <div class="slip-row section"><span>PPh 21 — TER Tabel B</span><span></span></div>
+            <div class="slip-row" style="font-size:11px"><span>Bruto 6,2jt → bracket ≤ 6.200.000 → rate 0%</span><span></span></div>
+            <div class="slip-row" style="font-size:11px"><span>6.200.000 × 0% — tepat di batas nol pajak</span><span class="pos">Rp 0</span></div>
 
             <div class="slip-row thp" style="background:var(--green)"><span>TAKE HOME PAY</span><span>Rp 6.036.000</span></div>
 
-            <div class="slip-row section"><span>BPJS Perusahaan (info)</span><span></span></div>
-            <div class="slip-row" style="font-size:11px;color:var(--slate)"><span>BPJS Kes (4%)</span><span>Rp 164.000</span></div>
-            <div class="slip-row" style="font-size:11px;color:var(--slate)"><span>JHT (3,7%)</span><span>Rp 151.700</span></div>
-            <div class="slip-row" style="font-size:11px;color:var(--slate)"><span>JP (2%)</span><span>Rp 82.000</span></div>
-            <div class="slip-row" style="font-size:11px;color:var(--slate)"><span>JKK (1,74%)</span><span>Rp 71.340</span></div>
-            <div class="slip-row" style="font-size:11px;color:var(--slate)"><span>JKM (0,3%)</span><span>Rp 12.300</span></div>
-            <div class="slip-row bold" style="font-size:11px"><span>Total Beban Perusahaan</span><span>Rp 481.340</span></div>
+            <div class="slip-row section" style="background:#f0fdf4;color:#166534"><span>BPJS Perusahaan (beban kantor)</span><span></span></div>
+            <div class="slip-row" style="font-size:11px;color:var(--slate)"><span>BPJS Kes 4% × 4.100.000</span><span>Rp 164.000</span></div>
+            <div class="slip-row" style="font-size:11px;color:var(--slate)"><span>JHT 3,7% × 4.100.000</span><span>Rp 151.700</span></div>
+            <div class="slip-row" style="font-size:11px;color:var(--slate)"><span>JP 2% × 4.100.000</span><span>Rp 82.000</span></div>
+            <div class="slip-row" style="font-size:11px;color:var(--slate)"><span>JKK 1,74% × 4.100.000</span><span>Rp 71.340</span></div>
+            <div class="slip-row" style="font-size:11px;color:var(--slate)"><span>JKM 0,3% × 4.100.000</span><span>Rp 12.300</span></div>
+            <div class="slip-row bold" style="font-size:11px"><span>Total BPJS Perusahaan</span><span style="color:var(--green)">Rp 481.340</span></div>
+            <div class="slip-row bold" style="font-size:12px;background:#f0fdf4"><span>Total Beban Perusahaan</span><span style="color:var(--green)">Rp 6.681.340</span></div>
           </div>
         </div>
       </div>
 
-      <!-- Perbandingan ringkas -->
-      <div>
-        <p style="font-size:11px;font-weight:700;color:var(--slate);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">Perbandingan TK/0 vs K/0 — Gaji Pokok Rp 4.100.000, Bruto Rp 6.200.000</p>
-        <table>
-          <thead>
-            <tr>
-              <th>Komponen</th>
-              <th class="right">TK/0 (Lajang)</th>
-              <th class="right">K/0 (Kawin)</th>
-              <th>Selisih</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr><td>Total Bruto</td><td class="right">Rp 6.200.000</td><td class="right">Rp 6.200.000</td><td>—</td></tr>
-            <tr><td>BPJS Karyawan</td><td class="right">(Rp 164.000)</td><td class="right">(Rp 164.000)</td><td>Sama</td></tr>
-            <tr><td>PPh 21 <span class="chip chip-amber">TER</span></td><td class="right" style="color:var(--red)">(Rp 46.500)</td><td class="right" style="color:var(--green)">Rp 0</td><td><span class="chip chip-amber">Beda Rp 46.500</span></td></tr>
-            <tr class="total-row"><td><b>Take Home Pay</b></td><td class="right bold" style="color:var(--navy)">Rp 5.989.500</td><td class="right bold" style="color:var(--green)">Rp 6.036.000</td><td><b>+Rp 46.500 utk K/0</b></td></tr>
-            <tr><td>Beban Perusahaan</td><td class="right">Rp 481.340</td><td class="right">Rp 481.340</td><td>Sama</td></tr>
-          </tbody>
-        </table>
+      <!-- Ringkasan G1 -->
+      <table>
+        <thead><tr><th>Komponen</th><th class="right">TK/0 (Lajang)</th><th class="right">K/0 (Kawin)</th><th>Catatan</th></tr></thead>
+        <tbody>
+          <tr><td>Total Bruto</td><td class="right">Rp 6.200.000</td><td class="right">Rp 6.200.000</td><td>Sama</td></tr>
+          <tr><td>BPJS Karyawan</td><td class="right">(Rp 164.000)</td><td class="right">(Rp 164.000)</td><td>Sama — dasar gaji pokok</td></tr>
+          <tr><td>PPh 21</td><td class="right" style="color:var(--red)">(Rp 46.500)</td><td class="right" style="color:var(--green)">Rp 0</td><td>TER A 0,75% vs TER B 0%</td></tr>
+          <tr class="total-row"><td><b>THP</b></td><td class="right bold" style="color:var(--navy)"><b>Rp 5.989.500</b></td><td class="right bold" style="color:var(--green)"><b>Rp 6.036.000</b></td><td><b>Selisih Rp 46.500</b></td></tr>
+          <tr><td>Total Beban Perusahaan</td><td class="right">Rp 6.727.840</td><td class="right">Rp 6.681.340</td><td>Selisih dari PPh TK/0</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════
+       CONTOH HITUNGAN — GOLONGAN II (BRUTO 4,7 JT)
+  ═══════════════════════════════════════════ -->
+  <div class="card">
+    <div class="card-header">
+      <h2>🧮 Golongan II — Gaji Pokok Rp 3.942.960 + Tunjangan Rp 757.040</h2>
+      <span class="badge">Bruto Rp 4.700.000 · Migas JKK 1,74%</span>
+    </div>
+    <div class="card-body" style="display:flex;flex-direction:column;gap:16px">
+
+      <div class="alert alert-green">
+        ✅ <div>Bruto Rp 4.700.000 berada di bawah ambang batas Tabel A (≤ Rp 5.400.000) maupun Tabel B (≤ Rp 6.200.000) → <b>PPh 21 = Rp 0</b> untuk semua status PTKP.</div>
+      </div>
+
+      <div class="grid2" style="gap:16px;align-items:start">
+
+        <!-- G2 TK/0 -->
+        <div class="slip">
+          <div class="slip-head">
+            Status TK/0 — <span class="chip chip-blue" style="margin-left:6px">Lajang / Tidak Kawin</span>
+            <span>TER Tabel A</span>
+          </div>
+          <div class="slip-body">
+            <div class="slip-row section"><span>Komponen Gaji</span><span></span></div>
+            <div class="slip-row"><span>Gaji Pokok</span><span>Rp 3.942.960</span></div>
+            <div class="slip-row"><span>Tunjangan Tetap</span><span>Rp 757.040</span></div>
+            <div class="slip-row bold"><span>Total Bruto</span><span>Rp 4.700.000</span></div>
+
+            <div class="slip-row section"><span>BPJS Karyawan — dasar Rp 3.942.960</span><span></span></div>
+            <div class="slip-row" style="font-size:11px"><span>BPJS Kes 1% × 3.942.960</span><span class="neg">(Rp 39.430)</span></div>
+            <div class="slip-row" style="font-size:11px"><span>BPJS JHT 2% × 3.942.960</span><span class="neg">(Rp 78.859)</span></div>
+            <div class="slip-row" style="font-size:11px"><span>BPJS JP 1% × 3.942.960</span><span class="neg">(Rp 39.430)</span></div>
+            <div class="slip-row bold"><span>Total BPJS Karyawan (4%)</span><span class="neg">(Rp 157.719)</span></div>
+
+            <div class="slip-row section"><span>PPh 21 — TER Tabel A</span><span></span></div>
+            <div class="slip-row" style="font-size:11px"><span>Bruto 4,7jt ≤ 5.400.000 → rate 0%</span><span class="pos">Rp 0</span></div>
+
+            <div class="slip-row thp"><span>TAKE HOME PAY</span><span>Rp 4.542.281</span></div>
+
+            <div class="slip-row section" style="background:#f0fdf4;color:#166534"><span>BPJS Perusahaan (beban kantor)</span><span></span></div>
+            <div class="slip-row" style="font-size:11px;color:var(--slate)"><span>BPJS Kes 4% × 3.942.960</span><span>Rp 157.718</span></div>
+            <div class="slip-row" style="font-size:11px;color:var(--slate)"><span>JHT 3,7% × 3.942.960</span><span>Rp 145.890</span></div>
+            <div class="slip-row" style="font-size:11px;color:var(--slate)"><span>JP 2% × 3.942.960</span><span>Rp 78.859</span></div>
+            <div class="slip-row" style="font-size:11px;color:var(--slate)"><span>JKK 1,74% × 3.942.960</span><span>Rp 68.608</span></div>
+            <div class="slip-row" style="font-size:11px;color:var(--slate)"><span>JKM 0,3% × 3.942.960</span><span>Rp 11.829</span></div>
+            <div class="slip-row bold" style="font-size:11px"><span>Total BPJS Perusahaan</span><span style="color:var(--green)">Rp 462.904</span></div>
+            <div class="slip-row bold" style="font-size:12px;background:#f0fdf4"><span>Total Beban Perusahaan</span><span style="color:var(--green)">Rp 5.162.904</span></div>
+          </div>
+        </div>
+
+        <!-- G2 K/0 -->
+        <div class="slip" style="border-color:var(--green)">
+          <div class="slip-head" style="background:var(--green)">
+            Status K/0 — <span class="chip chip-green" style="margin-left:6px">Kawin Belum Punya Anak</span>
+            <span>TER Tabel B</span>
+          </div>
+          <div class="slip-body">
+            <div class="slip-row section"><span>Komponen Gaji</span><span></span></div>
+            <div class="slip-row"><span>Gaji Pokok</span><span>Rp 3.942.960</span></div>
+            <div class="slip-row"><span>Tunjangan Tetap</span><span>Rp 757.040</span></div>
+            <div class="slip-row bold"><span>Total Bruto</span><span>Rp 4.700.000</span></div>
+
+            <div class="slip-row section"><span>BPJS Karyawan — dasar Rp 3.942.960</span><span></span></div>
+            <div class="slip-row" style="font-size:11px"><span>BPJS Kes 1% × 3.942.960</span><span class="neg">(Rp 39.430)</span></div>
+            <div class="slip-row" style="font-size:11px"><span>BPJS JHT 2% × 3.942.960</span><span class="neg">(Rp 78.859)</span></div>
+            <div class="slip-row" style="font-size:11px"><span>BPJS JP 1% × 3.942.960</span><span class="neg">(Rp 39.430)</span></div>
+            <div class="slip-row bold"><span>Total BPJS Karyawan (4%)</span><span class="neg">(Rp 157.719)</span></div>
+
+            <div class="slip-row section"><span>PPh 21 — TER Tabel B</span><span></span></div>
+            <div class="slip-row" style="font-size:11px"><span>Bruto 4,7jt ≤ 6.200.000 → rate 0%</span><span class="pos">Rp 0</span></div>
+
+            <div class="slip-row thp" style="background:var(--green)"><span>TAKE HOME PAY</span><span>Rp 4.542.281</span></div>
+
+            <div class="slip-row section" style="background:#f0fdf4;color:#166534"><span>BPJS Perusahaan (beban kantor)</span><span></span></div>
+            <div class="slip-row" style="font-size:11px;color:var(--slate)"><span>BPJS Kes 4% × 3.942.960</span><span>Rp 157.718</span></div>
+            <div class="slip-row" style="font-size:11px;color:var(--slate)"><span>JHT 3,7% × 3.942.960</span><span>Rp 145.890</span></div>
+            <div class="slip-row" style="font-size:11px;color:var(--slate)"><span>JP 2% × 3.942.960</span><span>Rp 78.859</span></div>
+            <div class="slip-row" style="font-size:11px;color:var(--slate)"><span>JKK 1,74% × 3.942.960</span><span>Rp 68.608</span></div>
+            <div class="slip-row" style="font-size:11px;color:var(--slate)"><span>JKM 0,3% × 3.942.960</span><span>Rp 11.829</span></div>
+            <div class="slip-row bold" style="font-size:11px"><span>Total BPJS Perusahaan</span><span style="color:var(--green)">Rp 462.904</span></div>
+            <div class="slip-row bold" style="font-size:12px;background:#f0fdf4"><span>Total Beban Perusahaan</span><span style="color:var(--green)">Rp 5.162.904</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Ringkasan G2 -->
+      <table>
+        <thead><tr><th>Komponen</th><th class="right">TK/0 (Lajang)</th><th class="right">K/0 (Kawin)</th><th>Catatan</th></tr></thead>
+        <tbody>
+          <tr><td>Total Bruto</td><td class="right">Rp 4.700.000</td><td class="right">Rp 4.700.000</td><td>Sama</td></tr>
+          <tr><td>BPJS Karyawan</td><td class="right">(Rp 157.719)</td><td class="right">(Rp 157.719)</td><td>Sama — dasar gaji pokok</td></tr>
+          <tr><td>PPh 21</td><td class="right" style="color:var(--green)">Rp 0</td><td class="right" style="color:var(--green)">Rp 0</td><td>Bruto di bawah ambang TER</td></tr>
+          <tr class="total-row"><td><b>THP</b></td><td class="right bold" style="color:var(--green)"><b>Rp 4.542.281</b></td><td class="right bold" style="color:var(--green)"><b>Rp 4.542.281</b></td><td><b>Sama — tidak kena PPh</b></td></tr>
+          <tr><td>Total Beban Perusahaan</td><td class="right">Rp 5.162.904</td><td class="right">Rp 5.162.904</td><td>Sama</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════
+       PERBANDINGAN ANTAR GOLONGAN
+  ═══════════════════════════════════════════ -->
+  <div class="card">
+    <div class="card-header">
+      <h2>📊 Perbandingan Ringkas — Semua Kombinasi</h2>
+    </div>
+    <div class="card-body">
+      <table>
+        <thead>
+          <tr>
+            <th>Golongan</th>
+            <th>Status</th>
+            <th class="right">Gaji Pokok</th>
+            <th class="right">Total Bruto</th>
+            <th class="right">BPJS Kary.</th>
+            <th class="right">PPh 21</th>
+            <th class="right" style="color:var(--navy)">THP</th>
+            <th class="right" style="color:var(--green)">Beban Perush.</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style="background:#fff7ed">
+            <td rowspan="2" style="font-weight:700;vertical-align:middle">Golongan I</td>
+            <td><span class="chip chip-blue">TK/0</span></td>
+            <td class="right">Rp 4.100.000</td>
+            <td class="right">Rp 6.200.000</td>
+            <td class="right">(Rp 164.000)</td>
+            <td class="right" style="color:var(--red)">(Rp 46.500)</td>
+            <td class="right bold" style="color:var(--navy)">Rp 5.989.500</td>
+            <td class="right" style="color:var(--green)">Rp 6.727.840</td>
+          </tr>
+          <tr style="background:#f0fdf4">
+            <td><span class="chip chip-green">K/0</span></td>
+            <td class="right">Rp 4.100.000</td>
+            <td class="right">Rp 6.200.000</td>
+            <td class="right">(Rp 164.000)</td>
+            <td class="right" style="color:var(--green)">Rp 0</td>
+            <td class="right bold" style="color:var(--green)">Rp 6.036.000</td>
+            <td class="right" style="color:var(--green)">Rp 6.681.340</td>
+          </tr>
+          <tr>
+            <td rowspan="2" style="font-weight:700;vertical-align:middle">Golongan II</td>
+            <td><span class="chip chip-blue">TK/0</span></td>
+            <td class="right">Rp 3.942.960</td>
+            <td class="right">Rp 4.700.000</td>
+            <td class="right">(Rp 157.719)</td>
+            <td class="right" style="color:var(--green)">Rp 0</td>
+            <td class="right bold">Rp 4.542.281</td>
+            <td class="right" style="color:var(--green)">Rp 5.162.904</td>
+          </tr>
+          <tr>
+            <td><span class="chip chip-green">K/0</span></td>
+            <td class="right">Rp 3.942.960</td>
+            <td class="right">Rp 4.700.000</td>
+            <td class="right">(Rp 157.719)</td>
+            <td class="right" style="color:var(--green)">Rp 0</td>
+            <td class="right bold">Rp 4.542.281</td>
+            <td class="right" style="color:var(--green)">Rp 5.162.904</td>
+          </tr>
+        </tbody>
+        <tfoot>
+          <tr class="total-row">
+            <td colspan="6" class="bold">Total pengeluaran perusahaan (4 karyawan/bulan)</td>
+            <td class="right bold" style="color:var(--navy)">Rp 21.069.062</td>
+            <td class="right bold" style="color:var(--green)">Rp 23.735.988</td>
+          </tr>
+        </tfoot>
+      </table>
+      <div class="alert alert-warn" style="margin-top:14px">
+        ⚠️ <div>Golongan I TK/0 adalah satu-satunya yang kena PPh 21 (Rp 46.500/bulan). Semua karyawan Golongan II tidak kena PPh karena bruto di bawah ambang TER Tabel A (Rp 5.400.000). Karyawan tanpa NPWP → PPh ×1,2.</div>
       </div>
     </div>
   </div>
