@@ -9083,6 +9083,7 @@
         const d = new Date(); d.setDate(1); d.setMonth(d.getMonth()-i);
         periodeOptions.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
       }
+      const cfg = await loadPayrollConfig();
       // Tambah periode THR yang sudah ada di DB
       const { data: thrPeriods } = await state.supabase.from('payroll_periods').select('periode').eq('is_thr',true).order('periode',{ascending:false});
       const thrPeriodeOpts = (thrPeriods||[]).map(p=>p.periode).filter(p=>!periodeOptions.includes(p));
