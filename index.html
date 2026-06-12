@@ -6096,11 +6096,21 @@
         <div class="mb-5">
           <h4 class="font-bold text-navy text-base uppercase tracking-wider mb-3">⚠️ Risk Assessment (Pedoman PEP)</h4>
           <div class="bg-white border border-slate-200 rounded-lg p-4">
-            ${infoRow('Tgl Mulai Beroperasi', tglMasukDisplay)}
-            ${infoRow('Target MTBF', targetMtbfDisplay)}
+
             <div class="grid grid-cols-3 gap-2 py-2.5 border-b border-slate-200">
-              <div class="text-sm font-medium text-slate-600">CoF Score</div>
+              <div class="text-sm font-medium text-slate-600">Tgl Mulai Beroperasi</div>
               <div class="col-span-2 flex items-center gap-2">
+                <span class="text-sm font-semibold text-slate-900">${tglMasukDisplay || '<span class="text-slate-400 font-normal">Belum diisi</span>'}</span>
+                <input type="date" id="tgl-operasi-${eq.id}" value="${eq.tanggal_masuk_operasi || ''}"
+                  class="ml-2 text-xs border border-slate-300 rounded px-2 py-1 bg-white outline-none focus:ring-2 focus:ring-navy" />
+                <button onclick="saveRiskField('${eq.id}','tanggal_masuk_operasi',document.getElementById('tgl-operasi-${eq.id}').value||null)"
+                  class="px-2 py-1 bg-navy text-white rounded text-xs font-semibold hover:bg-navy/80">Simpan</button>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-3 gap-2 py-2.5 border-b border-slate-200">
+              <div class="text-sm font-medium text-slate-600">CoF Score (0–5)</div>
+              <div class="col-span-2 flex items-center gap-2 flex-wrap">
                 ${cofLabel || '<span class="text-slate-400 font-normal text-sm">Belum diisi</span>'}
                 <select id="cof-select-${eq.id}" onchange="saveCofInline('${eq.id}',this.value)"
                   class="ml-2 text-xs border border-slate-300 rounded px-2 py-1 bg-white outline-none focus:ring-2 focus:ring-navy">
@@ -6109,6 +6119,18 @@
                 </select>
               </div>
             </div>
+
+            <div class="grid grid-cols-3 gap-2 py-2.5 border-b border-slate-200">
+              <div class="text-sm font-medium text-slate-600">Target MTBF (jam)</div>
+              <div class="col-span-2 flex items-center gap-2">
+                <span class="text-sm font-semibold text-slate-900">${targetMtbfDisplay || '<span class="text-slate-400 font-normal">Belum diisi</span>'}</span>
+                <input type="number" id="target-mtbf-${eq.id}" value="${eq.target_mtbf_hours || ''}" min="0" placeholder="jam"
+                  class="ml-2 w-28 text-xs border border-slate-300 rounded px-2 py-1 bg-white outline-none focus:ring-2 focus:ring-navy" />
+                <button onclick="saveRiskField('${eq.id}','target_mtbf_hours',document.getElementById('target-mtbf-${eq.id}').value||null)"
+                  class="px-2 py-1 bg-navy text-white rounded text-xs font-semibold hover:bg-navy/80">Simpan</button>
+              </div>
+            </div>
+
             ${infoRow('PoF Level', pofDisplay)}
             ${infoRow('Risk Level', riskDisplay)}
           </div>
@@ -11585,6 +11607,19 @@
       const { error } = await state.supabase.from('equipment').update({ cof_score: cof }).eq('id', eqId);
       if (error) throw error;
     }
+
+    async function saveRiskField(eqId, field, val) {
+      try {
+        const parsed = val === '' || val == null ? null
+          : (field === 'tanggal_masuk_operasi' ? val : Number(val));
+        const { error } = await state.supabase.from('equipment').update({ [field]: parsed }).eq('id', eqId);
+        if (error) throw error;
+        toast('Tersimpan', 'success');
+        const { data } = await state.supabase.from('equipment').select('*').eq('id', eqId).single();
+        if (data) { state.currentEquipment = data; renderDetailTab(data); }
+      } catch (e) { toast('Gagal: ' + e.message, 'error'); }
+    }
+    window.saveRiskField = saveRiskField;
 
     async function saveCofInline(eqId, cofVal) {
       try {
