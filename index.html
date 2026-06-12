@@ -1796,6 +1796,11 @@
     function isSrMekanikOrAbove() {
       return ['sr_mekanik','spv','sr_spv','astmen','admin'].includes(state.profile?.role);
     }
+    function canWrite() {
+      // Tamu dan role tidak dikenal = read-only
+      return !['tamu'].includes(state.profile?.role);
+    }
+    window.canWrite = canWrite;
 
     function visibleNavItems() {
       return NAV_ITEMS.filter(item =>
@@ -2830,7 +2835,9 @@
               <tbody class="divide-y divide-slate-200">
                 ${users.map(u => {
                   const isSelf = u.id === state.user.id;
-                  const roleBadge = u.role === 'admin' ? 'bg-navy text-white' : 'bg-slate-200 text-slate-700';
+                  const roleBadge = u.role === 'admin' ? 'bg-navy text-white'
+                    : u.role === 'tamu' ? 'bg-slate-100 text-slate-500 border border-slate-300'
+                    : 'bg-slate-200 text-slate-700';
                   return `
                     <tr class="hover:bg-slate-50">
                       <td class="px-3 py-2 text-sm font-medium text-slate-800">${escapeHtml(u.email)}${isSelf ? ' <span class="text-xs text-safety">(kamu)</span>' : ''}</td>
@@ -2840,6 +2847,7 @@
                       <td class="px-3 py-2 text-sm text-slate-500 whitespace-nowrap">${fmtDate(u.created_at)}</td>
                       <td class="px-3 py-2 text-right whitespace-nowrap">
                         <button onclick='openUserEditModal(${JSON.stringify(u).replace(/'/g, "&apos;")})' class="px-2 py-1 rounded bg-navy hover:bg-navy-700 text-white text-xs font-medium">✏ Edit</button>
+                        ${!isSelf ? `<button onclick="deleteUserProfile('${u.id}','${escapeHtml(u.email)}')" class="ml-1 px-2 py-1 rounded bg-red-100 hover:bg-red-200 text-red-700 text-xs font-medium">🗑</button>` : ''}
                       </td>
                     </tr>
                   `;
@@ -2874,7 +2882,7 @@
             <div>
               <label class="block text-sm font-semibold text-slate-700 mb-1">Role *</label>
               <select name="role" required ${isSelf ? 'disabled' : ''} class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">
-                ${['operator','mekanik','sr_mekanik','gudang','spv','sr_spv','astmen','admin','user'].map(r => `<option value="${r}" ${u.role === r ? 'selected' : ''}>${r}</option>`).join('')}
+                ${['operator','mekanik','sr_mekanik','gudang','spv','sr_spv','astmen','admin','user','tamu'].map(r => `<option value="${r}" ${u.role === r ? 'selected' : ''}>${r}</option>`).join('')}
               </select>
               ${isSelf ? '<p class="text-xs text-red-600 mt-1">⚠️ Role kamu sendiri tidak bisa diubah dari sini (anti-lockout).</p>' : ''}
             </div>
@@ -2957,6 +2965,7 @@
                 <option value="astmen">Astmen — akses RAM</option>
                 <option value="admin">Admin — full akses</option>
                 <option value="user">User — lihat saja</option>
+                <option value="tamu">Tamu — hanya lihat, tanpa edit</option>
               </select>
             </div>
             <div>
@@ -3003,10 +3012,17 @@
         const { data, error } = await state.supabase.functions.invoke('create-user', { body: payload });
         if (error) {
           let detail = error.message || 'Unknown error';
-          try { const b = await error.context?.json?.(); if (b && b.error) detail = b.error; } catch (_) {}
+          try {
+            const resp = error.context;
+            if (resp && typeof resp.json === 'function') {
+              const b = await resp.json();
+              if (b?.error) detail = b.error;
+              else if (b?.message) detail = b.message;
+            }
+          } catch (_) {}
           throw new Error(detail);
         }
-        if (data && !data.ok) throw new Error(data.error || 'Unknown error');
+        if (data && !data.ok) throw new Error(data.error || data.message || 'Edge Function error');
 
         toast(`✅ User ${payload.email} berhasil dibuat sebagai ${payload.role}.`, 'success');
         logActivity('user_created', 'user', data?.user_id, payload.email, { role: payload.role });
@@ -3027,6 +3043,19 @@
       }
     }
     window.submitCreateUser = submitCreateUser;
+
+    async function deleteUserProfile(userId, email) {
+      if (!confirm(`Hapus user "${email}" dari app?\n\nUser tidak bisa login lagi ke eRAMHoist.\n(Data auth Supabase tetap ada — hapus manual di Supabase Dashboard jika perlu.)`)) return;
+      try {
+        const { error } = await state.supabase.from('profiles').delete().eq('id', userId);
+        if (error) throw error;
+        toast(`User ${email} dihapus.`, 'success');
+        reloadUsersList();
+      } catch (err) {
+        toast('Gagal hapus: ' + err.message, 'error');
+      }
+    }
+    window.deleteUserProfile = deleteUserProfile;
 
     // ============================================================
     // 9c.4. ACTIVITY LOG (audit trail viewer)
@@ -11302,8 +11331,8 @@
             ${r.root_cause ? `<div class="text-sm text-slate-700 mb-2"><b>Root Cause:</b> ${escapeHtml(r.root_cause)}</div>` : ''}
             ${r.corrective_action ? `<div class="text-sm text-slate-700 mb-2"><b>Corrective Action:</b> ${escapeHtml(r.corrective_action)}</div>` : ''}
             <div class="flex gap-2 mt-2">
-              <button onclick="openRcaForm('${eq.id}','${r.id}')" class="px-3 py-1.5 bg-navy text-white rounded-lg text-xs font-semibold">✏ Edit</button>
-              ${r.status !== 'Verified' ? `<button onclick="verifyRca('${r.id}','${eq.id}')" class="px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-semibold">✅ Verify</button>` : ''}
+              ${canWrite() ? `<button onclick="openRcaForm('${eq.id}','${r.id}')" class="px-3 py-1.5 bg-navy text-white rounded-lg text-xs font-semibold">✏ Edit</button>` : ''}
+              ${canWrite() && r.status !== 'Verified' ? `<button onclick="verifyRca('${r.id}','${eq.id}')" class="px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-semibold">✅ Verify</button>` : ''}
             </div>
           </div>`).join('') :
           `<div class="text-sm text-slate-400 italic py-4 text-center">Belum ada record RCA untuk equipment ini.</div>`;
@@ -11315,7 +11344,7 @@
                 <h4 class="font-bold text-slate-800 text-base">🔎 Root Cause Analysis</h4>
                 <p class="text-xs text-slate-500 mt-0.5">Pedoman PEP: trigger wajib bila failure &gt;1× dalam 12 bulan · Metode: 5-Whys</p>
               </div>
-              <button onclick="openRcaForm('${eq.id}',null)" class="bg-safety hover:bg-safety/90 text-white px-4 py-2 rounded-lg text-sm font-semibold">+ Buat RCA</button>
+              ${canWrite() ? `<button onclick="openRcaForm('${eq.id}',null)" class="bg-safety hover:bg-safety/90 text-white px-4 py-2 rounded-lg text-sm font-semibold">+ Buat RCA</button>` : '<span class="text-xs text-slate-400 italic">👁 Mode lihat saja</span>'}
             </div>
             ${triggerBanner}
             <div class="space-y-3">${rcaRows}</div>
@@ -12340,7 +12369,7 @@
               <option value="90" ${availPeriodDays==90?'selected':''}>90 hari</option>
               <option value="365" ${availPeriodDays==365?'selected':''}>1 tahun</option>
             </select>
-            <button onclick="openDowntimeForm()" class="bg-safety hover:bg-safety/90 text-white px-4 py-2.5 rounded-lg text-sm font-semibold whitespace-nowrap">+ Catat Downtime</button>
+            ${canWrite() && isSrMekanikOrAbove() ? `<button onclick="openDowntimeForm()" class="bg-safety hover:bg-safety/90 text-white px-4 py-2.5 rounded-lg text-sm font-semibold whitespace-nowrap">+ Catat Downtime</button>` : ''}
             <button onclick="cetakAvailReport()" class="btn-cetak">🖨 Cetak</button>
           </div>
         </div>
