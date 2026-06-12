@@ -15764,6 +15764,50 @@
           ${tbl(['Tier', 'Contoh', 'PM', 'TOH', 'GOH', 'Eco life'], [['A', 'Perkins 1103A, Cummins 4BTA', '500', '6.000', '12.000', '30.000'], ['B', 'CAT C4.4, Deutz 1013', '500', '8.000', '16.000', '35.000'], ['C', 'FG Wilson P220 (Perkins 1106A)', '500', '10.000', '20.000', '40.000'], ['D', 'CAT D3406/C13/C15 (rig prime mover)', '500', '10.000', '20.000', '45.000']])}
           <p><b>Sisa PM</b> = (last_pm_hours + pm_interval_hours) − running_hours. Kalau ≤ 0 → ⚠️ lewat.</p>`)}
 
+        ${sec('#0f766e', '🔎', 'RCA — Root Cause Analysis (5-Whys)', `
+          <p>Metode investigasi akar masalah menggunakan <b>5-Whys</b> sesuai Pedoman Pemeliharaan PT Pertamina EP No. A04-005/PEP23000/2023-S9.</p>
+          <p><b>Kapan RCA wajib dibuat?</b> Sistem otomatis memunculkan alert 🚨 bila equipment mengalami failure <b>&gt;1× dalam 12 bulan terakhir</b>.</p>
+          <p><b>Cara akses:</b> Equipment → pilih equipment → tab <b>🔎 RCA</b></p>
+          ${tbl(['Langkah', 'Yang dilakukan'], [
+            ['1 — Buka tab RCA', 'Klik tab 🔎 RCA di halaman detail equipment. Sistem cek otomatis apakah ada trigger (failure &gt;1×/tahun).'],
+            ['2 — Klik + Buat RCA', 'Isi tanggal failure, deskripsi singkat kejadian, dan status awal (Open).'],
+            ['3 — Isi 5-Whys', 'Why 1 → Why 2 → … → Why 5. Setiap jawaban jadi pertanyaan berikutnya sampai akar masalah ditemukan.'],
+            ['4 — Tulis Root Cause', 'Kesimpulan akhir dari rangkaian Why. Ini yang dicatat sebagai akar masalah.'],
+            ['5 — Isi Corrective Action', 'Tindakan perbaikan yang diambil + PIC + target tanggal verifikasi.'],
+            ['6 — Verify', 'Setelah tindakan dilaksanakan, klik ✅ Verify. Status berubah Verified + tanggal aktual tercatat.'],
+          ])}
+          ${tbl(['Status', 'Arti', 'Tindakan selanjutnya'], [
+            ['🔴 Open', 'RCA dibuat, belum ada tindakan', 'Assign PIC, mulai investigasi'],
+            ['🟡 In Progress', 'Sedang dalam proses perbaikan', 'Update progress, tunggu selesai'],
+            ['✅ Verified', 'Tindakan sudah dilaksanakan & diverifikasi', 'Tutup — jadi histori permanen'],
+          ])}
+          <p class="bg-slate-50 border border-slate-200 rounded p-2 text-xs"><b>Tips 5-Whys:</b> Jangan berhenti di Why 1 (gejala). Terus gali sampai ketemu penyebab yang bisa dikendalikan. Contoh: "Pompa rusak" → "Seal aus" → "Pelumasan kurang" → "PM tidak dijalankan tepat waktu" → <b>Root Cause: interval PM belum tercatat di sistem</b>.</p>`)}
+
+        ${sec('#7c3aed', '⚡', 'Risk Assessment — CoF, PoF & Risk Level', `
+          <p>Menentukan <b>prioritas pemeliharaan</b> setiap equipment berdasarkan dua faktor sesuai Pedoman PEP.</p>
+          ${tbl(['Faktor', 'Arti', 'Cara input'], [
+            ['CoF (Consequence of Failure)', 'Seberapa besar dampak bila alat gagal (skala 0–5)', 'Input manual — tab Info → section Risk Assessment'],
+            ['PoF (Probability of Failure)', 'Seberapa sering alat rusak', 'Otomatis dari MTBF historis downtime'],
+            ['Risk Level', 'Hasil Risk Matrix PoF × CoF', 'Otomatis — Low / Medium / High / Extreme'],
+          ])}
+          ${tbl(['CoF', 'Label', 'Kondisi di Rig'], [
+            ['5', 'Catastrophic', 'Fatality, well blowout, aset hilang total → BOP Stack, Accumulator'],
+            ['4', 'Major', 'Rig shutdown, NPT &gt;72 jam → Drawworks, Top Drive, Crown Block'],
+            ['3', 'Significant', 'Drilling berhenti, NPT &gt;24 jam → Mud Pump, Generator, SCR/VFD'],
+            ['2', 'Moderate', 'Partial shutdown, NPT 4–24 jam → Shale Shaker, Air Compressor'],
+            ['1', 'Minor', 'NPT &lt;4 jam, workaround mudah → Forklift, Truck'],
+            ['0', 'Negligible', 'Tidak ada dampak operasi → fasilitas pendukung non-kritis'],
+          ])}
+          ${tbl(['PoF Level', 'MTBF Aktual', 'Label'], [
+            ['A', '&gt; 8.000 jam', 'Unlikely — andal tinggi'],
+            ['B', '4.000 – 8.000 jam', 'Rare'],
+            ['C', '2.000 – 4.000 jam', 'Moderate'],
+            ['D', '500 – 2.000 jam', 'Likely'],
+            ['E', '&lt; 500 jam', 'Almost Certain — sering rusak'],
+          ])}
+          <p><b>Cara isi CoF massal:</b> mulai dari parent equipment dulu (BOP Stack, Drawworks, Mud Pump), lalu child component bisa klik tombol amber <b>"↑ Warisi CoF dari Parent"</b> di tab Info — tidak perlu isi satu per satu.</p>
+          <p><b>Risk Level muncul otomatis</b> setelah CoF diisi + ada data downtime historis (untuk hitung MTBF → PoF).</p>`)}
+
         ${sec('#ef4444', '📋', 'Kelayakan Armada — Maintain vs Ganti', `
           <p>Gabungan <b>umur jam/km</b> (TOH/GOH/eco life) + <b>keandalan</b> (MTBF berbasis HM). Pakai 2 sumbu untuk verdict.</p>
           ${tbl(['Verdict', 'Aturan'], [['🟢 Sehat', 'Umur &lt;80% AND keandalan ≥1 siklus TOH'], ['🟡 Pantau', 'Salah satu sumbu bermasalah (umur 80-99% atau MTBF &lt;1 siklus)'], ['🔴 Kandidat ganti', 'Umur ≥100% AND keandalan &lt;½ TOH']])}
