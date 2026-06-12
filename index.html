@@ -6117,6 +6117,8 @@
                   <option value="">— Pilih CoF —</option>
                   ${[0,1,2,3,4,5].map(i => `<option value="${i}" ${cofVal===i?'selected':''}>${COF_DESC[i]}</option>`).join('')}
                 </select>
+                ${eq.parent_equipment_id && cofVal == null ? `<button onclick="inheritCofFromParent('${eq.id}','${eq.parent_equipment_id}')"
+                  class="px-2 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded text-xs font-semibold whitespace-nowrap">↑ Warisi dari Parent</button>` : ''}
               </div>
             </div>
 
@@ -11607,6 +11609,23 @@
       const { error } = await state.supabase.from('equipment').update({ cof_score: cof }).eq('id', eqId);
       if (error) throw error;
     }
+
+    async function inheritCofFromParent(eqId, parentId) {
+      try {
+        const { data: parent, error } = await state.supabase
+          .from('equipment').select('nama_equipment, cof_score').eq('id', parentId).single();
+        if (error) throw error;
+        if (parent.cof_score == null) {
+          toast(`Parent "${parent.nama_equipment}" belum punya CoF — isi parent dulu`, 'error'); return;
+        }
+        if (!confirm(`Warisi CoF ${parent.cof_score} dari "${parent.nama_equipment}"?`)) return;
+        await saveCofScore(eqId, parent.cof_score);
+        toast(`CoF diwarisi dari ${parent.nama_equipment}: ${parent.cof_score}`, 'success');
+        const { data } = await state.supabase.from('equipment').select('*').eq('id', eqId).single();
+        if (data) { state.currentEquipment = data; renderDetailTab(data); }
+      } catch (e) { toast('Gagal: ' + e.message, 'error'); }
+    }
+    window.inheritCofFromParent = inheritCofFromParent;
 
     async function saveRiskField(eqId, field, val) {
       try {
