@@ -12358,7 +12358,7 @@
           ${kpi('🔴 Sedang Down', ongoing.length + inspOngoing.length, inspOngoing.length ? `${inspOngoing.length} dari siklus inspeksi` : '')}
           ${kpi('🟡 Sedang Diselidiki', gejalaOngoing.length, 'gejala awal, alat masih jalan')}
           ${kpi('MTTR (rata² perbaikan)', mttr != null ? fmtH(mttr) : '—', allDur.length ? `dari ${allDur.length} perbaikan` : 'belum ada perbaikan selesai')}
-          ${kpi('MTBF (rata² antar rusak)', mtbf != null ? fmtH(mtbf) : '—', mtbf != null ? `dari ${totalFail} kerusakan · ${failedEq.length} alat` : 'belum ada kerusakan')}
+          ${kpi('MTBF (rata² antar rusak)', mtbf != null ? fmtH(mtbf) : '—', mtbf != null ? `dari ${totalFail} kerusakan · ${eqList.filter(o => o.failEvents > 0).length} alat` : 'belum ada kerusakan')}
         </div>
         ${(ongoing.length || inspOngoing.length) ? `<div class="bg-white rounded-xl border border-red-200 overflow-hidden">
           <div class="px-4 py-3 border-b border-slate-100 font-semibold text-red-700 text-sm">🔴 Sedang Down (${ongoing.length + inspOngoing.length}) <span class="ml-2 text-xs font-normal text-slate-400">🔒 = dari Siklus Inspeksi, read-only</span></div>
