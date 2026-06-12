@@ -422,9 +422,8 @@
       ]},
       { section: 'H. Risk Assessment (Pedoman PEP)', fields: [
         { name: 'tanggal_masuk_operasi', label: 'Tgl Mulai Beroperasi', type: 'date', placeholder: 'Basis denominator Availability — bukan tgl pembelian' },
-        { name: 'cof_score',            label: 'CoF Score (0–5)',       type: 'select',
-          options: ['','0 — Negligible','1 — Minor','2 — Moderate','3 — Significant','4 — Major','5 — Catastrophic'],
-          placeholder: 'Consequence of Failure' },
+        { name: 'cof_score', label: 'CoF Score (0–5)', type: 'number', min: 0, max: 5, step: 1,
+          placeholder: '0=Negligible 1=Minor 2=Moderate 3=Significant 4=Major 5=Catastrophic' },
         { name: 'target_mtbf_hours',    label: 'Target MTBF (jam)',     type: 'number', min: 0, placeholder: 'Target jam antar kerusakan' },
       ]},
       { section: 'I. Catatan', fields: [
