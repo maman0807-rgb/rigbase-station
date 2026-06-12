@@ -11328,19 +11328,11 @@
 
     function openRcaForm(eqId, rcaId) {
       const isEdit = !!rcaId;
-      const modal = document.getElementById('modal-overlay');
-      if (!modal) return;
-      modal.innerHTML = `
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
-          <div class="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-            <h3 class="font-bold text-lg text-slate-900">${isEdit ? '✏ Edit RCA' : '+ Buat RCA Baru'}</h3>
-            <button onclick="closeModal()" class="text-slate-400 hover:text-slate-700 text-2xl leading-none">&times;</button>
-          </div>
-          <div class="p-6 space-y-4" id="rca-form-body">
-            <div class="text-slate-400 text-sm">Memuat…</div>
-          </div>
-        </div>`;
-      modal.classList.remove('hidden');
+      openModal({
+        title: isEdit ? '✏ Edit RCA' : '+ Buat RCA Baru',
+        maxWidth: 'max-w-2xl',
+        body: '<div id="rca-form-body"><div class="text-slate-400 text-sm text-center py-4">Memuat…</div></div>',
+      });
       loadRcaForm(eqId, rcaId);
     }
     window.openRcaForm = openRcaForm;
