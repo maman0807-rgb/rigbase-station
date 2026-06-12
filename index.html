@@ -420,7 +420,14 @@
         { name: 'pressure_test_date',   label: 'Pressure Test Date',   type: 'date' },
         { name: 'pressure_test_result', label: 'Pressure Test Result', type: 'text' },
       ]},
-      { section: 'H. Catatan', fields: [
+      { section: 'H. Risk Assessment (Pedoman PEP)', fields: [
+        { name: 'tanggal_masuk_operasi', label: 'Tgl Mulai Beroperasi', type: 'date', placeholder: 'Basis denominator Availability — bukan tgl pembelian' },
+        { name: 'cof_score',            label: 'CoF Score (0–5)',       type: 'select',
+          options: ['','0 — Negligible','1 — Minor','2 — Moderate','3 — Significant','4 — Major','5 — Catastrophic'],
+          placeholder: 'Consequence of Failure' },
+        { name: 'target_mtbf_hours',    label: 'Target MTBF (jam)',     type: 'number', min: 0, placeholder: 'Target jam antar kerusakan' },
+      ]},
+      { section: 'I. Catatan', fields: [
         { name: 'remarks', label: 'Remarks', type: 'textarea' },
       ]},
     ];
@@ -792,7 +799,7 @@
     async function fetchEquipmentList() {
       let q = state.supabase
         .from('equipment')
-        .select('id, tag_number, nama_equipment, kategori_id, assigned_unit_id, tipe_kepemilikan, status_operasi, kondisi_fisik, brand, model, serial_number, next_maintenance_date, skpi_end_date, tgl_expired_sertifikat');
+        .select('id, tag_number, nama_equipment, kategori_id, assigned_unit_id, tipe_kepemilikan, status_operasi, kondisi_fisik, brand, model, serial_number, next_maintenance_date, skpi_end_date, tgl_expired_sertifikat, cof_score, criticality_level');
       const f = state.equipmentFilters;
       if (f.parent_unit_id) q = q.eq('assigned_unit_id', Number(f.parent_unit_id));
       if (f.kategori_id)    q = q.eq('kategori_id',      Number(f.kategori_id));
@@ -5587,6 +5594,7 @@
           <td class="px-3 py-2 text-sm cursor-pointer" onclick="setEquipmentView('detail', '${eq.id}')">${statusBadge(eq.status_operasi)}</td>
           <td class="px-3 py-2 text-sm cursor-pointer" onclick="setEquipmentView('detail', '${eq.id}')">${statusBadge(eq.tipe_kepemilikan)}</td>
           <td class="px-3 py-2 text-sm text-slate-600 whitespace-nowrap cursor-pointer" onclick="setEquipmentView('detail', '${eq.id}')">${fmtDate(eq.next_maintenance_date)}</td>
+          <td class="px-3 py-2 text-sm cursor-pointer" onclick="setEquipmentView('detail', '${eq.id}')">${eq.cof_score != null ? `<span class="px-1.5 py-0.5 rounded text-xs font-semibold bg-slate-100 text-slate-600">CoF ${eq.cof_score}</span>` : '<span class="text-slate-300 text-xs">—</span>'}</td>
         </tr>
       `).join('');
       // Action bar (muncul kalau ada selected)
@@ -5624,6 +5632,7 @@
                   <th class="px-3 py-2 text-left text-xs font-bold text-slate-700 uppercase">Status</th>
                   <th class="px-3 py-2 text-left text-xs font-bold text-slate-700 uppercase">Tipe</th>
                   <th class="px-3 py-2 text-left text-xs font-bold text-slate-700 uppercase">Next Maint.</th>
+                  <th class="px-3 py-2 text-left text-xs font-bold text-slate-700 uppercase">CoF</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-200">${rows}</tbody>
@@ -5938,6 +5947,7 @@
                 ['history','🔄 History'],
                 ['stress','🚛 Riwayat Stress'],
                 ['fmea','⚠️ FMEA'],
+                ['rca','🔎 RCA'],
               ].map(([id, lbl]) => `
                 <button onclick="state.equipmentDetailTab='${id}'; renderDetailTab(window.__currentEq)"
                   class="px-4 py-3 text-sm font-medium whitespace-nowrap ${state.equipmentDetailTab===id ? 'border-b-2 border-safety text-safety bg-safety/5' : 'text-slate-600 hover:text-navy'}">
@@ -5965,7 +5975,7 @@
       const parent = c.parentElement.querySelector('.flex.border-b');
       if (parent) {
         parent.querySelectorAll('button').forEach((btn, i) => {
-          const ids = ['info','maintenance','sos','sertifikasi','dokumen','inspeksi','history','stress','fmea'];
+          const ids = ['info','maintenance','sos','sertifikasi','dokumen','inspeksi','history','stress','fmea','rca'];
           btn.className = `px-4 py-3 text-sm font-medium whitespace-nowrap ${state.equipmentDetailTab===ids[i] ? 'border-b-2 border-safety text-safety bg-safety/5' : 'text-slate-600 hover:text-navy'}`;
         });
       }
@@ -5979,6 +5989,7 @@
         case 'history':     c.innerHTML = '<div class="text-slate-400">Memuat…</div>'; renderHistoryTab(eq, c); break;
         case 'stress':      c.innerHTML = '<div class="text-slate-400">Memuat…</div>'; renderStressHistoryTab(eq, c); break;
         case 'fmea':        c.innerHTML = '<div class="text-slate-400">Memuat…</div>'; renderFmeaForEquipmentTab(eq, c); break;
+        case 'rca':         c.innerHTML = '<div class="text-slate-400">Memuat…</div>'; renderRcaTab(eq, c); break;
       }
     }
     window.renderDetailTab = renderDetailTab;
@@ -6036,6 +6047,18 @@
           ['Remarks', eq.remarks],
         ]],
       ];
+      // Risk Assessment — Pedoman PEP
+      const cofVal = eq.cof_score != null ? eq.cof_score : null;
+      const cofLabel = cofVal != null ? `<span class="font-semibold">${COF_DESC[cofVal] || cofVal}</span>` : null;
+      const pofDisplay = eq._mtbf != null ? pofBadge(hitungPoF(eq._mtbf)) : '<span class="text-slate-400 text-xs">Belum ada data MTBF</span>';
+      const riskDisplay = (cofVal != null && eq._mtbf != null)
+        ? riskBadge(hitungRiskLevel(hitungPoF(eq._mtbf).level, cofVal))
+        : (cofVal != null ? '<span class="text-slate-400 text-xs">Perlu data MTBF (catat downtime)</span>'
+                          : '<span class="text-slate-400 text-xs">Isi CoF score dulu</span>');
+      const targetMtbfDisplay = eq.target_mtbf_hours != null
+        ? fmtNumber(eq.target_mtbf_hours, ' jam')
+        : null;
+      const tglMasukDisplay = eq.tanggal_masuk_operasi ? fmtDate(eq.tanggal_masuk_operasi) : null;
       // Spesifikasi nameplate per kategori (spec_data JSONB)
       const tpl = getSpecTemplate(eq.kategori_id, eq);
       let specSectionHtml = '';
@@ -6069,13 +6092,33 @@
           </div>
         </div>
       `).join('');
-      // Sisipkan section spek nameplate SETELAH section "Spesifikasi" (index 1)
+      // Risk Assessment section — Pedoman PEP A04-005/PEP23000/2023-S9
+      const riskSectionHtml = `
+        <div class="mb-5">
+          <h4 class="font-bold text-navy text-base uppercase tracking-wider mb-3">⚠️ Risk Assessment (Pedoman PEP)</h4>
+          <div class="bg-white border border-slate-200 rounded-lg p-4">
+            ${infoRow('Tgl Mulai Beroperasi', tglMasukDisplay)}
+            ${infoRow('Target MTBF', targetMtbfDisplay)}
+            <div class="grid grid-cols-3 gap-2 py-2.5 border-b border-slate-200">
+              <div class="text-sm font-medium text-slate-600">CoF Score</div>
+              <div class="col-span-2 flex items-center gap-2">
+                ${cofLabel || '<span class="text-slate-400 font-normal text-sm">Belum diisi</span>'}
+                <select id="cof-select-${eq.id}" onchange="saveCofInline('${eq.id}',this.value)"
+                  class="ml-2 text-xs border border-slate-300 rounded px-2 py-1 bg-white outline-none focus:ring-2 focus:ring-navy">
+                  <option value="">— Pilih CoF —</option>
+                  ${[0,1,2,3,4,5].map(i => `<option value="${i}" ${cofVal===i?'selected':''}>${COF_DESC[i]}</option>`).join('')}
+                </select>
+              </div>
+            </div>
+            ${infoRow('PoF Level', pofDisplay)}
+            ${infoRow('Risk Level', riskDisplay)}
+          </div>
+        </div>`;
+
       if (specSectionHtml) {
-        const parts = allSectionsHtml.split('</div>\n        </div>\n      ');
-        // fallback simpler: append di akhir kalau split gagal
-        return allSectionsHtml + specSectionHtml;
+        return allSectionsHtml + specSectionHtml + riskSectionHtml;
       }
-      return allSectionsHtml;
+      return allSectionsHtml + riskSectionHtml;
     }
 
     function renderSertifikasiTab(eq) {
@@ -11191,6 +11234,177 @@
     window.renderFmeaForEquipmentTab = renderFmeaForEquipmentTab;
 
     // ============================================================
+    // 10v2. RCA (Root Cause Analysis) — tab di Equipment Detail
+    // Trigger otomatis: failure > 1× dalam 12 bulan pada equipment yang sama
+    // Metode: 5-Whys + Corrective Action + Verifikasi
+    // ============================================================
+    async function renderRcaTab(eq, container) {
+      container.innerHTML = '<div class="text-slate-400 text-sm py-4 text-center">Memuat RCA…</div>';
+      try {
+        // Cek trigger: failure > 1x dalam 12 bulan
+        const since12 = new Date(); since12.setFullYear(since12.getFullYear() - 1);
+        const [rcaRes, dtRes] = await Promise.all([
+          state.supabase.from('rca_records').select('*').eq('equipment_id', eq.id).order('failure_date', { ascending: false }),
+          state.supabase.from('downtime_events').select('id, start_at, category').eq('equipment_id', eq.id)
+            .in('category', FAILURE_CATS).gte('start_at', since12.toISOString()),
+        ]);
+        const rcaList    = rcaRes.data || [];
+        const recentFail = dtRes.data || [];
+        const needsRca   = recentFail.length > 1;
+
+        const statusBadgeRca = (s) => ({
+          'Open':        '<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-red-100 text-red-700">Open</span>',
+          'In Progress': '<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-700">In Progress</span>',
+          'Verified':    '<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-green-100 text-green-700">✅ Verified</span>',
+        }[s] || s);
+
+        const triggerBanner = needsRca ? `
+          <div class="bg-red-50 border border-red-300 rounded-xl p-4 flex items-start gap-3">
+            <span class="text-2xl">🚨</span>
+            <div>
+              <div class="font-bold text-red-800">RCA Trigger — ${recentFail.length}× failure dalam 12 bulan</div>
+              <div class="text-sm text-red-700 mt-1">Pedoman PEP: failure berulang &gt;1× dalam 1 tahun wajib RCA. Buat RCA baru di bawah.</div>
+            </div>
+          </div>` : '';
+
+        const rcaRows = rcaList.length ? rcaList.map(r => `
+          <div class="bg-white border border-slate-200 rounded-xl p-4">
+            <div class="flex items-start justify-between gap-2 mb-3">
+              <div>
+                <div class="font-bold text-slate-800">${fmtDate(r.failure_date)} — ${escapeHtml(r.failure_description || '—')}</div>
+                <div class="text-xs text-slate-500 mt-0.5">Dibuat: ${fmtDate(r.created_at?.slice(0,10))} · PIC: ${escapeHtml(r.pic_action || '—')}</div>
+              </div>
+              ${statusBadgeRca(r.status)}
+            </div>
+            ${r.root_cause ? `<div class="text-sm text-slate-700 mb-2"><b>Root Cause:</b> ${escapeHtml(r.root_cause)}</div>` : ''}
+            ${r.corrective_action ? `<div class="text-sm text-slate-700 mb-2"><b>Corrective Action:</b> ${escapeHtml(r.corrective_action)}</div>` : ''}
+            <div class="flex gap-2 mt-2">
+              <button onclick="openRcaForm('${eq.id}','${r.id}')" class="px-3 py-1.5 bg-navy text-white rounded-lg text-xs font-semibold">✏ Edit</button>
+              ${r.status !== 'Verified' ? `<button onclick="verifyRca('${r.id}','${eq.id}')" class="px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-semibold">✅ Verify</button>` : ''}
+            </div>
+          </div>`).join('') :
+          `<div class="text-sm text-slate-400 italic py-4 text-center">Belum ada record RCA untuk equipment ini.</div>`;
+
+        container.innerHTML = `
+          <div class="space-y-4">
+            <div class="flex items-center justify-between flex-wrap gap-2">
+              <div>
+                <h4 class="font-bold text-slate-800 text-base">🔎 Root Cause Analysis</h4>
+                <p class="text-xs text-slate-500 mt-0.5">Pedoman PEP: trigger wajib bila failure &gt;1× dalam 12 bulan · Metode: 5-Whys</p>
+              </div>
+              <button onclick="openRcaForm('${eq.id}',null)" class="bg-safety hover:bg-safety/90 text-white px-4 py-2 rounded-lg text-sm font-semibold">+ Buat RCA</button>
+            </div>
+            ${triggerBanner}
+            <div class="space-y-3">${rcaRows}</div>
+          </div>`;
+      } catch(e) {
+        container.innerHTML = `<div class="bg-red-50 text-red-700 p-4 rounded-xl text-sm">Gagal memuat RCA: ${escapeHtml(e.message)}</div>`;
+      }
+    }
+    window.renderRcaTab = renderRcaTab;
+
+    function openRcaForm(eqId, rcaId) {
+      const isEdit = !!rcaId;
+      const modal = document.getElementById('modal-overlay');
+      if (!modal) return;
+      modal.innerHTML = `
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
+          <div class="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+            <h3 class="font-bold text-lg text-slate-900">${isEdit ? '✏ Edit RCA' : '+ Buat RCA Baru'}</h3>
+            <button onclick="closeModal()" class="text-slate-400 hover:text-slate-700 text-2xl leading-none">&times;</button>
+          </div>
+          <div class="p-6 space-y-4" id="rca-form-body">
+            <div class="text-slate-400 text-sm">Memuat…</div>
+          </div>
+        </div>`;
+      modal.classList.remove('hidden');
+      loadRcaForm(eqId, rcaId);
+    }
+    window.openRcaForm = openRcaForm;
+
+    async function loadRcaForm(eqId, rcaId) {
+      const body = document.getElementById('rca-form-body');
+      let r = { failure_date: new Date().toISOString().slice(0,10), status: 'Open' };
+      if (rcaId) {
+        const { data } = await state.supabase.from('rca_records').select('*').eq('id', rcaId).single();
+        if (data) r = data;
+      }
+      const fld = (lbl, name, type='text', val='', placeholder='') =>
+        `<div><label class="block text-xs font-semibold text-slate-600 mb-1">${lbl}</label>
+         <${type==='textarea'?'textarea':'input'} name="${name}" ${type!=='textarea'?`type="${type}"`:'rows="2"'}
+           class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-navy"
+           placeholder="${placeholder}" ${type!=='textarea'?`value="${escapeHtml(String(val||''))}"`:''}>
+         ${type==='textarea'?escapeHtml(String(val||''))+'</textarea>':''}</div>`;
+      body.innerHTML = `
+        <form id="rca-form" onsubmit="submitRcaForm(event,'${eqId}','${rcaId||''}')">
+          <div class="grid grid-cols-2 gap-3">
+            ${fld('Tanggal Failure *','failure_date','date', r.failure_date||'')}
+            <div><label class="block text-xs font-semibold text-slate-600 mb-1">Status</label>
+              <select name="status" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-navy">
+                ${['Open','In Progress','Verified'].map(s=>`<option ${r.status===s?'selected':''}>${s}</option>`).join('')}
+              </select></div>
+          </div>
+          ${fld('Deskripsi Failure *','failure_description','textarea', r.failure_description||'','Apa yang terjadi?')}
+          <div class="bg-slate-50 rounded-lg p-3 space-y-2">
+            <div class="text-xs font-bold text-slate-700 uppercase tracking-wider">5-Whys</div>
+            ${[1,2,3,4,5].map(i => fld(`Why ${i}`, `why_${i}`, 'textarea', r[`why_${i}`]||'', `Kenapa? (${i}/5)`)).join('')}
+          </div>
+          ${fld('Root Cause','root_cause','textarea', r.root_cause||'','Kesimpulan akar masalah')}
+          ${fld('Corrective Action','corrective_action','textarea', r.corrective_action||'','Tindakan perbaikan')}
+          <div class="grid grid-cols-2 gap-3">
+            ${fld('PIC Action','pic_action','text', r.pic_action||'')}
+            ${fld('Target Verifikasi','target_verification_date','date', r.target_verification_date||'')}
+          </div>
+          <div class="flex gap-2 justify-end pt-2">
+            <button type="button" onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 text-sm font-semibold">Batal</button>
+            <button type="submit" class="px-5 py-2 rounded-lg bg-safety text-white text-sm font-semibold hover:bg-safety/90">Simpan RCA</button>
+          </div>
+        </form>`;
+    }
+    window.loadRcaForm = loadRcaForm;
+
+    async function submitRcaForm(e, eqId, rcaId) {
+      e.preventDefault();
+      const f = e.target;
+      const g = (n) => f.elements[n]?.value?.trim() || null;
+      const payload = {
+        equipment_id: eqId, failure_date: g('failure_date'),
+        failure_description: g('failure_description'), status: g('status'),
+        why_1: g('why_1'), why_2: g('why_2'), why_3: g('why_3'), why_4: g('why_4'), why_5: g('why_5'),
+        root_cause: g('root_cause'), corrective_action: g('corrective_action'),
+        pic_action: g('pic_action'), target_verification_date: g('target_verification_date') || null,
+        created_by: state.user?.id,
+      };
+      if (!payload.failure_date || !payload.failure_description) { toast('Tanggal & deskripsi wajib diisi','error'); return; }
+      try {
+        if (rcaId) {
+          const { error } = await state.supabase.from('rca_records').update(payload).eq('id', rcaId);
+          if (error) throw error;
+        } else {
+          const { error } = await state.supabase.from('rca_records').insert(payload);
+          if (error) throw error;
+        }
+        closeModal();
+        toast('RCA disimpan', 'success');
+        const c = document.getElementById('detail-tab-content');
+        if (c && window.__currentEq) renderRcaTab(window.__currentEq, c);
+      } catch (err) { toast('Gagal: ' + err.message, 'error'); }
+    }
+    window.submitRcaForm = submitRcaForm;
+
+    async function verifyRca(rcaId, eqId) {
+      if (!confirm('Tandai RCA ini sebagai Verified?')) return;
+      const { error } = await state.supabase.from('rca_records')
+        .update({ status: 'Verified', actual_verification_date: new Date().toISOString().slice(0,10) })
+        .eq('id', rcaId);
+      if (error) { toast('Gagal: ' + error.message, 'error'); return; }
+      toast('RCA diverifikasi', 'success');
+      const c = document.getElementById('detail-tab-content');
+      if (c && window.__currentEq) renderRcaTab(window.__currentEq, c);
+    }
+    window.verifyRca = verifyRca;
+
+    // ============================================================
     // 10w. RELIABILITY CENTER — satu menu: Overview + Stress + FMEA + CSPP
     // ============================================================
     // RAM = payung 3 pilar: Reliability · Availability · Maintenance
@@ -11313,6 +11527,81 @@
     // Gejala = early warning; alat MASIH JALAN. Tidak masuk perhitungan availability/MTBF/MTTR.
     const GEJALA_CAT = 'gejala';
     let availPeriodDays = 365;
+
+    // ============================================================
+    // RISK ENGINE — Pedoman PEP A04-005/PEP23000/2023-S9
+    // ============================================================
+    const COF_DESC = [
+      '0 — Negligible: Tidak ada dampak operasi',
+      '1 — Minor: NPT < 4 jam, workaround tersedia',
+      '2 — Moderate: NPT 4–24 jam, partial shutdown',
+      '3 — Significant: Drilling halt penuh, NPT > 24 jam',
+      '4 — Major: Safety incident / total rig shutdown',
+      '5 — Catastrophic: Fatality / well blowout / major env damage',
+    ];
+
+    function hitungPoF(mtbfJam) {
+      // Pedoman: PoF dari MTBF (jam operasi antar kerusakan)
+      if (mtbfJam == null || mtbfJam <= 0) return { level: 'E', label: 'Almost Certain', color: 'red-700', bg: 'red-100' };
+      if (mtbfJam > 8000) return { level: 'A', label: 'Unlikely',       color: 'green-700',  bg: 'green-100' };
+      if (mtbfJam > 4000) return { level: 'B', label: 'Rare',           color: 'blue-700',   bg: 'blue-100' };
+      if (mtbfJam > 2000) return { level: 'C', label: 'Moderate',       color: 'yellow-700', bg: 'yellow-100' };
+      if (mtbfJam > 500)  return { level: 'D', label: 'Likely',         color: 'orange-700', bg: 'orange-100' };
+      return                     { level: 'E', label: 'Almost Certain', color: 'red-700',    bg: 'red-100' };
+    }
+
+    function hitungRiskLevel(pofLevel, cofScore) {
+      // Risk Matrix 5×6 sesuai pedoman (baris=PoF A–E, kolom=CoF 0–5)
+      const matrix = {
+        'A': [1, 1, 1, 1, 2, 2],
+        'B': [1, 1, 2, 2, 3, 3],
+        'C': [1, 2, 2, 3, 3, 4],
+        'D': [1, 2, 3, 3, 4, 4],
+        'E': [2, 3, 3, 4, 4, 4],
+      };
+      const cof = Math.max(0, Math.min(5, cofScore ?? 0));
+      const row = matrix[pofLevel] || matrix['E'];
+      const score = row[cof];
+      const map = {
+        1: { label: 'Low',     color: 'green-700',  bg: 'green-100',  criticality: 1 },
+        2: { label: 'Medium',  color: 'yellow-700', bg: 'yellow-100', criticality: 2 },
+        3: { label: 'High',    color: 'orange-700', bg: 'orange-100', criticality: 3 },
+        4: { label: 'Extreme', color: 'red-700',    bg: 'red-100',    criticality: 4 },
+      };
+      return { score, ...map[score] };
+    }
+
+    function riskBadge(risk) {
+      if (!risk) return '<span class="text-slate-300 text-xs">—</span>';
+      return `<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-${risk.bg} text-${risk.color}">${risk.label}</span>`;
+    }
+
+    function pofBadge(pof) {
+      if (!pof) return '<span class="text-slate-300 text-xs">—</span>';
+      return `<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-${pof.bg} text-${pof.color}">${pof.level} — ${pof.label}</span>`;
+    }
+
+    async function saveCofScore(eqId, cofVal) {
+      const cof = cofVal === '' || cofVal == null ? null : Number(cofVal);
+      const { error } = await state.supabase.from('equipment').update({ cof_score: cof }).eq('id', eqId);
+      if (error) throw error;
+    }
+
+    async function saveCofInline(eqId, cofVal) {
+      try {
+        await saveCofScore(eqId, cofVal);
+        toast('CoF score disimpan', 'success');
+        // Reload equipment data supaya Risk Level ikut update
+        const { data } = await state.supabase.from('equipment').select('*').eq('id', eqId).single();
+        if (data) {
+          state.currentEquipment = data;
+          renderDetailTab(data);
+        }
+      } catch (e) {
+        toast('Gagal simpan CoF: ' + e.message, 'error');
+      }
+    }
+    window.saveCofInline = saveCofInline;
     let availData = [];
     let availFilter = { unit_id: '', category: '' };
     function availFilteredData() {
@@ -11485,10 +11774,12 @@
       const periodDays = 365, now = Date.now(), start = now - periodDays * 86400000, periodH = periodDays * 24;
       const dAgg = {};
       dtAll.forEach(d => {
-        if (d.category === GEJALA_CAT) return; // gejala = alat masih jalan, skip
+        if (d.category === GEJALA_CAT) return;
         const k = d.equipment_id; if (!dAgg[k]) dAgg[k] = { fails: 0, downH: 0 };
-        if (FAILURE_CATS.includes(d.category)) dAgg[k].fails++;
-        const s = new Date(d.start_at).getTime(), e2 = d.end_at ? new Date(d.end_at).getTime() : now;
+        const s = new Date(d.start_at).getTime();
+        // Pedoman: hitung hanya failure yang START dalam periode (konsisten dengan downH)
+        if (FAILURE_CATS.includes(d.category) && s >= start) dAgg[k].fails++;
+        const e2 = d.end_at ? new Date(d.end_at).getTime() : now;
         dAgg[k].downH += Math.max(0, Math.min(e2, now) - Math.max(s, start)) / 3600000;
       });
       const VW = { replace: 0, watch: 1, keep: 2 };
@@ -11501,8 +11792,10 @@
           const lc = computeLifecycle(x);  // sama utk HM/KM (field semantik di-overload by pm_type)
           const d = dAgg[x.id] || { fails: 0, downH: 0 };
           const rh = Number(x.running_hours) || 0;
-          const mtbf = d.fails > 0 ? rh / d.fails : null;
-          const avail = Math.max(0, Math.min(100, (periodH - d.downH) / periodH * 100));
+          // Pedoman: MTBF = Total Operating Time / Jumlah Failure (dalam periode yang sama)
+          const eqOpH = Math.max(0, periodH - d.downH);
+          const mtbf = d.fails > 0 ? eqOpH / d.fails : null;
+          const avail = Math.max(0, Math.min(100, eqOpH / periodH * 100));
           const cycle = Number(x.toh_interval_hours) || Number(x.goh_interval_hours) || 0;
           let rel = 'na';
           if (d.fails === 0) rel = 'green';
@@ -11830,7 +12123,7 @@
       try {
         const [dt, eq, insp] = await Promise.all([
           state.supabase.from('downtime_events').select('*').order('start_at', { ascending: false }),
-          state.supabase.from('equipment').select('id, tag_number, nama_equipment, assigned_unit_id'),
+          state.supabase.from('equipment').select('id, tag_number, nama_equipment, assigned_unit_id, tanggal_masuk_operasi, cof_score, target_mtbf_hours'),
           state.supabase.from('v_inspection_downtime').select('*').order('mulai', { ascending: false }),
         ]);
         if (dt.error) throw dt.error; if (eq.error) throw eq.error;
@@ -11855,22 +12148,32 @@
         const clippedH = Math.max(0, Math.min(e, now) - Math.max(s, start)) / 3600000;
         agg[k].downH += clippedH;
         if (!TERENCANA_CATS.includes(d.category)) agg[k].downH_unplanned += clippedH;
-        // MTBF/MTTR hanya dari failure events (bukan PM / Tunggu Spare / dll)
         if (FAILURE_CATS.includes(d.category)) {
-          agg[k].failEvents++;
-          if (d.end_at) agg[k].failDur.push((new Date(d.end_at) - new Date(d.start_at)) / 3600000);
+          // Pedoman: hitung failure yang START dalam periode saja (konsisten dengan operating hours)
+          if (s >= start) agg[k].failEvents++;
+          // MTTR: sertakan open repair (end_at null → pakai now sementara)
+          const repairEnd = d.end_at ? new Date(d.end_at).getTime() : now;
+          const repairDur = (repairEnd - new Date(d.start_at).getTime()) / 3600000;
+          if (repairDur > 0) agg[k].failDur.push(repairDur);
         }
       });
-      // SEMUA equipment (filter rig) digabung dgn downtime → yang tak pernah down = 100%
+      // SEMUA equipment digabung dgn downtime — Pedoman: basis waktu per-alat dari tanggal_masuk_operasi
       const eqList = eqAll
         .filter(x => !availFilter.unit_id || String(x.assigned_unit_id) === String(availFilter.unit_id))
         .map(x => {
           const a = agg[x.id] || { events: 0, downH: 0, downH_unplanned: 0, failEvents: 0, failDur: [] };
-          return { id: x.id, tag: x.tag_number, name: x.nama_equipment, events: a.events, downH: a.downH,
-            failEvents: a.failEvents,
-            avail:   Math.max(0, Math.min(100, (periodH - a.downH)           / periodH * 100)),
-            availAi: Math.max(0, Math.min(100, (periodH - a.downH_unplanned) / periodH * 100)),
-            mttr: a.failDur.length ? a.failDur.reduce((p, q) => p + q, 0) / a.failDur.length : null };
+          // Pedoman: Total Time dihitung dari tanggal alat aktif (bukan tanggal filter)
+          const eqActiveMs = x.tanggal_masuk_operasi ? new Date(x.tanggal_masuk_operasi).getTime() : start;
+          const eqStart    = Math.max(start, eqActiveMs);
+          const eqPeriodH  = Math.max(1, (now - eqStart) / 3600000);
+          const mttr = a.failDur.length ? a.failDur.reduce((p, q) => p + q, 0) / a.failDur.length : null;
+          return {
+            id: x.id, tag: x.tag_number, name: x.nama_equipment, events: a.events,
+            downH: a.downH, failEvents: a.failEvents, eqPeriodH, mttr,
+            cofScore: x.cof_score, targetMtbf: x.target_mtbf_hours,
+            avail:   Math.max(0, Math.min(100, (eqPeriodH - a.downH)           / eqPeriodH * 100)),
+            availAi: Math.max(0, Math.min(100, (eqPeriodH - a.downH_unplanned) / eqPeriodH * 100)),
+          };
         }).sort((a, b) => a.avail - b.avail);
       const ongoing = data.filter(d => !d.end_at);
       const gejalaOngoing = gejalaAll.filter(d => !d.end_at);
@@ -11887,16 +12190,16 @@
         </tr>`;
       }).join('');
       // MTTR & MTBF hanya dari FAILURE_CATS (Breakdown + Troubleshoot)
-      const failData = data.filter(d => FAILURE_CATS.includes(d.category));
-      const allDur = failData.filter(d => d.end_at).map(d => (new Date(d.end_at) - new Date(d.start_at)) / 3600000);
+      // Pedoman: MTTR = Σ durasi repair / Σ failure (termasuk open repair)
+      const allDur = eqList.flatMap(o => {
+        const a = agg[o.id] || { failDur: [] };
+        return a.failDur;
+      });
+      const totalFail = eqList.reduce((s, o) => s + o.failEvents, 0);
       const mttr = allDur.length ? allDur.reduce((a, b) => a + b, 0) / allDur.length : null;
-      const totalFail = failData.length;
-      // MTBF baku: PER alat = jam operasi (uptime) ÷ jumlah failure events alat itu,
-      // lalu dirata-rata HANYA dari alat yang pernah failure (≥1 event).
-      const failedEq = eqList.filter(o => o.failEvents > 0);
-      const mtbf = failedEq.length
-        ? failedEq.reduce((sum, o) => sum + (periodH - o.downH) / o.failEvents, 0) / failedEq.length
-        : null;
+      // Pedoman: MTBF = Σ jam operasi semua alat / Σ failure semua alat (aggregate, bukan average)
+      const totalOpH = eqList.reduce((s, o) => s + Math.max(0, o.eqPeriodH - o.downH), 0);
+      const mtbf = totalFail > 0 ? totalOpH / totalFail : null;
       const fleetAvail = eqList.length ? eqList.reduce((a, b) => a + b.avail,   0) / eqList.length : 100;
       const fleetAi    = eqList.length ? eqList.reduce((a, b) => a + b.availAi, 0) / eqList.length : 100;
       const cat = {}; dataAll.forEach(d => { const c = DT_CAT[d.category] || 'Lainnya'; if (!cat[c]) cat[c] = { n: 0, h: 0 }; cat[c].n++; cat[c].h += Number(d.duration_hours) || 0; });
@@ -11915,10 +12218,12 @@
         const rAo   = re.length ? re.reduce((s, o) => s + o.avail,   0) / re.length : 100;
         const rAi   = re.length ? re.reduce((s, o) => s + o.availAi, 0) / re.length : 100;
         const rFail = re.reduce((s, o) => s + o.failEvents, 0);
-        const rMttrEq  = re.filter(o => o.mttr != null);
-        const rMttr    = rMttrEq.length ? rMttrEq.reduce((s, o) => s + o.mttr, 0) / rMttrEq.length : null;
-        const rFailedEq = re.filter(o => o.failEvents > 0);
-        const rMtbf    = rFailedEq.length ? rFailedEq.reduce((s, o) => s + (periodH - o.downH) / o.failEvents, 0) / rFailedEq.length : null;
+        // Pedoman: MTTR = Σ durasi repair / Σ failure (per rig)
+        const rAllDur  = re.flatMap(o => (agg[o.id] || { failDur: [] }).failDur);
+        const rMttr    = rAllDur.length ? rAllDur.reduce((a, b) => a + b, 0) / rAllDur.length : null;
+        // Pedoman: MTBF = Σ operating hours rig / Σ failures rig (aggregate)
+        const rOpH  = re.reduce((s, o) => s + Math.max(0, o.eqPeriodH - o.downH), 0);
+        const rMtbf = rFail > 0 ? rOpH / rFail : null;
         // Cek apakah ada inspeksi aktif di rig ini
         const inspActive = inspOngoing.filter(i => i.rig === r.name);
         const inspBadge = inspActive.length ? ` <span class="px-1.5 py-0.5 rounded text-[10px] bg-purple-100 text-purple-700 font-semibold">🔒 Inspeksi</span>` : '';
