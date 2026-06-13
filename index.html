@@ -6146,8 +6146,8 @@
                   <option value="">— Pilih CoF —</option>
                   ${[0,1,2,3,4,5].map(i => `<option value="${i}" ${cofVal===i?'selected':''}>${COF_DESC[i]}</option>`).join('')}
                 </select>
-                ${eq.parent_equipment_id && cofVal == null ? `<button onclick="inheritCofFromParent('${eq.id}','${eq.parent_equipment_id}')"
-                  class="px-2 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded text-xs font-semibold whitespace-nowrap">↑ Warisi dari Parent</button>` : ''}
+                ${eq.parent_equipment_id && (cofVal == null || eq.target_mtbf_hours == null) ? `<button onclick="inheritCofFromParent('${eq.id}','${eq.parent_equipment_id}')"
+                  class="px-2 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded text-xs font-semibold whitespace-nowrap">↑ Warisi CoF & MTBF dari Parent</button>` : ''}
               </div>
             </div>
 
@@ -11651,14 +11651,21 @@
     async function inheritCofFromParent(eqId, parentId) {
       try {
         const { data: parent, error } = await state.supabase
-          .from('equipment').select('nama_equipment, cof_score').eq('id', parentId).single();
+          .from('equipment').select('nama_equipment, cof_score, target_mtbf_hours').eq('id', parentId).single();
         if (error) throw error;
-        if (parent.cof_score == null) {
-          toast(`Parent "${parent.nama_equipment}" belum punya CoF — isi parent dulu`, 'error'); return;
+        if (parent.cof_score == null && parent.target_mtbf_hours == null) {
+          toast(`Parent "${parent.nama_equipment}" belum punya CoF & Target MTBF — isi parent dulu`, 'error'); return;
         }
-        if (!confirm(`Warisi CoF ${parent.cof_score} dari "${parent.nama_equipment}"?`)) return;
-        await saveCofScore(eqId, parent.cof_score);
-        toast(`CoF diwarisi dari ${parent.nama_equipment}: ${parent.cof_score}`, 'success');
+        const parts = [];
+        if (parent.cof_score != null) parts.push(`CoF ${parent.cof_score}`);
+        if (parent.target_mtbf_hours != null) parts.push(`Target MTBF ${parent.target_mtbf_hours} jam`);
+        if (!confirm(`Warisi ${parts.join(' & ')} dari "${parent.nama_equipment}"?`)) return;
+        const update = {};
+        if (parent.cof_score != null) update.cof_score = parent.cof_score;
+        if (parent.target_mtbf_hours != null) update.target_mtbf_hours = parent.target_mtbf_hours;
+        const { error: upErr } = await state.supabase.from('equipment').update(update).eq('id', eqId);
+        if (upErr) throw upErr;
+        toast(`Diwarisi dari ${parent.nama_equipment}: ${parts.join(' & ')}`, 'success');
         const { data } = await state.supabase.from('equipment').select('*').eq('id', eqId).single();
         if (data) { state.currentEquipment = data; renderDetailTab(data); }
       } catch (e) { toast('Gagal: ' + e.message, 'error'); }
