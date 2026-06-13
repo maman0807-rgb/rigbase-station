@@ -386,8 +386,9 @@
         { name: 'pic_mechanic',          label: 'PIC Mechanic',          type: 'text' },
         { name: 'goh_year',              label: 'GOH Year',              type: 'number', min: 1900, max: 2100 },
       ]},
-      { section: 'D2. PM, Overhaul & Kelayakan (basis jam atau km — ikut pm_type)', fields: [
-        { name: 'pm_type',             label: 'Basis Pemakaian',           type: 'select', options: ['hours','km','time'], placeholder: 'hours = jam (default engine/genset), km = kendaraan, time = kalender' },
+      { section: 'D2. PM, Overhaul & Kelayakan (basis jam / km / kalender / PLO)', fields: [
+        { name: 'pm_type',             label: 'Basis Pemakaian',           type: 'select', options: ['hours','km','time','plo'], placeholder: 'hours=jam, km=kendaraan, time=kalender, plo=Persetujuan Layak Operasi (3-4 thn)' },
+        { name: 'aktif_saat',          label: 'Aktif Saat',                type: 'select', options: ['kontinyu','rig_up_down','on_demand'], placeholder: 'kontinyu=selalu jalan, rig_up_down=hanya saat naikkan/turunkan menara, on_demand=sesuai kebutuhan' },
         { name: 'pm_interval_hours',   label: 'Interval PM (jam / km)',    type: 'number', min: 0, placeholder: 'mis. 250 jam atau 5000 km' },
         { name: 'toh_interval_hours',  label: 'Interval TOH (jam / km)',   type: 'number', min: 0, placeholder: 'mis. 12000' },
         { name: 'goh_interval_hours',  label: 'Interval GOH (jam / km)',   type: 'number', min: 0, placeholder: 'mis. 24000' },
@@ -874,7 +875,8 @@
         .from('equipment')
         .select('id, tag_number, nama_equipment, assigned_unit_id, status_operasi, running_hours, last_pm_hours, pm_interval_hours, pm_type')
         .gt('running_hours', 0)
-        .neq('pm_type', 'km');  // exclude unit KM dari analisa PM-jam
+        .neq('pm_type', 'km')
+        .neq('pm_type', 'plo');  // exclude PLO dari analisa PM-jam
       if (error) throw error;
       return (data || [])
         .map(e => {
@@ -908,6 +910,29 @@
         .slice(0, 15);
     }
 
+    // PM berbasis PLO: Persetujuan Layak Operasi — min 3 thn (warning), maks 4 thn (overdue).
+    // Equipment aktif saat rig_up_down (Telescope, Raising Ram) — tidak punya running_hours.
+    async function fetchPMDueByPLO() {
+      const { data, error } = await state.supabase
+        .from('equipment')
+        .select('id, tag_number, nama_equipment, assigned_unit_id, status_operasi, last_pm_date, aktif_saat, pm_type')
+        .eq('pm_type', 'plo');
+      if (error) throw error;
+      const today = new Date();
+      return (data || []).map(e => {
+        if (!e.last_pm_date) return { ...e, _ploStatus: 'unknown', _sisaHari: null, _nextMin: null, _nextMax: null };
+        const last   = new Date(e.last_pm_date);
+        const minDue = new Date(last); minDue.setFullYear(minDue.getFullYear() + 3);
+        const maxDue = new Date(last); maxDue.setFullYear(maxDue.getFullYear() + 4);
+        const sisaHari = Math.floor((maxDue - today) / 86400000);
+        const status = today > maxDue ? 'overdue'
+                     : today >= minDue ? 'warning'
+                     : (minDue - today) / 86400000 <= 90 ? 'approaching'
+                     : 'ok';
+        return { ...e, _ploStatus: status, _sisaHari: sisaHari, _nextMin: minDue, _nextMax: maxDue };
+      }).filter(e => e._ploStatus !== 'ok').sort((a, b) => (a._sisaHari ?? 9999) - (b._sisaHari ?? 9999));
+    }
+
     // Posisi siklus hidup engine berbasis JAM (TOH/GOH/umur ekonomis). Null jika belum ada HM.
     // Verdict FASE 1 = berbasis UMUR saja (keandalan/MTBF menyusul di fase 2).
     function computeLifecycle(eq) {
@@ -936,7 +961,8 @@
         .from('equipment')
         .select('id, tag_number, nama_equipment, assigned_unit_id, running_hours, toh_interval_hours, goh_interval_hours, economic_life_hours, last_toh_hours, last_goh_hours, pm_type')
         .gt('running_hours', 0)
-        .neq('pm_type', 'km');  // exclude unit KM dari analisa overhaul-jam
+        .neq('pm_type', 'km')
+        .neq('pm_type', 'plo');  // exclude PLO dari analisa overhaul-jam
       if (error) throw error;
       const out = [];
       (data || []).forEach(e => {
@@ -6226,8 +6252,21 @@
         const lcVerdict = lc ? (lc.verdict === 'replace' ? '🔴 Kandidat ganti (umur)' : lc.verdict === 'watch' ? '🟡 Pantau' : '🟢 Sehat') : null;
         const u = (eq.pm_type === 'km') ? 'km' : 'jam';
         const U = u.toUpperCase();
+        // PLO status (pm_type='plo'): warning ≥3 thn, overdue ≥4 thn
+        let ploInfo = null;
+        if (eq.pm_type === 'plo' && eq.last_pm_date) {
+          const last   = new Date(eq.last_pm_date);
+          const minDue = new Date(last); minDue.setFullYear(minDue.getFullYear() + 3);
+          const maxDue = new Date(last); maxDue.setFullYear(maxDue.getFullYear() + 4);
+          const today  = new Date();
+          const sisaHari = Math.floor((maxDue - today) / 86400000);
+          const status = today > maxDue ? '<span class="text-red-700 font-bold">⚠️ OVERDUE — lewat batas 4 tahun</span>'
+                       : today >= minDue ? `<span class="text-yellow-700 font-bold">⚠️ Masuk jendela PLO (sisa ${sisaHari} hari ke batas max)</span>`
+                       : `<span class="text-green-700">✅ OK (sisa ${Math.floor((minDue - today) / 86400000)} hari ke batas min)</span>`;
+          ploInfo = { minDue, maxDue, sisaHari, status };
+        }
         // Sisa ke PM (hitung dari counter - last_pm_hours vs interval)
-        const sisaPM = (eq.running_hours != null && eq.pm_interval_hours)
+        const sisaPM = (eq.pm_type !== 'plo' && eq.pm_type !== 'time' && eq.running_hours != null && eq.pm_interval_hours)
           ? (() => { const rem = Number(eq.pm_interval_hours) - (Number(eq.running_hours || 0) - Number(eq.last_pm_hours || 0));
                      return rem < 0 ? `<span class="text-red-700 font-bold">⚠️ lewat ${fmtNumber(-rem, ' ' + u)}</span>` : fmtNumber(rem, ' ' + u); })()
           : null;
@@ -6237,8 +6276,12 @@
             ['Last Type', eq.last_maintenance_type ? escapeHtml(eq.last_maintenance_type) : null],
             ['Next Maintenance', fmtDate(eq.next_maintenance_date)],
             ['Tgl PM Terakhir', eq.last_pm_date ? fmtDate(eq.last_pm_date) : null],
-            [`Interval PM (${u})`, eq.pm_interval_hours != null ? fmtNumber(eq.pm_interval_hours, ' ' + u) : null],
-            [`Sisa ${U} ke PM`, sisaPM],
+            [`Interval PM (${u})`, eq.pm_type === 'plo' ? 'PLO — min 3 thn, maks 4 thn' : (eq.pm_interval_hours != null ? fmtNumber(eq.pm_interval_hours, ' ' + u) : null)],
+            [`Sisa ${U} ke PM`, eq.pm_type === 'plo' ? null : sisaPM],
+            ['PLO Jadwal Min', ploInfo ? fmtDate(ploInfo.minDue.toISOString().slice(0,10)) : null],
+            ['PLO Batas Maks', ploInfo ? fmtDate(ploInfo.maxDue.toISOString().slice(0,10)) : null],
+            ['Status PLO', ploInfo ? ploInfo.status : null],
+            ['Aktif Saat', eq.aktif_saat === 'rig_up_down' ? '🏗️ Rig Up / Rig Down Menara' : eq.aktif_saat === 'on_demand' ? 'On Demand' : eq.aktif_saat === 'kontinyu' ? 'Kontinyu' : null],
             ['Interval', eq.maintenance_interval ? escapeHtml(eq.maintenance_interval) : null],
             ['PIC Mechanic', eq.pic_mechanic ? escapeHtml(eq.pic_mechanic) : null],
             ['GOH Year', eq.goh_year],
