@@ -10803,8 +10803,25 @@
         }));
         const { error: e2 } = await state.supabase.from('mobilization_equipment').insert(eqRows);
         if (e2) throw e2;
+
+        // Auto-update running_hours carrier (pm_type='km') dari JMP distance — hanya untuk entry BARU
+        let kmUpdated = 0;
+        if (!editId && payload.total_distance > 0) {
+          const eqIds = eqRows.map(r => r.equipment_id);
+          const { data: kmEqs } = await state.supabase
+            .from('equipment').select('id, running_hours').in('id', eqIds).eq('pm_type', 'km');
+          if (kmEqs && kmEqs.length > 0) {
+            for (const eq of kmEqs) {
+              const newKm = (Number(eq.running_hours) || 0) + Number(payload.total_distance);
+              await state.supabase.from('equipment').update({ running_hours: newKm }).eq('id', eq.id);
+            }
+            kmUpdated = kmEqs.length;
+          }
+        }
+
         window.__jmpFile = null; window.__jmpFileName = null; window.__mobEditId = null; window.__mobEditRec = null; window.__mobEditEqIds = null;
-        toast(`Tersimpan. Skor ${sc.total} (${STRESS_CAT_META[sc.category].label}) → ${eqRows.length} equipment.`, 'success');
+        const kmMsg = kmUpdated > 0 ? ` · +${payload.total_distance} km → ${kmUpdated} carrier` : '';
+        toast(`Tersimpan. Skor ${sc.total} (${STRESS_CAT_META[sc.category].label}) → ${eqRows.length} equipment${kmMsg}.`, 'success');
         closeModal();
         state.ramTab = 'reliability'; state.reliabilityTab = 'stress'; navigate('reliability');
       } catch (e) {
