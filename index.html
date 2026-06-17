@@ -2043,7 +2043,7 @@
                       </div>
                       <div class="flex flex-wrap items-center gap-1.5 mt-1.5">
                         ${urgBadge}
-                        <button onclick="showPMPartsModal('${e.id}', ${e._actualInterval}, ${Math.round(e._remaining)})" class="inline-flex items-center gap-1 text-xs bg-navy text-white px-2.5 py-0.5 rounded-full font-bold shadow-sm hover:opacity-80 transition">📦 Siapkan Part PM — ${e._actualInterval} HM</button>
+                        <button onclick="showPMPartsModal('${e.id}', ${e._actualInterval}, ${Math.round(e._remaining)}, '${escapeAttr(e.tag_number)}', '${escapeAttr(e.nama_equipment)}')" class="inline-flex items-center gap-1 text-xs bg-navy text-white px-2.5 py-0.5 rounded-full font-bold shadow-sm hover:opacity-80 transition">📦 Siapkan Part PM — ${e._actualInterval} HM</button>
                       </div>
                     </div>
                     <div class="text-right flex-shrink-0 ml-3">
@@ -2592,10 +2592,7 @@
             <div class="flex-1 min-w-48">
               <label class="block text-xs font-semibold text-slate-600 mb-1">Equipment</label>
               <select id="pmp-sel-eq" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-navy">
-                <option value="">-- Pilih Equipment --</option>
-                ${(state.equipmentList || []).sort((a,b)=>(a.tag_number||'').localeCompare(b.tag_number||'')).map(eq =>
-                  `<option value="${eq.id}">${escapeHtml(eq.tag_number)} — ${escapeHtml(eq.nama_equipment)}</option>`
-                ).join('')}
+                <option value="">Memuat…</option>
               </select>
             </div>
             <div>
@@ -2650,8 +2647,26 @@
           </div>
         `;
 
-        // load materials & summary async
+        // load equipment + materials + summary async
         (async () => {
+          // Equipment — semua, tanpa filter
+          try {
+            const { data: eqData } = await state.supabase
+              .from('equipment')
+              .select('id, tag_number, nama_equipment')
+              .order('tag_number');
+            const sel = document.getElementById('pmp-sel-eq');
+            if (sel) {
+              sel.innerHTML = '<option value="">-- Pilih Equipment --</option>' +
+                (eqData || []).map(eq =>
+                  `<option value="${eq.id}">${escapeHtml(eq.tag_number)} — ${escapeHtml(eq.nama_equipment)}</option>`
+                ).join('');
+            }
+          } catch(e) {
+            const sel = document.getElementById('pmp-sel-eq');
+            if (sel) sel.innerHTML = '<option value="">Gagal memuat equipment</option>';
+          }
+          // Materials
           try {
             const all = [];
             for (let f = 0; ; f += 1000) {
@@ -2673,10 +2688,10 @@
     // ============================================================
     // PM PARTS CHECKLIST
     // ============================================================
-    async function showPMPartsModal(equipmentId, intervalHm, sisaHm) {
+    async function showPMPartsModal(equipmentId, intervalHm, sisaHm, tagNumOverride, eqNameOverride) {
       const eq = (state.equipmentList || []).find(e => e.id === equipmentId);
-      const tagNum = eq?.tag_number || '—';
-      const eqName = eq?.nama_equipment || '';
+      const tagNum = tagNumOverride || eq?.tag_number || '—';
+      const eqName = eqNameOverride || eq?.nama_equipment || '';
       const remTxt = sisaHm <= 0
         ? `<strong class="text-red-600">⛔ LEWAT ${Math.abs(sisaHm)} HM</strong>`
         : `<strong class="${sisaHm <= 50 ? 'text-amber-600' : 'text-yellow-600'}">🟡 Sisa ${sisaHm} HM</strong>`;
