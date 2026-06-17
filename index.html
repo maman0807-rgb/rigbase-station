@@ -7448,6 +7448,9 @@
                     ${e.kind === 'pinjam' && e.status === 'active' ? '<span class="px-2 py-0.5 bg-amber-100 text-amber-800 text-xs font-semibold rounded">aktif</span>' : ''}
                     ${e.kind === 'down' && e.status === 'down' ? '<span class="px-2 py-0.5 bg-red-100 text-red-800 text-xs font-semibold rounded">masih down</span>' : ''}
                     ${e.kind === 'gejala' && e.status === 'gejala' ? '<span class="px-2 py-0.5 bg-amber-100 text-amber-800 text-xs font-semibold rounded">diselidiki</span>' : ''}
+                    ${(e.kind === 'down' || e.kind === 'gejala') && e.eventId && state.profile?.role === 'admin'
+                      ? `<button onclick="confirmDeleteDowntime('${e.eventId}')" class="ml-auto text-xs text-red-400 hover:text-red-600 hover:bg-red-50 px-2 py-0.5 rounded border border-red-200 transition">🗑 Hapus</button>`
+                      : ''}
                   </div>
                   ${e.detail ? `<div class="text-xs text-slate-600 leading-relaxed">${e.detailIsHtml ? e.detail : escapeHtml(e.detail)}</div>` : ''}
                   ${(e.photos && e.photos.length) ? `<div class="mt-2 flex flex-wrap gap-2">${e.photos.map(p => {
@@ -7531,6 +7534,28 @@
       openSignDialog({ title: `Riwayat Equipment — ${eq.tag_number || ''}`, type: 'HIST', summary, chart, intro, table, kesimpulan });
     }
     window.cetakHistoryReport = cetakHistoryReport;
+
+    async function confirmDeleteDowntime(eventId) {
+      const ok = await confirmDialog({
+        title: 'Hapus Event Downtime?',
+        message: 'Seluruh data event ini (termasuk foto & catatan tindakan) akan dihapus permanen. Tindakan ini tidak bisa dibatalkan.',
+        confirmText: 'Ya, Hapus',
+        danger: true,
+      });
+      if (!ok) return;
+      try {
+        await state.supabase.from('downtime_photos').delete().eq('downtime_event_id', eventId);
+        const { error } = await state.supabase.from('downtime_events').delete().eq('id', eventId);
+        if (error) throw error;
+        toast('Event downtime dihapus', 'success');
+        const eq = window.__hist?.eq;
+        const c  = window.__histHost;
+        if (eq && c) { c.innerHTML = '<div class="text-slate-400 text-sm">Memuat…</div>'; renderHistoryTab(eq, c); }
+      } catch(err) {
+        toast('Gagal hapus: ' + err.message, 'error');
+      }
+    }
+    window.confirmDeleteDowntime = confirmDeleteDowntime;
 
     // ============================================================
     // 9f. EQUIPMENT FORM (Add / Edit)
