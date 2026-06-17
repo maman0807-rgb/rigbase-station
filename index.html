@@ -339,6 +339,7 @@
       { id: 'recurring',   label: 'Temuan Berulang', icon: '🔁', group: 'Inspeksi', srOnly: true },
       { id: 'reliability', label: 'RAM',          icon: '📈', group: 'Analisa',      srOnly: true, bottomNav: true },
       { id: 'calendar',    label: 'Kalender',    icon: '📅', group: 'Analisa',      srOnly: true },
+      { id: 'pm-parts',    label: 'PM Parts',     icon: '📦', group: 'Pemeliharaan', adminOnly: true },
       { id: 'categories',  label: 'Kategori',     icon: '🏷️', group: 'Administrasi', adminOnly: true },
       { id: 'users',       label: 'User',         icon: '👥', group: 'Administrasi', adminOnly: true },
       { id: 'activity',    label: 'Activity Log', icon: '📜', group: 'Administrasi', adminOnly: true },
@@ -880,10 +881,15 @@
       if (error) throw error;
       return (data || [])
         .map(e => {
-          const interval  = Number(e.pm_interval_hours) || 250;
-          const used      = Number(e.running_hours || 0) - Number(e.last_pm_hours || 0);
-          const remaining = interval - used;
-          return { ...e, _interval: interval, _used: used, _remaining: remaining };
+          const interval     = Number(e.pm_interval_hours) || 250;
+          const used         = Number(e.running_hours || 0) - Number(e.last_pm_hours || 0);
+          const remaining    = interval - used;
+          const nextPmAt     = Number(e.last_pm_hours || 0) + interval;
+          const actualInterval =
+            nextPmAt % 2000 === 0 ? 2000 :
+            nextPmAt % 1000 === 0 ? 1000 :
+            nextPmAt % 500  === 0 ? 500  : 250;
+          return { ...e, _interval: interval, _actualInterval: actualInterval, _used: used, _remaining: remaining };
         })
         .filter(e => e._remaining <= thresholdHours)
         .sort((a, b) => a._remaining - b._remaining)
@@ -2024,22 +2030,27 @@
                                  : rem <= 50  ? `⚠️ Sisa ${Math.round(rem)} HM`
                                  : `🟡 Sisa ${Math.round(rem)} HM`;
                   const txtCls   = rem <= 0 ? 'text-red-700 font-bold' : rem <= 50 ? 'text-amber-700 font-semibold' : 'text-yellow-700 font-semibold';
-                  const alertBadge = rem <= 0
-                    ? `<span class="inline-flex items-center gap-1 text-sm bg-red-600 text-white px-3 py-1 rounded-full font-extrabold mt-1 tracking-wide shadow">🚨 LAKUKAN PM SEKARANG</span>`
+                  const urgBadge = rem <= 0
+                    ? `<span class="inline-flex items-center gap-1 text-xs bg-red-600 text-white px-2.5 py-0.5 rounded-full font-extrabold tracking-wide shadow">🚨 LAKUKAN PM SEKARANG</span>`
                     : rem <= 50
-                    ? `<span class="inline-flex items-center gap-1 text-sm bg-amber-500 text-white px-3 py-1 rounded-full font-extrabold mt-1 tracking-wide shadow">⚠️ JADWALKAN PM</span>`
-                    : `<span class="inline-flex items-center gap-1 text-sm bg-yellow-500 text-white px-3 py-1 rounded-full font-extrabold mt-1 tracking-wide shadow">📦 SIAPKAN PART PM</span>`;
-                  return `<button onclick="setEquipmentView('detail','${e.id}'); navigate('equipment')" class="w-full text-left flex items-center justify-between border ${borderCls} rounded-lg px-3 py-2 hover:opacity-80 transition">
-                    <div class="min-w-0">
-                      <div class="font-semibold text-navy text-sm truncate">${escapeHtml(e.tag_number)}</div>
-                      <div class="text-xs text-slate-500 truncate">${escapeHtml(e.nama_equipment)} • ${escapeHtml(getParentUnitName(e.assigned_unit_id))}</div>
-                      ${alertBadge}
+                    ? `<span class="inline-flex items-center gap-1 text-xs bg-amber-500 text-white px-2.5 py-0.5 rounded-full font-extrabold tracking-wide shadow">⚠️ JADWALKAN PM</span>`
+                    : '';
+                  return `<div class="w-full text-left flex items-center justify-between border ${borderCls} rounded-lg px-3 py-2">
+                    <div class="min-w-0 flex-1">
+                      <div class="cursor-pointer hover:opacity-75 transition" onclick="setEquipmentView('detail','${e.id}'); navigate('equipment')">
+                        <div class="font-semibold text-navy text-sm truncate">${escapeHtml(e.tag_number)}</div>
+                        <div class="text-xs text-slate-500 truncate">${escapeHtml(e.nama_equipment)} • ${escapeHtml(getParentUnitName(e.assigned_unit_id))}</div>
+                      </div>
+                      <div class="flex flex-wrap items-center gap-1.5 mt-1.5">
+                        ${urgBadge}
+                        <button onclick="showPMPartsModal('${e.id}', ${e._actualInterval}, ${Math.round(e._remaining)})" class="inline-flex items-center gap-1 text-xs bg-navy text-white px-2.5 py-0.5 rounded-full font-bold shadow-sm hover:opacity-80 transition">📦 Siapkan Part PM — ${e._actualInterval} HM</button>
+                      </div>
                     </div>
                     <div class="text-right flex-shrink-0 ml-3">
                       <div class="${txtCls} text-sm">${label}</div>
-                      <div class="text-xs text-slate-400">Interval ${e._interval} HM</div>
+                      <div class="text-xs text-slate-400">Next PM: ${e._actualInterval} HM</div>
                     </div>
-                  </button>`;
+                  </div>`;
                 }).join('');
             // SKPI
             $('#dash-skpi').innerHTML = skpi.length === 0
@@ -2563,7 +2574,454 @@
         setTimeout(() => renderPayrollTab(), 0);
         return div;
       },
+
+      // -----------------------------------------------------
+      // PM PARTS TEMPLATE ADMIN
+      // -----------------------------------------------------
+      'pm-parts': function() {
+        const div = document.createElement('div');
+        div.className = 'page space-y-5';
+        div.innerHTML = `
+          <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+            <h3 class="text-lg font-bold text-slate-900 mb-1">📦 PM Parts Template</h3>
+            <p class="text-sm text-slate-500">Kelola daftar spare parts per equipment per interval PM. Data stok diambil real-time dari Stok Gudang.</p>
+          </div>
+
+          <!-- Filter bar -->
+          <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex flex-wrap gap-3 items-end">
+            <div class="flex-1 min-w-48">
+              <label class="block text-xs font-semibold text-slate-600 mb-1">Equipment</label>
+              <select id="pmp-sel-eq" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-navy">
+                <option value="">-- Pilih Equipment --</option>
+                ${(state.equipmentList || []).sort((a,b)=>(a.tag_number||'').localeCompare(b.tag_number||'')).map(eq =>
+                  `<option value="${eq.id}">${escapeHtml(eq.tag_number)} — ${escapeHtml(eq.nama_equipment)}</option>`
+                ).join('')}
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-600 mb-1">Interval PM (HM)</label>
+              <select id="pmp-sel-interval" class="border border-slate-200 rounded-lg px-3 py-2 text-sm w-32 focus:outline-none focus:ring-2 focus:ring-navy">
+                <option value="250">250 HM</option>
+                <option value="500">500 HM</option>
+                <option value="1000">1000 HM</option>
+                <option value="2000">2000 HM</option>
+              </select>
+            </div>
+            <button onclick="pmpLoad()" class="px-5 py-2 bg-navy text-white rounded-lg text-sm font-semibold hover:opacity-80 transition">Load Parts</button>
+          </div>
+
+          <!-- Parts table -->
+          <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+            <div class="flex justify-between items-center mb-3">
+              <div>
+                <h4 class="font-bold text-slate-800" id="pmp-title">Daftar Parts</h4>
+                <p class="text-xs text-slate-400" id="pmp-subtitle">Pilih equipment dan interval lalu klik Load Parts</p>
+              </div>
+              <button onclick="pmpAddRow()" id="pmp-btn-add" class="hidden px-3 py-1.5 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 transition">+ Tambah Part</button>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="w-full text-sm border-collapse" id="pmp-table">
+                <thead>
+                  <tr class="bg-slate-50 text-xs text-slate-600">
+                    <th class="text-left p-2 font-semibold">Nama Part</th>
+                    <th class="text-left p-2 font-semibold">Part Number</th>
+                    <th class="text-left p-2 font-semibold">Link Stok Gudang</th>
+                    <th class="text-center p-2 font-semibold w-20">Qty</th>
+                    <th class="text-center p-2 font-semibold w-24">Unit</th>
+                    <th class="text-center p-2 font-semibold w-16">Wajib</th>
+                    <th class="text-center p-2 font-semibold w-12">Hapus</th>
+                  </tr>
+                </thead>
+                <tbody id="pmp-tbody">
+                  <tr><td colspan="7" class="text-center py-8 text-slate-400 text-sm">Pilih equipment dan interval untuk memuat parts</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="mt-4 flex gap-3 items-center">
+              <button onclick="pmpSave()" id="pmp-btn-save" class="hidden px-6 py-2 bg-navy text-white rounded-lg text-sm font-semibold hover:opacity-80 transition">💾 Simpan Semua</button>
+              <span id="pmp-status" class="text-sm text-slate-500"></span>
+            </div>
+          </div>
+
+          <!-- Summary -->
+          <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+            <h4 class="font-bold text-slate-800 mb-3">📋 Semua Template Terdaftar</h4>
+            <div id="pmp-summary" class="text-sm text-slate-400">Memuat…</div>
+          </div>
+        `;
+
+        // load materials & summary async
+        (async () => {
+          try {
+            const all = [];
+            for (let f = 0; ; f += 1000) {
+              const { data, error } = await state.supabase.from('materials')
+                .select('id, part_number, description, satuan, stok').range(f, f + 999);
+              if (error) break;
+              all.push(...(data || []));
+              if (!data || data.length < 1000) break;
+            }
+            window._pmpMaterials = all;
+          } catch(e) { window._pmpMaterials = []; }
+          pmpLoadSummary();
+        })();
+
+        return div;
+      },
     };
+
+    // ============================================================
+    // PM PARTS CHECKLIST
+    // ============================================================
+    async function showPMPartsModal(equipmentId, intervalHm, sisaHm) {
+      const eq = (state.equipmentList || []).find(e => e.id === equipmentId);
+      const tagNum = eq?.tag_number || '—';
+      const eqName = eq?.nama_equipment || '';
+      const remTxt = sisaHm <= 0
+        ? `<strong class="text-red-600">⛔ LEWAT ${Math.abs(sisaHm)} HM</strong>`
+        : `<strong class="${sisaHm <= 50 ? 'text-amber-600' : 'text-yellow-600'}">🟡 Sisa ${sisaHm} HM</strong>`;
+
+      openModal({
+        title: `📦 Siapkan Part PM — ${escapeHtml(tagNum)}`,
+        maxWidth: 'max-w-2xl',
+        body: `
+          <p class="text-sm text-slate-500 -mt-1 mb-3">${escapeHtml(eqName)}${eqName ? ' &nbsp;|&nbsp; ' : ''}Interval ${intervalHm} HM &nbsp;|&nbsp; ${remTxt}</p>
+          <div id="pm-parts-content" class="text-sm text-slate-400 py-8 text-center">Memuat daftar parts…</div>
+        `,
+        footer: `
+          <button onclick="exportPMPartsPDF()" id="pm-pdf-btn" class="hidden px-4 py-2 rounded-lg bg-navy text-white text-sm font-semibold hover:opacity-80">📤 Export PDF</button>
+          <button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Tutup</button>
+        `,
+      });
+
+      try {
+        const { data: parts, error } = await state.supabase
+          .from('pm_parts_template')
+          .select('*, materials(id, description, satuan, stok)')
+          .eq('equipment_id', equipmentId)
+          .eq('interval_hm', intervalHm)
+          .order('is_mandatory', { ascending: false })
+          .order('part_name');
+
+        if (error) throw error;
+
+        const content = document.getElementById('pm-parts-content');
+        if (!content) return;
+
+        if (!parts || parts.length === 0) {
+          content.innerHTML = `
+            <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800">
+              <p class="font-semibold mb-1">⚠️ Belum ada template parts untuk PM ${intervalHm} HM equipment ini.</p>
+              <p>Buka menu <button onclick="closeModal(); navigate('pm-parts')" class="underline text-navy font-medium">📦 PM Parts →</button> untuk mengisi daftar parts yang diperlukan.</p>
+            </div>`;
+          return;
+        }
+
+        let kurangCount = 0;
+        const tbody = parts.map(p => {
+          const stok = p.materials?.stok ?? null;
+          const cukup = stok !== null && stok >= p.qty_required;
+          if (!cukup && p.is_mandatory) kurangCount++;
+          const stokTxt = stok === null
+            ? '<span class="text-slate-400 italic">tidak terhubung ke gudang</span>'
+            : `${stok} ${escapeHtml(p.materials?.satuan || p.unit)}`;
+          const statusIcon = stok === null ? '' : cukup ? '✅' : '⚠️';
+          const rowCls = !cukup && stok !== null ? 'bg-red-50' : '';
+          const optBadge = p.is_mandatory ? '' : '<span class="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded mr-1">opsional</span>';
+          return `<tr class="${rowCls}">
+            <td class="py-2 px-3">${optBadge}${escapeHtml(p.part_name)}${p.part_number ? `<div class="text-[10px] text-slate-400 mt-0.5">${escapeHtml(p.part_number)}</div>` : ''}</td>
+            <td class="py-2 px-3 text-center font-mono text-xs">${p.qty_required} ${escapeHtml(p.unit)}</td>
+            <td class="py-2 px-3 text-sm">${statusIcon} ${stokTxt}</td>
+          </tr>`;
+        }).join('');
+
+        const summaryHtml = kurangCount > 0
+          ? `<div class="mt-3 bg-amber-50 border border-amber-300 rounded-lg px-4 py-2.5 text-sm text-amber-800 font-medium">⚠️ ${kurangCount} item stok wajib <strong>kurang</strong> — segera proses PO sebelum PM!</div>`
+          : `<div class="mt-3 bg-green-50 border border-green-300 rounded-lg px-4 py-2.5 text-sm text-green-800 font-medium">✅ Semua stok wajib tersedia — siap untuk PM!</div>`;
+
+        content.innerHTML = `
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm border-collapse">
+              <thead>
+                <tr class="bg-navy text-white text-xs">
+                  <th class="py-2 px-3 text-left font-semibold rounded-tl-lg">Nama Part</th>
+                  <th class="py-2 px-3 text-center font-semibold">Qty Dibutuhkan</th>
+                  <th class="py-2 px-3 text-left font-semibold rounded-tr-lg">Stok Gudang</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100">${tbody}</tbody>
+            </table>
+          </div>
+          ${summaryHtml}`;
+
+        window._pmPartsData = { tagNum, eqName, intervalHm, sisaHm, parts };
+        document.getElementById('pm-pdf-btn')?.classList.remove('hidden');
+
+      } catch (err) {
+        const c = document.getElementById('pm-parts-content');
+        if (c) c.innerHTML = `<div class="text-red-600 text-sm py-4 text-center">❌ Gagal memuat: ${escapeHtml(err.message)}</div>`;
+      }
+    }
+    window.showPMPartsModal = showPMPartsModal;
+
+    function exportPMPartsPDF() {
+      const d = window._pmPartsData;
+      if (!d || !d.parts) { toast('Data belum tersedia', 'error'); return; }
+
+      const rows = d.parts.map(p => {
+        const stok = p.materials?.stok ?? null;
+        const cukup = stok !== null && stok >= p.qty_required;
+        const statusTxt = stok === null
+          ? 'Tidak terhubung ke gudang'
+          : cukup
+            ? `✅ Stok: ${stok} ${p.materials?.satuan || p.unit}`
+            : `⚠️ Stok: ${stok} ${p.materials?.satuan || p.unit} (KURANG)`;
+        return `<tr>
+          <td>${p.is_mandatory ? '' : '[Opsional] '}${p.part_name}${p.part_number ? ` (${p.part_number})` : ''}</td>
+          <td style="text-align:center">${p.qty_required} ${p.unit}</td>
+          <td>${statusTxt}</td>
+        </tr>`;
+      }).join('');
+
+      const now = new Date();
+      const html = `<!DOCTYPE html><html><head>
+        <meta charset="UTF-8">
+        <title>PM Parts List — ${d.tagNum}</title>
+        <style>
+          body{font-family:Arial,sans-serif;font-size:12px;padding:24px;color:#222}
+          h2{color:#1E3A8A;margin-bottom:4px}
+          .sub{color:#666;font-size:11px;margin-bottom:16px}
+          table{width:100%;border-collapse:collapse;margin-top:8px}
+          th{background:#1E3A8A;color:#fff;padding:8px 10px;text-align:left;font-size:11px}
+          td{padding:6px 10px;border-bottom:1px solid #e5e7eb;font-size:11px}
+          tr:nth-child(even) td{background:#f9fafb}
+          .footer{margin-top:24px;font-size:9px;color:#aaa;border-top:1px solid #eee;padding-top:8px}
+        </style>
+      </head><body>
+        <h2>📋 PM Parts List — ${d.tagNum}</h2>
+        <div class="sub">${d.eqName ? d.eqName + ' &nbsp;|&nbsp; ' : ''}Interval: <strong>${d.intervalHm} HM</strong> &nbsp;|&nbsp; Tanggal: <strong>${now.toLocaleDateString('id-ID')}</strong></div>
+        <table>
+          <thead><tr><th>Nama Part</th><th>Qty Dibutuhkan</th><th>Status Stok Gudang</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+        <div class="footer">Ref: Pedoman Pemeliharaan PT Pertamina EP No. A04-005/PEP23000/2023-S9 — Bab VI Suku Cadang<br>Dicetak dari eRAMHoist — RAM Field Prabumulih — ${now.toLocaleString('id-ID')}</div>
+      </body></html>`;
+
+      const win = window.open('', '_blank');
+      if (!win) { toast('Pop-up diblokir browser. Izinkan pop-up untuk Export PDF.', 'error'); return; }
+      win.document.write(html);
+      win.document.close();
+      win.focus();
+      setTimeout(() => win.print(), 500);
+    }
+    window.exportPMPartsPDF = exportPMPartsPDF;
+
+    // ============================================================
+    // PM PARTS TEMPLATE — page functions
+    // ============================================================
+    let _pmpRowCount = 0;
+
+    async function pmpLoad() {
+      const eqId    = document.getElementById('pmp-sel-eq')?.value;
+      const interval = document.getElementById('pmp-sel-interval')?.value;
+      if (!eqId) { toast('Pilih equipment dulu', 'error'); return; }
+
+      const { data, error } = await state.supabase
+        .from('pm_parts_template')
+        .select('*')
+        .eq('equipment_id', eqId)
+        .eq('interval_hm', interval)
+        .order('is_mandatory', { ascending: false })
+        .order('part_name');
+      if (error) { toast('Gagal load: ' + error.message, 'error'); return; }
+
+      const eq     = (state.equipmentList || []).find(e => e.id === eqId);
+      const eqTxt  = eq ? `${eq.tag_number} — ${eq.nama_equipment}` : eqId;
+      const titleEl = document.getElementById('pmp-title');
+      const subEl   = document.getElementById('pmp-subtitle');
+      if (titleEl) titleEl.textContent = `Parts PM ${interval} HM — ${eqTxt}`;
+      if (subEl)   subEl.textContent   = `${(data||[]).length} parts terdaftar`;
+
+      document.getElementById('pmp-btn-add')?.classList.remove('hidden');
+      document.getElementById('pmp-btn-save')?.classList.remove('hidden');
+
+      _pmpRowCount = 0;
+      pmpRenderTable(data || []);
+    }
+    window.pmpLoad = pmpLoad;
+
+    function pmpRenderTable(parts) {
+      const tbody = document.getElementById('pmp-tbody');
+      if (!tbody) return;
+      if (parts.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" class="text-center py-6 text-slate-400 text-sm">Belum ada parts. Klik "+ Tambah Part" untuk mulai.</td></tr>`;
+        return;
+      }
+      tbody.innerHTML = '';
+      parts.forEach(p => pmpAppendRow(p));
+    }
+
+    function pmpAppendRow(p = {}) {
+      const tbody = document.getElementById('pmp-tbody');
+      if (!tbody) return;
+      if (tbody.querySelector('[data-empty]')) tbody.innerHTML = '';
+      const i   = _pmpRowCount++;
+      const mats = window._pmpMaterials || [];
+      const matOpts = mats.map(m =>
+        `<option value="${m.id}" ${p.material_id === m.id ? 'selected' : ''}>${m.part_number ? '['+m.part_number+'] ' : ''}${escapeHtml(m.description)} (${m.stok} ${m.satuan||''})</option>`
+      ).join('');
+      const tr = document.createElement('tr');
+      tr.className = 'border-t align-top';
+      tr.id = `pmp-row-${i}`;
+      tr.innerHTML = `
+        <td class="p-1.5">
+          <input type="hidden" class="pmp-id" value="${p.id || ''}">
+          <input type="text" class="pmp-name w-full border border-slate-200 rounded px-2 py-1 text-xs" value="${escapeHtml(p.part_name||'')}" placeholder="Nama part…">
+        </td>
+        <td class="p-1.5">
+          <input type="text" class="pmp-pn w-full border border-slate-200 rounded px-2 py-1 text-xs" value="${escapeHtml(p.part_number||'')}" placeholder="Part No.">
+        </td>
+        <td class="p-1.5">
+          <select class="pmp-mat w-full border border-slate-200 rounded px-2 py-1 text-xs">
+            <option value="">-- Tidak ada --</option>
+            ${matOpts}
+          </select>
+        </td>
+        <td class="p-1.5 text-center">
+          <input type="number" class="pmp-qty w-16 border border-slate-200 rounded px-2 py-1 text-xs text-center" value="${p.qty_required||1}" min="0.01" step="0.01">
+        </td>
+        <td class="p-1.5 text-center">
+          <select class="pmp-unit border border-slate-200 rounded px-2 py-1 text-xs">
+            ${['pcs','liter','set','meter','kg','roll','botol'].map(u=>
+              `<option ${(p.unit||'pcs')===u?'selected':''}>${u}</option>`
+            ).join('')}
+          </select>
+        </td>
+        <td class="p-1.5 text-center">
+          <input type="checkbox" class="pmp-mandatory w-4 h-4 cursor-pointer" ${p.is_mandatory!==false?'checked':''}>
+        </td>
+        <td class="p-1.5 text-center">
+          <button onclick="pmpDeleteRow('${p.id||''}','${i}')" class="text-red-400 hover:text-red-600 text-xl font-bold leading-none">×</button>
+        </td>`;
+      tbody.appendChild(tr);
+    }
+    window.pmpAddRow = function() { pmpAppendRow({}); };
+
+    async function pmpDeleteRow(id, rowId) {
+      if (id) {
+        const { error } = await state.supabase.from('pm_parts_template').delete().eq('id', id);
+        if (error) { toast('Gagal hapus: ' + error.message, 'error'); return; }
+      }
+      document.getElementById('pmp-row-' + rowId)?.remove();
+    }
+    window.pmpDeleteRow = pmpDeleteRow;
+
+    async function pmpSave() {
+      const eqId    = document.getElementById('pmp-sel-eq')?.value;
+      const interval = parseInt(document.getElementById('pmp-sel-interval')?.value);
+      if (!eqId) { toast('Pilih equipment dulu', 'error'); return; }
+
+      const rows    = document.querySelectorAll('#pmp-tbody tr[id^="pmp-row-"]');
+      const upserts = [];
+      rows.forEach(row => {
+        const name = row.querySelector('.pmp-name')?.value?.trim();
+        if (!name) return;
+        const existId = row.querySelector('.pmp-id')?.value;
+        const obj = {
+          equipment_id: eqId,
+          interval_hm:  interval,
+          part_name:    name,
+          part_number:  row.querySelector('.pmp-pn')?.value?.trim()  || null,
+          material_id:  row.querySelector('.pmp-mat')?.value          || null,
+          qty_required: parseFloat(row.querySelector('.pmp-qty')?.value)  || 1,
+          unit:         row.querySelector('.pmp-unit')?.value         || 'pcs',
+          is_mandatory: row.querySelector('.pmp-mandatory')?.checked  ?? true,
+          updated_at:   new Date().toISOString(),
+        };
+        if (existId) obj.id = existId;
+        upserts.push(obj);
+      });
+
+      if (!upserts.length) { toast('Tidak ada data untuk disimpan', 'error'); return; }
+
+      const statusEl = document.getElementById('pmp-status');
+      if (statusEl) statusEl.textContent = 'Menyimpan…';
+
+      const { error } = await state.supabase.from('pm_parts_template').upsert(upserts, { onConflict: 'id' });
+      if (error) {
+        toast('Gagal simpan: ' + error.message, 'error');
+        if (statusEl) { statusEl.textContent = '❌ ' + error.message; statusEl.className = 'text-sm text-red-500'; }
+      } else {
+        toast('Parts template tersimpan ✅', 'success');
+        if (statusEl) { statusEl.textContent = '✅ Tersimpan!'; statusEl.className = 'text-sm text-green-600'; setTimeout(()=>{ statusEl.textContent=''; }, 3000); }
+        pmpLoad();
+        pmpLoadSummary();
+      }
+    }
+    window.pmpSave = pmpSave;
+
+    async function pmpLoadSummary() {
+      const el = document.getElementById('pmp-summary');
+      if (!el) return;
+      const { data, error } = await state.supabase
+        .from('pm_parts_template')
+        .select('equipment_id, interval_hm, equipment:equipment_id(tag_number, nama_equipment)');
+      if (error) { el.textContent = 'Gagal memuat ringkasan.'; return; }
+
+      const map = {};
+      (data||[]).forEach(r => {
+        const key = `${r.equipment_id}_${r.interval_hm}`;
+        if (!map[key]) map[key] = { eq: r.equipment, interval: r.interval_hm, count: 0 };
+        map[key].count++;
+      });
+      const entries = Object.values(map).sort((a,b) =>
+        (a.eq?.tag_number||'').localeCompare(b.eq?.tag_number||'') || a.interval - b.interval
+      );
+
+      if (!entries.length) {
+        el.innerHTML = '<div class="text-slate-400 py-4 text-center text-sm">Belum ada template parts yang dibuat.</div>';
+        return;
+      }
+      el.innerHTML = `<div class="overflow-x-auto">
+        <table class="w-full text-sm border-collapse">
+          <thead><tr class="bg-slate-50 text-xs text-slate-600">
+            <th class="p-2 text-left font-semibold">Equipment</th>
+            <th class="p-2 text-center font-semibold">Interval PM</th>
+            <th class="p-2 text-center font-semibold">Jumlah Parts</th>
+            <th class="p-2 text-center font-semibold">Aksi</th>
+          </tr></thead>
+          <tbody class="divide-y divide-slate-100">
+            ${entries.map(e => `<tr class="hover:bg-slate-50">
+              <td class="p-2 font-semibold text-navy text-sm">${escapeHtml(e.eq?.tag_number||'—')}
+                <div class="text-xs text-slate-400 font-normal">${escapeHtml(e.eq?.nama_equipment||'')}</div></td>
+              <td class="p-2 text-center text-sm">${e.interval} HM</td>
+              <td class="p-2 text-center font-bold text-slate-800">${e.count}</td>
+              <td class="p-2 text-center">
+                <button onclick="pmpQuickLoad('${e.eq?.tag_number||''}',${e.interval})" class="text-xs text-navy underline hover:opacity-70">Edit →</button>
+              </td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`;
+    }
+    window.pmpLoadSummary = pmpLoadSummary;
+
+    function pmpQuickLoad(tagNumber, interval) {
+      const sel = document.getElementById('pmp-sel-eq');
+      if (sel) {
+        for (const opt of sel.options) {
+          if (opt.text.startsWith(tagNumber + ' —') || opt.text.startsWith(tagNumber + '—')) {
+            sel.value = opt.value;
+            break;
+          }
+        }
+      }
+      const intSel = document.getElementById('pmp-sel-interval');
+      if (intSel) intSel.value = interval;
+      pmpLoad();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+    window.pmpQuickLoad = pmpQuickLoad;
 
     // ============================================================
     // 9c.1. CATEGORY MANAGEMENT (admin)
