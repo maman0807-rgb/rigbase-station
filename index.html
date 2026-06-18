@@ -12393,7 +12393,7 @@
     }
     window.saveCofInline = saveCofInline;
     let availData = [];
-    let availFilter = { unit_id: '', category: '' };
+    let availFilter = { unit_id: '', category: '', kategori_id: '' };
     function availFilteredData() {
       return (availData || []).filter(d => {
         if (availFilter.unit_id && String(d.unit_id) !== String(availFilter.unit_id)) return false;
@@ -12913,7 +12913,7 @@
       try {
         const [dt, eq, insp] = await Promise.all([
           state.supabase.from('downtime_events').select('*').order('start_at', { ascending: false }),
-          state.supabase.from('equipment').select('id, tag_number, nama_equipment, assigned_unit_id, tanggal_masuk_operasi, cof_score, target_mtbf_hours'),
+          state.supabase.from('equipment').select('id, tag_number, nama_equipment, assigned_unit_id, tanggal_masuk_operasi, cof_score, target_mtbf_hours, kategori_id'),
           state.supabase.from('v_inspection_downtime').select('*').order('mulai', { ascending: false }),
         ]);
         if (dt.error) throw dt.error; if (eq.error) throw eq.error;
@@ -12954,7 +12954,8 @@
       });
       // SEMUA equipment digabung dgn downtime — Pedoman: basis waktu per-alat dari tanggal_masuk_operasi
       const eqList = eqAll
-        .filter(x => !availFilter.unit_id || String(x.assigned_unit_id) === String(availFilter.unit_id))
+        .filter(x => !availFilter.unit_id    || String(x.assigned_unit_id) === String(availFilter.unit_id))
+        .filter(x => !availFilter.kategori_id || String(x.kategori_id)      === String(availFilter.kategori_id))
         .map(x => {
           const a = agg[x.id] || { events: 0, downH: 0, downH_unplanned: 0, failEvents: 0, failDur: [], waitH: 0 };
           // Pedoman: Total Time dihitung dari tanggal alat aktif (bukan tanggal filter)
@@ -13081,6 +13082,10 @@
             <select onchange="setAvailFilter('unit_id', this.value)" class="px-2 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-navy">
               <option value="">Semua Rig</option>
               ${state.parentUnits.filter(u => u.type === 'Rig').map(u => `<option value="${u.id}" ${availFilter.unit_id == u.id ? 'selected' : ''}>${escapeHtml(u.name)}</option>`).join('')}
+            </select>
+            <select onchange="setAvailFilter('kategori_id', this.value)" class="px-2 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-navy">
+              <option value="">Semua Kategori</option>
+              ${[...(state.categories||[])].sort((a,b)=>a.name.localeCompare(b.name)).map(c => `<option value="${c.id}" ${availFilter.kategori_id == c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}
             </select>
             <select onchange="setAvailFilter('category', this.value)" class="px-2 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-navy">
               <option value="">Semua Penyebab</option>
