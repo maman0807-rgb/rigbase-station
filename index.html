@@ -2882,9 +2882,10 @@
       if (tbody.querySelector('[data-empty]')) tbody.innerHTML = '';
       const i   = _pmpRowCount++;
       const mats = window._pmpMaterials || [];
-      const matOpts = mats.map(m =>
-        `<option value="${m.id}" ${p.material_id === m.id ? 'selected' : ''}>${m.part_number ? '['+m.part_number+'] ' : ''}${escapeHtml(m.description)} (${m.stok} ${m.satuan||''})</option>`
-      ).join('');
+      const selectedMat = p.material_id ? mats.find(m => m.id === p.material_id) : null;
+      const selectedLabel = selectedMat
+        ? (selectedMat.part_number ? '['+selectedMat.part_number+'] ' : '') + selectedMat.description
+        : '';
       const tr = document.createElement('tr');
       tr.className = 'border-t align-top';
       tr.id = `pmp-row-${i}`;
@@ -2897,10 +2898,10 @@
           <input type="text" class="pmp-pn w-full border border-slate-200 rounded px-2 py-1 text-xs" value="${escapeHtml(p.part_number||'')}" placeholder="Part No.">
         </td>
         <td class="p-1.5">
-          <select class="pmp-mat w-full border border-slate-200 rounded px-2 py-1 text-xs">
-            <option value="">-- Tidak ada --</option>
-            ${matOpts}
-          </select>
+          <div class="pmp-mat-wrap relative">
+            <input type="hidden" class="pmp-mat" value="${p.material_id || ''}">
+            <input type="text" class="pmp-mat-search w-full border border-slate-200 rounded px-2 py-1 text-xs" placeholder="Cari nama / part no…" value="${escapeHtml(selectedLabel)}" autocomplete="off" oninput="pmpMatSearch(this)" onfocus="pmpMatSearch(this)" onblur="pmpMatHide(this)">
+          </div>
         </td>
         <td class="p-1.5 text-center">
           <input type="number" class="pmp-qty w-16 border border-slate-200 rounded px-2 py-1 text-xs text-center" value="${p.qty_required||1}" min="0.01" step="0.01">
@@ -2921,6 +2922,59 @@
       tbody.appendChild(tr);
     }
     window.pmpAddRow = function() { pmpAppendRow({}); };
+
+    function pmpMatSearch(input) {
+      // Tutup list lain yang sedang terbuka
+      document.querySelectorAll('.pmp-mat-list').forEach(l => { if (l !== input._matList) l.classList.add('hidden'); });
+      if (!input._matList) {
+        const list = document.createElement('ul');
+        list.className = 'pmp-mat-list fixed bg-white border border-slate-200 rounded-lg shadow-xl max-h-60 overflow-y-auto text-xs';
+        list.style.zIndex = '9999';
+        document.body.appendChild(list);
+        input._matList = list;
+      }
+      const list = input._matList;
+      list._inputRef = input;
+      const rect = input.getBoundingClientRect();
+      list.style.top  = (rect.bottom + window.scrollY + 2) + 'px';
+      list.style.left = (rect.left  + window.scrollX) + 'px';
+      list.style.width = Math.max(300, rect.width) + 'px';
+      const q = input.value.toLowerCase().trim();
+      const mats = window._pmpMaterials || [];
+      const filtered = q
+        ? mats.filter(m => (m.description||'').toLowerCase().includes(q) || (m.part_number||'').toLowerCase().includes(q))
+        : mats;
+      list.innerHTML = `<li class="px-3 py-2 hover:bg-slate-100 cursor-pointer text-slate-400 italic border-b border-slate-100" onmousedown="pmpMatSelect(this,event)" data-id="" data-label="">— Tidak ada / hapus link —</li>`
+        + filtered.slice(0, 80).map(m => {
+          const lbl = (m.part_number ? '['+m.part_number+'] ' : '') + m.description;
+          const stok = Number(m.stok) || 0;
+          const stokCls = stok > 0 ? 'text-green-600 font-semibold' : 'text-red-500';
+          return `<li class="px-3 py-2 hover:bg-blue-50 cursor-pointer flex items-baseline gap-2 border-b border-slate-50" onmousedown="pmpMatSelect(this,event)" data-id="${m.id}" data-label="${escapeHtml(lbl)}">
+            <span class="font-mono text-slate-400 text-[10px] shrink-0">${escapeHtml(m.part_number||'—')}</span>
+            <span class="flex-1 truncate text-slate-800">${escapeHtml(m.description)}</span>
+            <span class="${stokCls} shrink-0 text-[10px]">${stok} ${escapeHtml(m.satuan||'')}</span>
+          </li>`;
+        }).join('');
+      list.classList.remove('hidden');
+    }
+    window.pmpMatSearch = pmpMatSearch;
+
+    function pmpMatSelect(li, e) {
+      e.preventDefault();
+      const list = li.closest('.pmp-mat-list');
+      const input = list?._inputRef;
+      if (!input) return;
+      const wrap = input.closest('.pmp-mat-wrap');
+      wrap.querySelector('.pmp-mat').value = li.dataset.id || '';
+      input.value = li.dataset.label || '';
+      list.classList.add('hidden');
+    }
+    window.pmpMatSelect = pmpMatSelect;
+
+    function pmpMatHide(input) {
+      setTimeout(() => { if (input._matList) input._matList.classList.add('hidden'); }, 150);
+    }
+    window.pmpMatHide = pmpMatHide;
 
     async function pmpDeleteRow(id, rowId) {
       if (id) {
