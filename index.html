@@ -3007,7 +3007,7 @@
           is_mandatory: row.querySelector('.pmp-mandatory')?.checked  ?? true,
           updated_at:   new Date().toISOString(),
         };
-        if (existId) obj.id = existId;
+        obj.id = existId || crypto.randomUUID();
         upserts.push(obj);
       });
 
