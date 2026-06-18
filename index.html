@@ -12781,7 +12781,7 @@
       const agg = {};
       data.forEach(d => {
         const k = d.equipment_id;
-        if (!agg[k]) agg[k] = { events: 0, downH: 0, downH_unplanned: 0, failEvents: 0, failDur: [] };
+        if (!agg[k]) agg[k] = { events: 0, downH: 0, downH_unplanned: 0, failEvents: 0, failDur: [], waitH: 0 };
         agg[k].events++;
         const s = new Date(d.start_at).getTime(), e = d.end_at ? new Date(d.end_at).getTime() : now;
         const clippedH = Math.max(0, Math.min(e, now) - Math.max(s, start)) / 3600000;
@@ -12795,12 +12795,17 @@
           const repairDur = (repairEnd - new Date(d.start_at).getTime()) / 3600000;
           if (repairDur > 0) agg[k].failDur.push(repairDur);
         }
+        if (d.category === 'tunggu_spare') {
+          const wEnd = d.end_at ? new Date(d.end_at).getTime() : now;
+          const wDur = (wEnd - new Date(d.start_at).getTime()) / 3600000;
+          if (wDur > 0) agg[k].waitH += wDur;
+        }
       });
       // SEMUA equipment digabung dgn downtime — Pedoman: basis waktu per-alat dari tanggal_masuk_operasi
       const eqList = eqAll
         .filter(x => !availFilter.unit_id || String(x.assigned_unit_id) === String(availFilter.unit_id))
         .map(x => {
-          const a = agg[x.id] || { events: 0, downH: 0, downH_unplanned: 0, failEvents: 0, failDur: [] };
+          const a = agg[x.id] || { events: 0, downH: 0, downH_unplanned: 0, failEvents: 0, failDur: [], waitH: 0 };
           // Pedoman: Total Time dihitung dari tanggal alat aktif (bukan tanggal filter)
           const eqActiveMs = x.tanggal_masuk_operasi ? new Date(x.tanggal_masuk_operasi).getTime() : start;
           const eqStart    = Math.max(start, eqActiveMs);
@@ -12808,7 +12813,7 @@
           const mttr = a.failDur.length ? a.failDur.reduce((p, q) => p + q, 0) / a.failDur.length : null;
           return {
             id: x.id, tag: x.tag_number, name: x.nama_equipment, events: a.events,
-            downH: a.downH, failEvents: a.failEvents, eqPeriodH, mttr,
+            downH: a.downH, failEvents: a.failEvents, eqPeriodH, mttr, waitH: a.waitH,
             cofScore: x.cof_score, targetMtbf: x.target_mtbf_hours,
             avail:   Math.max(0, Math.min(100, (eqPeriodH - a.downH)           / eqPeriodH * 100)),
             availAi: Math.max(0, Math.min(100, (eqPeriodH - a.downH_unplanned) / eqPeriodH * 100)),
@@ -12911,6 +12916,7 @@
         <td class="px-3 py-2 text-sm font-semibold text-slate-700">${o.failEvents}x</td>
         <td class="px-3 py-2 text-sm font-semibold text-slate-700">${fmtH(o.downH)}</td>
         <td class="px-3 py-2 text-sm font-semibold text-slate-700">${o.mttr != null ? fmtH(o.mttr) : '—'}</td>
+        <td class="px-3 py-2 text-sm ${o.waitH > 0 ? 'text-amber-600 font-semibold' : 'text-slate-400'}">${o.waitH > 0 ? fmtH(o.waitH) : '—'}</td>
       </tr>`).join('');
       const catRows = Object.entries(cat).sort((a, b) => b[1].h - a[1].h).map(([c, v]) => `<div class="flex items-center justify-between text-sm py-1.5 border-b border-slate-100"><span>${escapeHtml(c)}</span><span class="text-slate-500">${v.n}x · ${fmtH(v.h)}</span></div>`).join('');
 
@@ -12961,7 +12967,7 @@
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div class="lg:col-span-2 bg-white rounded-xl border border-slate-200 overflow-hidden">
             <div class="px-4 py-3 border-b border-slate-100 font-semibold text-slate-800 text-sm">Availability per Equipment (${availPeriodDays} hari) <span class="text-slate-400 font-normal">— klik buka detail</span></div>
-            <div class="overflow-x-auto max-h-96 overflow-y-auto"><table class="w-full"><thead class="sticky top-0 bg-slate-50"><tr class="text-left text-xs font-bold text-slate-600"><th class="px-3 py-2">Tag</th><th class="px-3 py-2">Nama</th><th class="px-3 py-2">Ao</th><th class="px-3 py-2">Ai</th><th class="px-3 py-2">Failure</th><th class="px-3 py-2">Total Down</th><th class="px-3 py-2">MTTR</th></tr></thead><tbody>${eqRows || '<tr><td colspan="7" class="px-3 py-6 text-center text-slate-400 text-sm">Tidak ada equipment.</td></tr>'}</tbody></table></div>
+            <div class="overflow-x-auto max-h-96 overflow-y-auto"><table class="w-full"><thead class="sticky top-0 bg-slate-50"><tr class="text-left text-xs font-bold text-slate-600"><th class="px-3 py-2">Tag</th><th class="px-3 py-2">Nama</th><th class="px-3 py-2">Ao</th><th class="px-3 py-2">Ai</th><th class="px-3 py-2">Failure</th><th class="px-3 py-2">Total Down</th><th class="px-3 py-2">MTTR</th><th class="px-3 py-2 text-amber-700" title="Total waktu menunggu spare part (sub-komponen dari MTTR)">Tunggu Part</th></tr></thead><tbody>${eqRows || '<tr><td colspan="8" class="px-3 py-6 text-center text-slate-400 text-sm">Tidak ada equipment.</td></tr>'}</tbody></table></div>
           </div>
           <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
             <div class="px-4 py-3 border-b border-slate-100 font-semibold text-slate-800 text-sm">Penyebab Down</div>
