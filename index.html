@@ -13086,8 +13086,9 @@
             <select onchange="setAvailFilter('kategori_id', this.value)" class="px-2 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-navy">
               <option value="">Semua Kategori</option>
               ${(() => {
-                const usedIds = new Set(eqAll.map(x => String(x.kategori_id)).filter(Boolean));
-                return [...(state.categories||[])].filter(c => usedIds.has(String(c.id))).sort((a,b)=>a.name.localeCompare(b.name)).map(c => `<option value="${c.id}" ${availFilter.kategori_id == c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('');
+                const rigIds = new Set((state.parentUnits||[]).filter(u => u.type === 'Rig').map(u => String(u.id)));
+                const nonRigCatIds = new Set(eqAll.filter(x => !rigIds.has(String(x.assigned_unit_id))).map(x => String(x.kategori_id)).filter(Boolean));
+                return [...(state.categories||[])].filter(c => nonRigCatIds.has(String(c.id))).sort((a,b)=>a.name.localeCompare(b.name)).map(c => `<option value="${c.id}" ${availFilter.kategori_id == c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('');
               })()}
             </select>
             <select onchange="setAvailFilter('category', this.value)" class="px-2 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-navy">
