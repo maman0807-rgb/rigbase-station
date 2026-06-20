@@ -869,6 +869,21 @@
       return data || [];
     }
 
+    // PM Cycle Logic — Diesel (250 HM base interval)
+    // Priority: GOH > PM6 > PM5 > PM4 > PM3
+    function getPMType(hm) {
+      if (hm % 10000 === 0) return 'GOH';
+      if (hm % 2000  === 0) return 'PM6';
+      if (hm % 1000  === 0) return 'PM5';
+      if (hm % 500   === 0) return 'PM4';
+      if (hm % 250   === 0) return 'PM3';
+      return null;
+    }
+    function getNextPM(currentHM) {
+      const nextHM = Math.ceil((currentHM + 1) / 250) * 250;
+      return { next_hm: nextHM, pm_type: getPMType(nextHM), sisa_hm: nextHM - currentHM };
+    }
+
     // PM berbasis JAM (HM): pakai running_hours (diisi mekanik via Logbook) vs last_pm_hours + pm_interval_hours.
     // Hanya unit ber-HM (running_hours > 0) yang dihitung. Tampilkan yang mendekati / sudah lewat jam PM.
     async function fetchPMDueByHours(thresholdHours = 50) {
@@ -881,15 +896,18 @@
       if (error) throw error;
       return (data || [])
         .map(e => {
-          const interval     = Number(e.pm_interval_hours) || 250;
-          const used         = Number(e.running_hours || 0) - Number(e.last_pm_hours || 0);
-          const remaining    = interval - used;
-          const nextPmAt     = Number(e.last_pm_hours || 0) + interval;
-          const actualInterval =
-            nextPmAt % 2000 === 0 ? 2000 :
-            nextPmAt % 1000 === 0 ? 1000 :
-            nextPmAt % 500  === 0 ? 500  : 250;
-          return { ...e, _interval: interval, _actualInterval: actualInterval, _used: used, _remaining: remaining };
+          const interval        = Number(e.pm_interval_hours) || 250;
+          const used            = Number(e.running_hours || 0) - Number(e.last_pm_hours || 0);
+          const remaining       = interval - used;
+          const nextPmAt        = Number(e.last_pm_hours || 0) + interval;
+          const _actualInterval = nextPmAt % 10000 === 0 ? 10000 :
+                                  nextPmAt % 2000  === 0 ? 2000  :
+                                  nextPmAt % 1000  === 0 ? 1000  :
+                                  nextPmAt % 500   === 0 ? 500   : 250;
+          const _pmType         = (interval === 250)
+                                  ? (() => { const t = getPMType(nextPmAt); return (t === 'GOH' && e.goh_interval_hours) ? 'PM3' : (t || 'PM?'); })()
+                                  : `PM-${interval}HM`;
+          return { ...e, _interval: interval, _actualInterval, _pmType, _used: used, _remaining: remaining };
         })
         .filter(e => e._remaining <= thresholdHours)
         .sort((a, b) => a._remaining - b._remaining)
@@ -2035,6 +2053,8 @@
                     : rem <= 50
                     ? `<span class="inline-flex items-center gap-1 text-xs bg-amber-500 text-white px-2.5 py-0.5 rounded-full font-extrabold tracking-wide shadow">⚠️ JADWALKAN PM</span>`
                     : '';
+                  const _pmColors = { GOH:'bg-red-600', PM6:'bg-orange-500', PM5:'bg-purple-600', PM4:'bg-blue-600', PM3:'bg-slate-500' };
+                  const pmBadge = `<span class="inline-flex items-center text-xs ${_pmColors[e._pmType]||'bg-slate-500'} text-white px-2 py-0.5 rounded-full font-bold">${e._pmType}</span>`;
                   return `<div class="w-full text-left flex items-center justify-between border ${borderCls} rounded-lg px-3 py-2">
                     <div class="min-w-0 flex-1">
                       <div class="cursor-pointer hover:opacity-75 transition" onclick="setEquipmentView('detail','${e.id}'); navigate('equipment')">
@@ -2042,14 +2062,15 @@
                         <div class="text-xs text-slate-500 truncate">${escapeHtml(e.nama_equipment)} • ${escapeHtml(getParentUnitName(e.assigned_unit_id))}</div>
                       </div>
                       <div class="flex flex-wrap items-center gap-1.5 mt-1.5">
+                        ${pmBadge}
                         ${urgBadge}
-                        <button onclick="showPMPartsModal('${e.id}', ${e._actualInterval}, ${Math.round(e._remaining)}, '${escapeAttr(e.tag_number)}', '${escapeAttr(e.nama_equipment)}')" class="inline-flex items-center gap-1 text-xs bg-navy text-white px-2.5 py-0.5 rounded-full font-bold shadow-sm hover:opacity-80 transition">📦 Siapkan Part PM — ${e._actualInterval} HM</button>
-                        <button onclick="showCatatPMModal('${e.id}', '${escapeAttr(e.tag_number)}', '${escapeAttr(e.nama_equipment)}', ${Number(e.running_hours)||0}, ${e._actualInterval})" class="inline-flex items-center gap-1 text-xs bg-green-600 text-white px-2.5 py-0.5 rounded-full font-bold shadow-sm hover:opacity-80 transition">✅ Catat PM Selesai</button>
+                        <button onclick="showPMPartsModal('${e.id}', ${e._actualInterval}, ${Math.round(e._remaining)}, '${escapeAttr(e.tag_number)}', '${escapeAttr(e.nama_equipment)}')" class="inline-flex items-center gap-1 text-xs bg-navy text-white px-2.5 py-0.5 rounded-full font-bold shadow-sm hover:opacity-80 transition">📦 Siapkan Part — ${e._pmType} (${e._actualInterval} HM)</button>
+                        <button onclick="showCatatPMModal('${e.id}', '${escapeAttr(e.tag_number)}', '${escapeAttr(e.nama_equipment)}', ${Number(e.running_hours)||0}, ${e._actualInterval}, '${e._pmType}')" class="inline-flex items-center gap-1 text-xs bg-green-600 text-white px-2.5 py-0.5 rounded-full font-bold shadow-sm hover:opacity-80 transition">✅ Catat ${e._pmType} Selesai</button>
                       </div>
                     </div>
                     <div class="text-right flex-shrink-0 ml-3">
                       <div class="${txtCls} text-sm">${label}</div>
-                      <div class="text-xs text-slate-400">Next PM: ${e._actualInterval} HM</div>
+                      <div class="text-xs text-slate-400">Next: <b>${e._pmType}</b> @ ${e._actualInterval} HM</div>
                     </div>
                   </div>`;
                 }).join('');
@@ -2780,13 +2801,16 @@
     }
     window.showPMPartsModal = showPMPartsModal;
 
-    async function showCatatPMModal(equipmentId, tagNumber, equipmentName, currentRunningHours, actualInterval) {
+    async function showCatatPMModal(equipmentId, tagNumber, equipmentName, currentRunningHours, actualInterval, pmType = '') {
       const nowLocal = toLocalInput(new Date().toISOString());
       const body = `
         <div class="space-y-4">
           <div class="bg-green-50 border border-green-200 rounded-lg px-4 py-3">
-            <div class="font-semibold text-green-900 text-sm">${escapeHtml(tagNumber)} — ${escapeHtml(equipmentName)}</div>
-            <div class="text-xs text-green-700 mt-0.5">PM ${actualInterval} HM · Running Hours saat ini: <b>${currentRunningHours} HM</b></div>
+            <div class="font-semibold text-green-900 text-sm flex items-center gap-2">
+              ${pmType ? `<span class="text-xs bg-green-700 text-white px-2 py-0.5 rounded-full font-bold">${escapeHtml(pmType)}</span>` : ''}
+              ${escapeHtml(tagNumber)} — ${escapeHtml(equipmentName)}
+            </div>
+            <div class="text-xs text-green-700 mt-0.5">${actualInterval} HM · Running Hours saat ini: <b>${currentRunningHours} HM</b></div>
           </div>
           <div>
             <label class="text-xs font-semibold text-slate-500 uppercase">Running Hours saat PM dilakukan *</label>
@@ -2814,16 +2838,16 @@
           <p class="text-[11px] text-slate-400">Sistem akan: (1) mencatat event downtime PM, (2) mereset counter PM — alert dashboard hilang otomatis.</p>
         </div>`;
       openModal({
-        title: `✅ Catat PM Selesai`,
+        title: `✅ Catat ${pmType || 'PM'} Selesai`,
         body,
         footer: `<button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 text-sm">Batal</button>
-                 <button onclick="savePMDone('${equipmentId}','${escapeAttr(tagNumber)}','${escapeAttr(equipmentName)}')" class="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-semibold">✅ Simpan & Reset Counter</button>`,
+                 <button onclick="savePMDone('${equipmentId}','${escapeAttr(tagNumber)}','${escapeAttr(equipmentName)}','${pmType}')" class="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-semibold">✅ Simpan & Reset Counter</button>`,
         maxWidth: 'max-w-lg',
       });
     }
     window.showCatatPMModal = showCatatPMModal;
 
-    async function savePMDone(equipmentId, tagNumber, equipmentName) {
+    async function savePMDone(equipmentId, tagNumber, equipmentName, pmType = '') {
       const rhVal  = parseFloat(document.getElementById('pm-done-rh')?.value);
       const startV = document.getElementById('pm-done-start')?.value;
       const endV   = document.getElementById('pm-done-end')?.value;
@@ -2849,7 +2873,7 @@
           category:       'pm',
           start_at:       new Date(startV).toISOString(),
           end_at:         endV ? new Date(endV).toISOString() : null,
-          notes:          `PM ${rhVal} HM selesai.${notes ? ' ' + notes : ''}`,
+          notes:          `${pmType || 'PM'} ${rhVal} HM selesai.${notes ? ' ' + notes : ''}`,
           created_by:     state.user?.id || null,
           created_by_name: state.profile?.full_name || state.profile?.email || '',
         };
@@ -2861,7 +2885,7 @@
           .from('equipment').update({ last_pm_hours: rhVal }).eq('id', equipmentId);
         if (eqErr) throw eqErr;
 
-        toast(`PM ${tagNumber} selesai dicatat. Counter HM direset ✅`, 'success');
+        toast(`${pmType || 'PM'} ${tagNumber} selesai dicatat. Counter HM direset ✅`, 'success');
         closeModal();
 
         // Refresh state equipment list & dashboard
@@ -6894,6 +6918,13 @@
           ? (() => { const rem = Number(eq.pm_interval_hours) - (Number(eq.running_hours || 0) - Number(eq.last_pm_hours || 0));
                      return rem < 0 ? `<span class="text-red-700 font-bold">⚠️ lewat ${fmtNumber(-rem, ' ' + u)}</span>` : fmtNumber(rem, ' ' + u); })()
           : null;
+        const _nextPmHm  = Number(eq.last_pm_hours || 0) + (Number(eq.pm_interval_hours) || 250);
+        const _eqInterval = Number(eq.pm_interval_hours) || 250;
+        const _nextPmType = (eq.pm_type !== 'plo' && eq.pm_type !== 'time' && eq.pm_interval_hours)
+          ? (_eqInterval === 250
+              ? (() => { const t = getPMType(_nextPmHm); return (t === 'GOH' && eq.goh_interval_hours) ? 'PM3' : (t || 'PM?'); })()
+              : `PM-${_eqInterval}HM`)
+          : null;
         const mtSections = [
           ['Maintenance', [
             ['Last Maintenance', fmtDate(eq.last_maintenance_date)],
@@ -6902,6 +6933,7 @@
             ['Tgl PM Terakhir', eq.last_pm_date ? fmtDate(eq.last_pm_date) : null],
             [`Interval PM (${u})`, eq.pm_type === 'plo' ? 'PLO — min 3 thn, maks 4 thn' : (eq.pm_interval_hours != null ? fmtNumber(eq.pm_interval_hours, ' ' + u) : null)],
             [`Sisa ${U} ke PM`, eq.pm_type === 'plo' ? null : sisaPM],
+            ['Tipe PM Berikutnya', _nextPmType ? `<span class="font-bold text-navy">${_nextPmType}</span> @ ${fmtNumber(_nextPmHm, ' HM')}` : null],
             ['PLO Jadwal Min', ploInfo ? fmtDate(ploInfo.minDue.toISOString().slice(0,10)) : null],
             ['PLO Batas Maks', ploInfo ? fmtDate(ploInfo.maxDue.toISOString().slice(0,10)) : null],
             ['Status PLO', ploInfo ? ploInfo.status : null],
