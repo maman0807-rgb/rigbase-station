@@ -907,7 +907,7 @@
           const _pmType         = (interval === 250)
                                   ? (() => { const t = getPMType(nextPmAt); return (t === 'GOH' && e.goh_interval_hours) ? 'PM3' : (t || 'PM?'); })()
                                   : `PM-${interval}HM`;
-          return { ...e, _interval: interval, _actualInterval, _pmType, _used: used, _remaining: remaining };
+          return { ...e, _interval: interval, _actualInterval, _pmType, _nextPmAt: nextPmAt, _used: used, _remaining: remaining };
         })
         .filter(e => e._remaining <= thresholdHours)
         .sort((a, b) => a._remaining - b._remaining)
@@ -2070,7 +2070,7 @@
                     </div>
                     <div class="text-right flex-shrink-0 ml-3">
                       <div class="${txtCls} text-sm">${label}</div>
-                      <div class="text-xs text-slate-400">Next: <b>${e._pmType}</b> @ ${e._actualInterval} HM</div>
+                      <div class="text-xs text-slate-400">Next: <b>${e._pmType}</b> @ ${fmtNumber(e._nextPmAt, ' HM')}</div>
                     </div>
                   </div>`;
                 }).join('');
