@@ -2627,10 +2627,11 @@
             <div>
               <label class="block text-xs font-semibold text-slate-600 mb-1">Interval PM (HM)</label>
               <select id="pmp-sel-interval" class="border border-slate-200 rounded-lg px-3 py-2 text-sm w-32 focus:outline-none focus:ring-2 focus:ring-navy">
-                <option value="250">250 HM</option>
-                <option value="500">500 HM</option>
-                <option value="1000">1000 HM</option>
-                <option value="2000">2000 HM</option>
+                <option value="250">250 HM — PM3</option>
+                <option value="500">500 HM — PM4</option>
+                <option value="1000">1000 HM — PM5</option>
+                <option value="2000">2000 HM — PM6</option>
+                <option value="10000">10000 HM — GOH</option>
               </select>
             </div>
             <button onclick="pmpLoad()" class="px-5 py-2 bg-navy text-white rounded-lg text-sm font-semibold hover:opacity-80 transition">Load Parts</button>
@@ -2690,6 +2691,15 @@
                 (eqData || []).map(eq =>
                   `<option value="${eq.id}">${escapeHtml(eq.tag_number)} — ${escapeHtml(eq.nama_equipment)}</option>`
                 ).join('');
+              // Auto-select dari preset (klik "Siapkan Part" di dashboard)
+              if (window._pmpPreset) {
+                const { eqId, interval } = window._pmpPreset;
+                window._pmpPreset = null;
+                if (eqId) sel.value = eqId;
+                const intSel = document.getElementById('pmp-sel-interval');
+                if (intSel && interval) intSel.value = String(interval);
+                pmpLoad();
+              }
             }
           } catch(e) {
             const sel = document.getElementById('pmp-sel-eq');
@@ -2756,7 +2766,7 @@
           content.innerHTML = `
             <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800">
               <p class="font-semibold mb-1">⚠️ Belum ada template parts untuk PM ${intervalHm} HM equipment ini.</p>
-              <p>Buka menu <button onclick="closeModal(); navigate('pm-parts')" class="underline text-navy font-medium">📦 PM Parts →</button> untuk mengisi daftar parts yang diperlukan.</p>
+              <p>Buka menu <button onclick="closeModal(); window._pmpPreset={eqId:'${equipmentId}',interval:${intervalHm}}; navigate('pm-parts')" class="underline text-navy font-medium">📦 PM Parts →</button> untuk mengisi daftar parts yang diperlukan.</p>
             </div>`;
           return;
         }
