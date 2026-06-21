@@ -899,16 +899,19 @@
           const interval       = Number(e.pm_interval_hours) || 250;
           const currentHM      = Number(e.running_hours || 0);
           const lastPmHm       = Number(e.last_pm_hours || 0);
-          // Gunakan grid absolute (kelipatan 250 dari HM 0), bukan last_pm_hours + interval
-          const lastMilestone  = Math.floor(currentHM / 250) * 250;
+          // Grid absolute berbasis interval masing-masing (bukan hardcode 250)
+          const lastMilestone  = Math.floor(currentHM / interval) * interval;
           const isOverdue      = lastPmHm < lastMilestone && lastMilestone > 0;
-          const nextPmAt       = isOverdue ? lastMilestone : getNextPM(currentHM).next_hm;
+          const nextPmAt       = isOverdue
+                                 ? lastMilestone
+                                 : Math.ceil((currentHM + 1) / interval) * interval;
           const remaining      = nextPmAt - currentHM;
           const _actualInterval = nextPmAt % 10000 === 0 ? 10000 :
                                   nextPmAt % 2000  === 0 ? 2000  :
                                   nextPmAt % 1000  === 0 ? 1000  :
                                   nextPmAt % 500   === 0 ? 500   : 250;
-          const _pmType        = (interval === 250)
+          // Guard: interval kelipatan 250 → bisa dapat PM type label
+          const _pmType        = (interval % 250 === 0)
                                  ? (() => { const t = getPMType(nextPmAt); return (t === 'GOH' && e.goh_interval_hours) ? 'PM3' : (t || 'PM?'); })()
                                  : `PM-${interval}HM`;
           return { ...e, _interval: interval, _actualInterval, _pmType, _nextPmAt: nextPmAt, _used: currentHM - lastPmHm, _remaining: remaining };
