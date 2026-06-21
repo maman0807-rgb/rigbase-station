@@ -2077,7 +2077,7 @@
                     </div>
                     <div class="text-right flex-shrink-0 ml-3">
                       <div class="${txtCls} text-sm">${label}</div>
-                      <div class="text-xs text-slate-400">Next: <b>${e._pmType}</b> @ ${fmtNumber(e._nextPmAt, ' HM')}</div>
+                      <div class="text-xs ${e._remaining < 0 ? 'text-red-500' : 'text-slate-400'}">${e._remaining < 0 ? `⚠️ Terlewat: <b>${e._pmType}</b> @ ${fmtNumber(e._nextPmAt, ' HM')} — lakukan segera` : `Next: <b>${e._pmType}</b> @ ${fmtNumber(e._nextPmAt, ' HM')}`}</div>
                     </div>
                   </div>`;
                 }).join('');
