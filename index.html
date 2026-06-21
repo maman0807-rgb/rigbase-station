@@ -2897,9 +2897,15 @@
         const { error: dtErr } = await state.supabase.from('downtime_events').insert(payload);
         if (dtErr) throw dtErr;
 
-        // 2. Update last_pm_hours → reset counter PM
+        // 2. Update last_pm_hours + last_pm_date → reset counter PM
+        const pmDate = startV ? new Date(startV).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
+        const eqUpdate = { last_pm_hours: rhVal, last_pm_date: pmDate };
+        // Bila GOH → reset last_goh_hours & last_goh_date supaya countdown overhaul ikut reset
+        if (pmType === 'GOH') { eqUpdate.last_goh_hours = rhVal; eqUpdate.last_goh_date = pmDate; }
+        // Bila TOH (milestone 5000/6000/8000/10000 yang bukan GOH) → reset last_toh_hours
+        if (pmType === 'TOH') { eqUpdate.last_toh_hours = rhVal; }
         const { error: eqErr } = await state.supabase
-          .from('equipment').update({ last_pm_hours: rhVal }).eq('id', equipmentId);
+          .from('equipment').update(eqUpdate).eq('id', equipmentId);
         if (eqErr) throw eqErr;
 
         toast(`${pmType || 'PM'} ${tagNumber} selesai dicatat. Counter HM direset ✅`, 'success');
@@ -2908,7 +2914,10 @@
         // Refresh state equipment list & dashboard
         if (state.equipmentList) {
           const eq2 = state.equipmentList.find(x => x.id === equipmentId);
-          if (eq2) eq2.last_pm_hours = rhVal;
+          if (eq2) { eq2.last_pm_hours = rhVal; eq2.last_pm_date = pmDate;
+            if (pmType === 'GOH') { eq2.last_goh_hours = rhVal; eq2.last_goh_date = pmDate; }
+            if (pmType === 'TOH') { eq2.last_toh_hours = rhVal; }
+          }
         }
         navigate('dashboard');
       } catch (err) {
@@ -6930,14 +6939,14 @@
                        : `<span class="text-green-700">✅ OK (sisa ${Math.floor((minDue - today) / 86400000)} hari ke batas min)</span>`;
           ploInfo = { minDue, maxDue, sisaHari, status };
         }
-        // Sisa ke PM (hitung dari counter - last_pm_hours vs interval)
-        const sisaPM = (eq.pm_type !== 'plo' && eq.pm_type !== 'time' && eq.running_hours != null && eq.pm_interval_hours)
-          ? (() => { const rem = Number(eq.pm_interval_hours) - (Number(eq.running_hours || 0) - Number(eq.last_pm_hours || 0));
-                     return rem < 0 ? `<span class="text-red-700 font-bold">⚠️ lewat ${fmtNumber(-rem, ' ' + u)}</span>` : fmtNumber(rem, ' ' + u); })()
-          : null;
         const _eqInterval = Number(eq.pm_interval_hours) || 250;
         const _currentHM  = Number(eq.running_hours || 0);
         const _nextPmHm   = Math.ceil((_currentHM + 1) / _eqInterval) * _eqInterval;
+        // Sisa ke PM — grid-anchored (sinkron dengan dashboard)
+        const sisaPM = (eq.pm_type !== 'plo' && eq.pm_type !== 'time' && eq.running_hours != null && eq.pm_interval_hours)
+          ? (() => { const rem = _nextPmHm - _currentHM;
+                     return rem <= 0 ? `<span class="text-red-700 font-bold">⚠️ lewat ${fmtNumber(-rem, ' ' + u)}</span>` : fmtNumber(rem, ' ' + u); })()
+          : null;
         const _nextPmType = (eq.pm_type !== 'plo' && eq.pm_type !== 'time' && eq.pm_interval_hours)
           ? (_eqInterval === 250
               ? (() => { const t = getPMType(_nextPmHm); return (t === 'GOH' && eq.goh_interval_hours) ? 'PM3' : (t || 'PM?'); })()
