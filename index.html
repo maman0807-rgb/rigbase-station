@@ -6925,8 +6925,9 @@
           ? (() => { const rem = Number(eq.pm_interval_hours) - (Number(eq.running_hours || 0) - Number(eq.last_pm_hours || 0));
                      return rem < 0 ? `<span class="text-red-700 font-bold">⚠️ lewat ${fmtNumber(-rem, ' ' + u)}</span>` : fmtNumber(rem, ' ' + u); })()
           : null;
-        const _nextPmHm  = Number(eq.last_pm_hours || 0) + (Number(eq.pm_interval_hours) || 250);
         const _eqInterval = Number(eq.pm_interval_hours) || 250;
+        const _currentHM  = Number(eq.running_hours || 0);
+        const _nextPmHm   = Math.ceil((_currentHM + 1) / _eqInterval) * _eqInterval;
         const _nextPmType = (eq.pm_type !== 'plo' && eq.pm_type !== 'time' && eq.pm_interval_hours)
           ? (_eqInterval === 250
               ? (() => { const t = getPMType(_nextPmHm); return (t === 'GOH' && eq.goh_interval_hours) ? 'PM3' : (t || 'PM?'); })()
