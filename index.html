@@ -6688,6 +6688,7 @@
                 ['stress','🚛 Riwayat Stress'],
                 ['fmea','⚠️ FMEA'],
                 ['rca','🔎 RCA'],
+                ['pemasangan','🔧 Pemasangan'],
               ].map(([id, lbl]) => `
                 <button onclick="state.equipmentDetailTab='${id}'; renderDetailTab(window.__currentEq)"
                   class="px-4 py-3 text-sm font-medium whitespace-nowrap ${state.equipmentDetailTab===id ? 'border-b-2 border-safety text-safety bg-safety/5' : 'text-slate-600 hover:text-navy'}">
@@ -6715,7 +6716,7 @@
       const parent = c.parentElement.querySelector('.flex.border-b');
       if (parent) {
         parent.querySelectorAll('button').forEach((btn, i) => {
-          const ids = ['info','maintenance','sos','sertifikasi','dokumen','inspeksi','history','stress','fmea','rca'];
+          const ids = ['info','maintenance','sos','sertifikasi','dokumen','inspeksi','history','stress','fmea','rca','pemasangan'];
           btn.className = `px-4 py-3 text-sm font-medium whitespace-nowrap ${state.equipmentDetailTab===ids[i] ? 'border-b-2 border-safety text-safety bg-safety/5' : 'text-slate-600 hover:text-navy'}`;
         });
       }
@@ -6730,6 +6731,7 @@
         case 'stress':      c.innerHTML = '<div class="text-slate-400">Memuat…</div>'; renderStressHistoryTab(eq, c); break;
         case 'fmea':        c.innerHTML = '<div class="text-slate-400">Memuat…</div>'; renderFmeaForEquipmentTab(eq, c); break;
         case 'rca':         c.innerHTML = '<div class="text-slate-400">Memuat…</div>'; renderRcaTab(eq, c); break;
+        case 'pemasangan':  c.innerHTML = '<div class="text-slate-400">Memuat…</div>'; renderPemasanganTab(eq, c); break;
       }
     }
     window.renderDetailTab = renderDetailTab;
@@ -7452,6 +7454,335 @@
     window.renderInspeksiHistoryTab = renderInspeksiHistoryTab;
 
     let historyFilter = 'all';   // all | mutasi | pinjam | downtime
+    // ── Pemasangan Tab ──────────────────────────────────────────
+    async function renderPemasanganTab(eq, container) {
+      try {
+        // Fetch data paralel: sebagai induk + sebagai anak
+        const [anakRows, riwayatRows, totalRow] = await Promise.all([
+          // Anak yang terpasang di equipment ini (sebagai induk)
+          state.supabase.from('v_hm_anak_aktif').select('*').eq('induk_id', eq.id)
+            .then(r => r.data || []),
+          // Riwayat pemasangan equipment ini (sebagai anak)
+          eq.parent_equipment_id
+            ? state.supabase.from('pemasangan')
+                .select('*, induk:induk_id(tag_number, nama_equipment, running_hours)')
+                .eq('anak_tag', eq.tag_number)
+                .order('tanggal_pasang', { ascending: false })
+                .then(r => r.data || [])
+            : Promise.resolve([]),
+          // Total HM akumulatif (sebagai anak)
+          eq.parent_equipment_id
+            ? state.supabase.from('v_hm_anak_total').select('*').eq('anak_tag', eq.tag_number)
+                .maybeSingle().then(r => r.data)
+            : Promise.resolve(null),
+        ]);
+
+        const isAnak  = !!eq.parent_equipment_id;
+        const isInduk = anakRows.length > 0;
+        const fmt2    = v => (v == null ? '—' : Number(v).toFixed(1) + ' HM');
+        const fmtD    = v => v ? v.split('-').reverse().join('/') : '—';
+
+        let html = '<div class="space-y-6">';
+
+        // ── SEBAGAI INDUK ──
+        if (isInduk || !isAnak) {
+          const aktifSesi = riwayatRows.filter(r => !r.tanggal_lepas);
+          html += `
+          <div>
+            <div class="flex items-center justify-between mb-3">
+              <h4 class="font-bold text-navy text-base uppercase tracking-wider">Anak Terpasang</h4>
+              <button onclick="showPasangAnakModal('${eq.id}', ${eq.running_hours || 0})"
+                class="bg-safety text-white text-xs font-semibold px-3 py-1.5 rounded-lg hover:bg-safety/90">
+                + Pasang Anak Baru
+              </button>
+            </div>`;
+          if (!anakRows.length) {
+            html += `<div class="text-slate-400 text-sm py-6 text-center bg-slate-50 rounded-lg">Belum ada anak terpasang</div>`;
+          } else {
+            html += `
+            <div class="overflow-x-auto rounded-lg border border-slate-200">
+              <table class="w-full text-sm">
+                <thead class="bg-slate-50 border-b border-slate-200">
+                  <tr>
+                    <th class="text-left px-3 py-2.5 font-semibold text-slate-600">Tag Anak</th>
+                    <th class="text-left px-3 py-2.5 font-semibold text-slate-600">Nama</th>
+                    <th class="text-left px-3 py-2.5 font-semibold text-slate-600">Posisi</th>
+                    <th class="text-left px-3 py-2.5 font-semibold text-slate-600">Terpasang Sejak</th>
+                    <th class="text-right px-3 py-2.5 font-semibold text-slate-600">HM Running</th>
+                    <th class="text-left px-3 py-2.5 font-semibold text-slate-600">Mode</th>
+                    <th class="px-3 py-2.5"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${anakRows.map(r => `
+                  <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+                    <td class="px-3 py-2.5 font-mono text-xs font-semibold text-navy">${escapeHtml(r.anak_tag)}</td>
+                    <td class="px-3 py-2.5 text-slate-700">${escapeHtml(r.anak_nama || '—')}</td>
+                    <td class="px-3 py-2.5 text-slate-500 text-xs">${escapeHtml(r.posisi || '—')}</td>
+                    <td class="px-3 py-2.5 text-slate-500 text-xs">${fmtD(r.tanggal_pasang)}</td>
+                    <td class="px-3 py-2.5 text-right font-semibold ${r.hm_running == null ? 'text-slate-400' : 'text-navy'}">${fmt2(r.hm_running)}</td>
+                    <td class="px-3 py-2.5 text-xs">
+                      <span class="px-2 py-0.5 rounded-full ${r.punya_meter_sendiri ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}">
+                        ${r.punya_meter_sendiri ? 'Meter Sendiri' : 'Numpang Induk'}
+                      </span>
+                    </td>
+                    <td class="px-3 py-2.5 text-center">
+                      <button onclick="showLepasAnakModal('${r.pemasangan_id}','${escapeHtml(r.anak_tag)}',${r.punya_meter_sendiri},${eq.running_hours||0},${r.anak_hm_sekarang||0})"
+                        class="text-xs text-red-500 hover:text-red-700 font-medium">Lepas</button>
+                    </td>
+                  </tr>`).join('')}
+                </tbody>
+              </table>
+            </div>`;
+          }
+          html += `</div>`;
+        }
+
+        // ── SEBAGAI ANAK ──
+        if (isAnak) {
+          const aktif = riwayatRows.find(r => !r.tanggal_lepas);
+          html += `
+          <div>
+            <h4 class="font-bold text-navy text-base uppercase tracking-wider mb-3">Status Pemasangan</h4>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+              <div class="bg-blue-50 rounded-lg p-3 text-center">
+                <div class="text-xs text-blue-600 font-medium mb-1">HM Session Ini</div>
+                <div class="text-xl font-bold text-blue-800">${fmt2(aktif?.hm_running ?? null)}</div>
+              </div>
+              <div class="bg-navy/5 rounded-lg p-3 text-center">
+                <div class="text-xs text-slate-600 font-medium mb-1">Total Akumulatif</div>
+                <div class="text-xl font-bold text-navy">${fmt2(totalRow?.hm_total ?? null)}</div>
+              </div>
+              <div class="bg-slate-50 rounded-lg p-3 text-center">
+                <div class="text-xs text-slate-600 font-medium mb-1">Induk Sekarang</div>
+                <div class="text-sm font-bold text-slate-700 truncate">${escapeHtml(aktif?.induk?.tag_number || aktif?.induk_tag || '—')}</div>
+              </div>
+              <div class="bg-slate-50 rounded-lg p-3 text-center">
+                <div class="text-xs text-slate-600 font-medium mb-1">Terpasang Sejak</div>
+                <div class="text-sm font-bold text-slate-700">${aktif ? fmtD(aktif.tanggal_pasang) : '—'}</div>
+              </div>
+            </div>`;
+
+          if (aktif) {
+            html += `
+            <div class="flex justify-end mb-4">
+              <button onclick="showLepasAnakModal('${aktif.id}','${escapeHtml(eq.tag_number)}',${aktif.punya_meter_sendiri},${aktif.induk?.running_hours||0},${eq.running_hours||0})"
+                class="bg-red-50 border border-red-200 text-red-600 text-xs font-semibold px-4 py-2 rounded-lg hover:bg-red-100">
+                Lepas dari Induk
+              </button>
+            </div>`;
+          }
+
+          html += `
+            <h4 class="font-bold text-navy text-sm uppercase tracking-wider mb-2">Riwayat Pemasangan</h4>
+            <div class="overflow-x-auto rounded-lg border border-slate-200">
+              <table class="w-full text-sm">
+                <thead class="bg-slate-50 border-b border-slate-200">
+                  <tr>
+                    <th class="text-left px-3 py-2.5 font-semibold text-slate-600">Induk</th>
+                    <th class="text-left px-3 py-2.5 font-semibold text-slate-600">Posisi</th>
+                    <th class="text-left px-3 py-2.5 font-semibold text-slate-600">Pasang</th>
+                    <th class="text-left px-3 py-2.5 font-semibold text-slate-600">Lepas</th>
+                    <th class="text-right px-3 py-2.5 font-semibold text-slate-600">HM Sesi</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${riwayatRows.length ? riwayatRows.map(r => {
+                    const indukTag = r.induk?.tag_number || '—';
+                    const hmSesi = r.punya_meter_sendiri
+                      ? (r.hm_meter_lepas != null ? r.hm_meter_lepas - r.hm_meter_pasang : null)
+                      : (r.hm_induk_lepas != null ? r.hm_induk_lepas - r.hm_induk_pasang : null);
+                    return `
+                    <tr class="border-b border-slate-100 last:border-0 ${!r.tanggal_lepas ? 'bg-green-50' : ''}">
+                      <td class="px-3 py-2.5 font-mono text-xs font-semibold text-navy">${escapeHtml(indukTag)}</td>
+                      <td class="px-3 py-2.5 text-slate-500 text-xs">${escapeHtml(r.posisi || '—')}</td>
+                      <td class="px-3 py-2.5 text-slate-600 text-xs">${fmtD(r.tanggal_pasang)}</td>
+                      <td class="px-3 py-2.5 text-slate-600 text-xs">${r.tanggal_lepas ? fmtD(r.tanggal_lepas) : '<span class="text-green-600 font-semibold">Aktif</span>'}</td>
+                      <td class="px-3 py-2.5 text-right font-semibold ${hmSesi == null ? 'text-slate-400' : 'text-slate-700'}">${fmt2(hmSesi)}</td>
+                    </tr>`;
+                  }).join('') : `<tr><td colspan="5" class="text-center text-slate-400 py-6">Belum ada riwayat</td></tr>`}
+                </tbody>
+              </table>
+            </div>
+          </div>`;
+        }
+
+        html += '</div>';
+        container.innerHTML = html;
+
+      } catch(err) {
+        container.innerHTML = `<div class="bg-red-50 border border-red-200 p-4 rounded-lg text-red-700 text-sm">Gagal load: ${escapeHtml(err.message)}</div>`;
+      }
+    }
+
+    // Modal: Pasang Anak Baru
+    function showPasangAnakModal(indukId, indukHm) {
+      const overlay = document.createElement('div');
+      overlay.className = 'fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4';
+      overlay.innerHTML = `
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+          <div class="flex items-center justify-between mb-5">
+            <h3 class="font-bold text-navy text-lg">Pasang Anak Baru</h3>
+            <button onclick="this.closest('.fixed').remove()" class="text-slate-400 hover:text-slate-600 text-2xl leading-none">&times;</button>
+          </div>
+          <form id="form-pasang-anak" class="space-y-4">
+            <div>
+              <label class="block text-xs font-semibold text-slate-500 uppercase mb-1">Tag Anak (equipment yang dipasang)</label>
+              <input id="pa-anak-tag" type="text" placeholder="Contoh: TRANS-100A" required
+                class="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-safety">
+              <p class="text-xs text-slate-400 mt-1">Isi tag_number equipment anak</p>
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-500 uppercase mb-1">Posisi / Slot</label>
+              <input id="pa-posisi" type="text" placeholder="Contoh: transmisi, engine_deck"
+                class="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-safety">
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-500 uppercase mb-1">Tanggal Pasang</label>
+              <input id="pa-tgl" type="date" value="${new Date().toISOString().split('T')[0]}" required
+                class="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-safety">
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-500 uppercase mb-1">Mode HM Anak</label>
+              <div class="flex gap-3">
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="pa-mode" value="numpang" checked class="accent-safety">
+                  <span class="text-sm">Numpang induk</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="pa-mode" value="sendiri" class="accent-safety">
+                  <span class="text-sm">Meter sendiri</span>
+                </label>
+              </div>
+              <p class="text-xs text-slate-400 mt-1">Numpang = HM anak ikut induk (mis. transmisi). Sendiri = anak punya meter sendiri (mis. engine ECU).</p>
+            </div>
+            <div id="pa-hm-meter-row" class="hidden">
+              <label class="block text-xs font-semibold text-slate-500 uppercase mb-1">HM Meter Anak Saat Ini</label>
+              <input id="pa-hm-meter" type="number" min="0" step="0.1" placeholder="0"
+                class="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-safety">
+            </div>
+            <div class="bg-slate-50 rounded-lg px-3 py-2 text-xs text-slate-500">
+              HM Induk saat ini: <span class="font-semibold text-navy">${Number(indukHm||0).toFixed(1)} HM</span>
+            </div>
+            <div id="pa-err" class="hidden text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2"></div>
+            <div class="flex gap-3 pt-1">
+              <button type="button" onclick="this.closest('.fixed').remove()"
+                class="flex-1 border border-slate-200 text-slate-600 py-2.5 rounded-xl font-semibold text-sm">Batal</button>
+              <button type="submit"
+                class="flex-1 bg-safety text-white py-2.5 rounded-xl font-semibold text-sm hover:bg-safety/90">Pasang</button>
+            </div>
+          </form>
+        </div>`;
+      // Toggle meter row
+      overlay.querySelectorAll('[name="pa-mode"]').forEach(r => {
+        r.addEventListener('change', () => {
+          overlay.querySelector('#pa-hm-meter-row').classList.toggle('hidden', r.value !== 'sendiri' || !r.checked);
+        });
+      });
+      overlay.querySelector('#form-pasang-anak').addEventListener('submit', async e => {
+        e.preventDefault();
+        const errEl  = overlay.querySelector('#pa-err');
+        const btn    = overlay.querySelector('[type="submit"]');
+        const anakTag = overlay.querySelector('#pa-anak-tag').value.trim().toUpperCase();
+        const posisi  = overlay.querySelector('#pa-posisi').value.trim();
+        const tgl     = overlay.querySelector('#pa-tgl').value;
+        const mode    = overlay.querySelector('[name="pa-mode"]:checked').value;
+        const hmMeter = parseFloat(overlay.querySelector('#pa-hm-meter').value) || 0;
+        if (!anakTag) { errEl.textContent = 'Tag anak wajib diisi'; errEl.classList.remove('hidden'); return; }
+        btn.textContent = 'Menyimpan…'; btn.disabled = true;
+        errEl.classList.add('hidden');
+        try {
+          // Ambil HM anak sekarang kalau numpang (untuk kalkulasi hm_induk_pasang relatif)
+          const { data: anakEq } = await state.supabase.from('equipment').select('running_hours').eq('tag_number', anakTag).maybeSingle();
+          if (!anakEq) throw new Error(`Tag "${anakTag}" tidak ditemukan di database`);
+          const anakHm = Number(anakEq.running_hours || 0);
+          const payload = {
+            induk_id: indukId,
+            anak_tag: anakTag,
+            posisi: posisi || null,
+            tanggal_pasang: tgl,
+            punya_meter_sendiri: mode === 'sendiri',
+            hm_induk_pasang: mode === 'numpang' ? (Number(indukHm) - anakHm) : null,
+            hm_meter_pasang: mode === 'sendiri' ? hmMeter : null,
+          };
+          const { error } = await state.supabase.from('pemasangan').insert(payload);
+          if (error) throw error;
+          overlay.remove();
+          // Refresh tab
+          const c = document.getElementById('detail-tab-content');
+          if (c) { c.innerHTML = '<div class="text-slate-400">Memuat…</div>'; renderPemasanganTab(window.__currentEq, c); }
+          toast('Anak berhasil dipasang', 'success');
+        } catch(err) {
+          errEl.textContent = err.message; errEl.classList.remove('hidden');
+          btn.textContent = 'Pasang'; btn.disabled = false;
+        }
+      });
+      document.body.appendChild(overlay);
+    }
+    window.showPasangAnakModal = showPasangAnakModal;
+
+    // Modal: Lepas Anak
+    function showLepasAnakModal(pemasanganId, anakTag, punyaMeterSendiri, indukHmSekarang, anakHmSekarang) {
+      const overlay = document.createElement('div');
+      overlay.className = 'fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4';
+      overlay.innerHTML = `
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+          <div class="flex items-center justify-between mb-5">
+            <h3 class="font-bold text-navy text-lg">Lepas Anak dari Induk</h3>
+            <button onclick="this.closest('.fixed').remove()" class="text-slate-400 hover:text-slate-600 text-2xl leading-none">&times;</button>
+          </div>
+          <div class="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4 text-sm">
+            <span class="font-semibold text-amber-800">${escapeHtml(anakTag)}</span>
+            <span class="text-amber-700"> akan dilepas. Snapshot HM akan dibekukan.</span>
+          </div>
+          <form id="form-lepas-anak" class="space-y-4">
+            <div>
+              <label class="block text-xs font-semibold text-slate-500 uppercase mb-1">Tanggal Lepas</label>
+              <input id="la-tgl" type="date" value="${new Date().toISOString().split('T')[0]}" required
+                class="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-safety">
+            </div>
+            <div class="bg-slate-50 rounded-lg px-3 py-2 text-xs text-slate-500 space-y-1">
+              ${punyaMeterSendiri
+                ? `<div>Meter anak saat ini: <span class="font-semibold text-navy">${Number(anakHmSekarang||0).toFixed(1)} HM</span> → akan jadi snapshot lepas</div>`
+                : `<div>HM induk saat ini: <span class="font-semibold text-navy">${Number(indukHmSekarang||0).toFixed(1)} HM</span> → akan jadi snapshot lepas</div>`
+              }
+            </div>
+            <div id="la-err" class="hidden text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2"></div>
+            <div class="flex gap-3 pt-1">
+              <button type="button" onclick="this.closest('.fixed').remove()"
+                class="flex-1 border border-slate-200 text-slate-600 py-2.5 rounded-xl font-semibold text-sm">Batal</button>
+              <button type="submit"
+                class="flex-1 bg-red-500 text-white py-2.5 rounded-xl font-semibold text-sm hover:bg-red-600">Konfirmasi Lepas</button>
+            </div>
+          </form>
+        </div>`;
+      overlay.querySelector('#form-lepas-anak').addEventListener('submit', async e => {
+        e.preventDefault();
+        const errEl = overlay.querySelector('#la-err');
+        const btn   = overlay.querySelector('[type="submit"]');
+        const tgl   = overlay.querySelector('#la-tgl').value;
+        btn.textContent = 'Menyimpan…'; btn.disabled = true;
+        errEl.classList.add('hidden');
+        try {
+          const update = { tanggal_lepas: tgl };
+          if (punyaMeterSendiri) update.hm_meter_lepas = Number(anakHmSekarang || 0);
+          else                   update.hm_induk_lepas = Number(indukHmSekarang || 0);
+          const { error } = await state.supabase.from('pemasangan').update(update).eq('id', pemasanganId);
+          if (error) throw error;
+          overlay.remove();
+          const c = document.getElementById('detail-tab-content');
+          if (c) { c.innerHTML = '<div class="text-slate-400">Memuat…</div>'; renderPemasanganTab(window.__currentEq, c); }
+          toast('Anak berhasil dilepas', 'success');
+        } catch(err) {
+          errEl.textContent = err.message; errEl.classList.remove('hidden');
+          btn.textContent = 'Konfirmasi Lepas'; btn.disabled = false;
+        }
+      });
+      document.body.appendChild(overlay);
+    }
+    window.showLepasAnakModal = showLepasAnakModal;
+    // ── End Pemasangan ───────────────────────────────────────────
+
     async function renderHistoryTab(eq, container) {
       historyFilter = 'all';   // reset filter tiap buka equipment baru
       try {
