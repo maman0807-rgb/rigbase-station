@@ -394,6 +394,8 @@
         { name: 'toh_interval_hours',  label: 'Interval TOH (jam / km)',   type: 'number', min: 0, placeholder: 'mis. 12000' },
         { name: 'goh_interval_hours',  label: 'Interval GOH (jam / km)',   type: 'number', min: 0, placeholder: 'mis. 24000' },
         { name: 'economic_life_hours', label: 'Batas Umur Ekonomis (jam / km)', type: 'number', min: 0, placeholder: 'mis. 48000 jam atau 300000 km' },
+        { name: 'last_pm_hours',       label: 'Counter saat PM Terakhir',  type: 'number', min: 0, step: '0.1', placeholder: 'HM atau KM saat PM terakhir' },
+        { name: 'last_pm_date',        label: 'Tgl PM Terakhir',           type: 'date' },
         { name: 'last_toh_hours',      label: 'Counter saat TOH Terakhir', type: 'number', min: 0, step: '0.1', placeholder: 'HM atau KM saat TOH' },
         { name: 'last_goh_hours',      label: 'Counter saat GOH Terakhir', type: 'number', min: 0, step: '0.1', placeholder: 'HM atau KM saat GOH' },
       ]},
@@ -845,7 +847,7 @@
       if (error) throw error;
       const eq = data || [];
       const byUnit = {};
-      eq.forEach(e => { byUnit[e.assigned_unit_id] = (byUnit[e.assigned_unit_id] || 0) + 1; });
+      eq.forEach(e => { if (e.assigned_unit_id != null) byUnit[e.assigned_unit_id] = (byUnit[e.assigned_unit_id] || 0) + 1; });
       return {
         total: eq.length,
         aktif: eq.filter(e => e.status_operasi === 'Aktif').length,
@@ -879,11 +881,6 @@
       if (hm % 250   === 0) return 'PM3';
       return null;
     }
-    function getNextPM(currentHM) {
-      const nextHM = Math.ceil((currentHM + 1) / 250) * 250;
-      return { next_hm: nextHM, pm_type: getPMType(nextHM), sisa_hm: nextHM - currentHM };
-    }
-
     // PM berbasis JAM (HM): pakai running_hours (diisi mekanik via Logbook) vs last_pm_hours + pm_interval_hours.
     // Hanya unit ber-HM (running_hours > 0) yang dihitung. Tampilkan yang mendekati / sudah lewat jam PM.
     // ratio: 0.2 = warning (20% sisa interval), 0.1 = critical (10% sisa interval) — proporsional per tier.
@@ -986,7 +983,7 @@
     }
 
     // Unit yang mendekati/lewat overhaul atau batas umur (berbasis jam).
-    async function fetchOverhaulDue(thresholdHours = 500) {
+    async function fetchOverhaulDue(ratio = 0.05) {
       const { data, error } = await state.supabase
         .from('equipment')
         .select('id, tag_number, nama_equipment, assigned_unit_id, running_hours, toh_interval_hours, goh_interval_hours, economic_life_hours, last_toh_hours, last_goh_hours, pm_type')
@@ -1001,7 +998,10 @@
         const tohRem = lc.toh ? lc.toh.remaining : Infinity;
         const gohRem = lc.goh ? lc.goh.remaining : Infinity;
         const minRem = Math.min(tohRem, gohRem);
-        if (lc.verdict !== 'keep' || minRem <= thresholdHours) out.push({ ...e, _lc: lc, _minRem: minRem });
+        const tohThreshold = Number(e.toh_interval_hours) > 0 ? Math.max(200, Math.round(Number(e.toh_interval_hours) * ratio)) : 0;
+        const gohThreshold = Number(e.goh_interval_hours) > 0 ? Math.max(500, Math.round(Number(e.goh_interval_hours) * ratio)) : 0;
+        const isDue = lc.verdict !== 'keep' || tohRem <= tohThreshold || gohRem <= gohThreshold;
+        if (isDue) out.push({ ...e, _lc: lc, _minRem: minRem });
       });
       return out.sort((a, b) => a._minRem - b._minRem).slice(0, 15);
     }
@@ -2032,7 +2032,7 @@
               fetchAllActiveLoans().catch(() => []),
               fetchPMDueByHours(0.1).catch(() => []),
               fetchPMDueByKm(500).catch(() => []),
-              fetchOverhaulDue(500).catch(() => []),
+              fetchOverhaulDue(0.05).catch(() => []),
               state.supabase.from('v_inspection_downtime').select('*').eq('is_holding', true).order('mulai').then(r => r).catch(() => ({ data: [] })),
             ]);
             // Stats
@@ -2040,7 +2040,7 @@
               ${statCard('Total Equipment', fmtNumber(stats.total),   ICONS.wrench,  'bg-blue-100 text-blue-700')}
               ${statCard('Aktif',           fmtNumber(stats.aktif),   ICONS.check,   'bg-green-100 text-green-700')}
               ${statCard('Down',            fmtNumber(stats.down),    ICONS.warning, 'bg-red-100 text-red-700')}
-              ${statCard('Maintenance Due', fmtNumber(due.length),    ICONS.bell,    'bg-orange-100 text-orange-700')}
+              ${statCard('Warning PM', fmtNumber(due.length) + (pmHours.length ? ` (${pmHours.length} kritis)` : ''), ICONS.bell, 'bg-orange-100 text-orange-700')}
             `;
             // Mendekati Maintenance PM (HM-based, threshold proporsional 20% interval tiap unit)
             $('#dash-due').innerHTML = due.length === 0
@@ -2697,8 +2697,13 @@
                 window._pmpPreset = null;
                 if (eqId) sel.value = eqId;
                 const intSel = document.getElementById('pmp-sel-interval');
-                if (intSel && interval) intSel.value = String(interval);
-                pmpLoad();
+                if (intSel && interval) {
+                  if (![...intSel.options].some(o => o.value === String(interval))) {
+                    intSel.add(new Option(`${interval} HM — Custom`, String(interval)));
+                  }
+                  intSel.value = String(interval);
+                  pmpLoad();
+                }
               }
             }
           } catch(e) {
@@ -2870,7 +2875,7 @@
       const endV   = document.getElementById('pm-done-end')?.value;
       const notes  = (document.getElementById('pm-done-notes')?.value || '').trim();
 
-      if (!rhVal || rhVal < 0) { toast('Isi running hours saat PM', 'warn'); return; }
+      if (rhVal == null || isNaN(rhVal) || rhVal < 0) { toast('Isi running hours saat PM', 'warn'); return; }
       if (!startV)             { toast('Isi waktu mulai PM', 'warn'); return; }
       if (endV && new Date(endV) < new Date(startV)) { toast('Waktu selesai tidak boleh sebelum mulai', 'warn'); return; }
 
@@ -6064,13 +6069,7 @@
               .delete({ count: 'exact' })
               .in('inspection_id', replaceIds);
             if (delErr) { toast('Gagal hapus temuan lama: ' + delErr.message, 'error'); if (btn) { btn.disabled = false; btn.textContent = '✅ Import Semua'; } return; }
-            if (!delCount) {
-              // RLS: hapus temuan butuh hak Admin. Batalkan biar gak jadi dobel.
-              toast('Gagal ganti temuan lama — butuh hak Admin untuk menghapus. Import dibatalkan.', 'error');
-              if (btn) { btn.disabled = false; btn.textContent = '✅ Import Semua'; }
-              return;
-            }
-            imported.temuan_deleted = delCount;
+            imported.temuan_deleted = delCount || 0;
           }
         }
 
@@ -8164,7 +8163,7 @@
       const mutation_date = form.elements.mutation_date.value;
       const reason = form.elements.reason.value || null;
       if (!to_unit_id) { toast('Pilih unit tujuan dulu.', 'warn'); return; }
-      if (to_unit_id === from_unit_id) { toast('Unit tujuan harus berbeda dengan unit asal.', 'warn'); return; }
+      if (from_unit_id != null && to_unit_id === from_unit_id) { toast('Unit tujuan harus berbeda dengan unit asal.', 'warn'); return; }
 
       // Cek apakah equipment ini punya children — kalau iya, tanya cascade
       let children = [];
@@ -12470,11 +12469,17 @@
     }
     window.saveCofInline = saveCofInline;
     let availData = [];
+    let availEqAll = [];
     let availFilter = { unit_id: '', category: '', kategori_id: '' };
     function availFilteredData() {
+      // Build set of equipment IDs that match kategori filter (if active)
+      const katSet = availFilter.kategori_id
+        ? new Set(availEqAll.filter(x => String(x.kategori_id) === String(availFilter.kategori_id)).map(x => x.id))
+        : null;
       return (availData || []).filter(d => {
         if (availFilter.unit_id && String(d.unit_id) !== String(availFilter.unit_id)) return false;
         if (availFilter.category && d.category !== availFilter.category) return false;
+        if (katSet && !katSet.has(d.equipment_id)) return false;
         return true;
       });
     }
@@ -12545,10 +12550,12 @@
             dueAll.push({ x, u, kind: 'EOL', sisa: ecoInt - rh, interval: ecoInt, pct });
         }
       });
-      // Threshold per milestone
-      const T = { PM: 500, TOH: 1000, GOH: 2000, EOL: 0 };
+      // Threshold proporsional per milestone dan per interval masing-masing equipment
+      const _kelThreshold = d => d.kind === 'PM'  ? Math.max(50,  Math.round(d.interval * 0.2))
+                                : d.kind === 'TOH' ? Math.max(200, Math.round(d.interval * 0.05))
+                                : d.kind === 'GOH' ? Math.max(500, Math.round(d.interval * 0.05)) : 0;
       const overdue = dueAll.filter(d => d.kind !== 'EOL' && d.sisa < 0).sort((a, b) => a.sisa - b.sisa);
-      const soon = dueAll.filter(d => d.kind !== 'EOL' && d.sisa >= 0 && d.sisa < T[d.kind]).sort((a, b) => a.sisa - b.sisa);
+      const soon = dueAll.filter(d => d.kind !== 'EOL' && d.sisa >= 0 && d.sisa < _kelThreshold(d)).sort((a, b) => a.sisa - b.sisa);
       const eolNear = dueAll.filter(d => d.kind === 'EOL').sort((a, b) => b.pct - a.pct);
 
       const rowDue = (d, withSisa = true) => {
@@ -12807,7 +12814,7 @@
         const since = new Date(); since.setMonth(since.getMonth() - 11); since.setDate(1); since.setHours(0,0,0,0);
         const [dtRes, eqRes] = await Promise.all([
           state.supabase.from('downtime_events').select('equipment_id,start_at,end_at,category').gte('start_at', since.toISOString()),
-          state.supabase.from('equipment').select('id,assigned_unit_id'),
+          state.supabase.from('equipment').select('id,assigned_unit_id,tanggal_masuk_operasi'),
         ]);
         if (dtRes.error) throw dtRes.error;
         const events = dtRes.data || [];
@@ -12816,8 +12823,6 @@
         const filteredEqIds = new Set(
           eqAll.filter(x => !availFilter.unit_id || String(x.assigned_unit_id) === String(availFilter.unit_id)).map(x => x.id)
         );
-        const eqCount = filteredEqIds.size || 1;
-
         // 12-month buckets (oldest → newest)
         const months = Array.from({ length: 12 }, (_, i) => {
           const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - (11 - i));
@@ -12830,7 +12835,13 @@
         });
 
         const monthData = months.map(m => {
-          const periodH = m.days * 24 * eqCount;
+          // Hitung jumlah equipment yang sudah beroperasi di bulan ini (berdasar tanggal_masuk_operasi)
+          const monthEqCount = eqAll.filter(x => {
+            if (!filteredEqIds.has(x.id)) return false;
+            const comm = x.tanggal_masuk_operasi ? new Date(x.tanggal_masuk_operasi).getTime() : 0;
+            return comm <= m.end;
+          }).length || 1;
+          const periodH = m.days * 24 * monthEqCount;
           let downH = 0, downH_unplanned = 0, failures = 0;
           events.forEach(e => {
             if (!filteredEqIds.has(e.equipment_id) || e.category === GEJALA_CAT) return;
@@ -12994,7 +13005,7 @@
           state.supabase.from('v_inspection_downtime').select('*').order('mulai', { ascending: false }),
         ]);
         if (dt.error) throw dt.error; if (eq.error) throw eq.error;
-        availData = dt.data || []; eqAll = eq.data || [];
+        availData = dt.data || []; eqAll = eq.data || []; availEqAll = eqAll;
         inspData = insp.data || []; // graceful: kalau view belum ada, lanjut tanpa error
       } catch (e) {
         host.innerHTML = `<div class="bg-red-50 text-red-700 p-4 rounded-xl text-sm">Gagal memuat: ${escapeHtml(e.message)}</div>`;
@@ -13929,7 +13940,13 @@
 
         (eqs || []).forEach((eq) => {
           const unitName = getParentUnitName(eq.assigned_unit_id);
-          const rate = 8; // jam per hari (default)
+          const catName = (getCategoryName(eq.kategori_id) || '').toLowerCase();
+          // Estimasi jam operasi per hari berdasar kategori — dipakai proyeksi kalender PM
+          const rate = eq.pm_type === 'km' ? 200  // ~200 km/hari untuk kendaraan
+                     : /genset|generator|power|listrik/i.test(catName) ? 20  // genset ~20 jam/hari
+                     : /hoist|winch|crane|lifting/i.test(catName)      ? 10  // angkat ~10 jam/hari
+                     : /kendaraan|truck|vehicle/i.test(catName)        ? 10  // kendaraan 10j/hari
+                     : 8;  // default HHE lainnya
           const rh = Number(eq.running_hours) || 0;
 
           // Helper: convert "jam lagi" → ISO date
