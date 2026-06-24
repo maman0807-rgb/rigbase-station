@@ -3432,6 +3432,19 @@
           'Kondisi Fisik': eq.kondisi_fisik,
           'Lokasi Fisik': eq.lokasi_fisik,
           'Running Hours': eq.running_hours,
+          'PM Type': eq.pm_type,
+          'PM Interval (HM/km)': eq.pm_interval_hours,
+          'Last PM Hours': eq.last_pm_hours,
+          'Last PM Date': eq.last_pm_date,
+          'TOH Interval (HM)': eq.toh_interval_hours,
+          'Last TOH Hours': eq.last_toh_hours,
+          'GOH Interval (HM)': eq.goh_interval_hours,
+          'Last GOH Hours': eq.last_goh_hours,
+          'Last GOH Date': eq.last_goh_date,
+          'Economic Life (HM)': eq.economic_life_hours,
+          'Target MTBF (HM)': eq.target_mtbf_hours,
+          'COF Score': eq.cof_score,
+          'Tanggal Masuk Operasi': eq.tanggal_masuk_operasi,
           'Last Maintenance Date': eq.last_maintenance_date,
           'Last Maintenance Type': eq.last_maintenance_type,
           'Next Maintenance Date': eq.next_maintenance_date,
@@ -6943,10 +6956,15 @@
                        : `<span class="text-green-700">✅ OK (sisa ${Math.floor((minDue - today) / 86400000)} hari ke batas min)</span>`;
           ploInfo = { minDue, maxDue, sisaHari, status };
         }
-        const _eqInterval = Number(eq.pm_interval_hours) || 250;
-        const _currentHM  = Number(eq.running_hours || 0);
-        const _nextPmHm   = Math.ceil((_currentHM + 1) / _eqInterval) * _eqInterval;
-        // Sisa ke PM — grid-anchored (sinkron dengan dashboard)
+        const _eqInterval    = Number(eq.pm_interval_hours) || 250;
+        const _currentHM     = Number(eq.running_hours || 0);
+        const _lastPmHm      = Number(eq.last_pm_hours || 0);
+        const _lastMilestone = Math.floor(_currentHM / _eqInterval) * _eqInterval;
+        const _isOverdue     = _lastPmHm < _lastMilestone && _lastMilestone > 0;
+        const _nextPmHm      = _isOverdue
+                               ? _lastMilestone
+                               : Math.ceil((_currentHM + 1) / _eqInterval) * _eqInterval;
+        // Sisa ke PM — grid-anchored (sinkron dengan dashboard), negatif jika overdue
         const sisaPM = (eq.pm_type !== 'plo' && eq.pm_type !== 'time' && eq.running_hours != null && eq.pm_interval_hours)
           ? (() => { const rem = _nextPmHm - _currentHM;
                      return rem <= 0 ? `<span class="text-red-700 font-bold">⚠️ lewat ${fmtNumber(-rem, ' ' + u)}</span>` : fmtNumber(rem, ' ' + u); })()
@@ -13061,7 +13079,8 @@
       const mtbf = totalFail > 0 ? totalOpH / totalFail : null;
       const fleetAvail = eqList.length ? eqList.reduce((a, b) => a + b.avail,   0) / eqList.length : 100;
       const fleetAi    = eqList.length ? eqList.reduce((a, b) => a + b.availAi, 0) / eqList.length : 100;
-      const cat = {}; dataAll.forEach(d => { const c = DT_CAT[d.category] || 'Lainnya'; if (!cat[c]) cat[c] = { n: 0, h: 0 }; cat[c].n++; cat[c].h += Number(d.duration_hours) || 0; });
+      const _dtH = d => d.duration_hours != null ? Number(d.duration_hours) : (d.end_at ? (new Date(d.end_at) - new Date(d.start_at)) / 3600000 : (Date.now() - new Date(d.start_at).getTime()) / 3600000);
+      const cat = {}; dataAll.forEach(d => { const c = DT_CAT[d.category] || 'Lainnya'; if (!cat[c]) cat[c] = { n: 0, h: 0 }; cat[c].n++; cat[c].h += _dtH(d); });
 
       // Rekap RAM per rig — group eqList (sudah ada agg) berdasarkan assigned_unit_id
       const rigMap = {};
@@ -15911,21 +15930,30 @@
         const rh = Number(eq.running_hours) || 0;
         const lc = computeLifecycle(eq);
 
-        // Hitung sisa milestone
-        const sisaPM = (eq.pm_interval_hours) ? eq.pm_interval_hours - (rh - (Number(eq.last_pm_hours) || 0)) : null;
+        // Hitung sisa milestone — grid-anchored (sinkron dashboard)
+        const _woInterval    = Number(eq.pm_interval_hours) || 250;
+        const _woLastMile    = Math.floor(rh / _woInterval) * _woInterval;
+        const _woOverdue     = Number(eq.last_pm_hours || 0) < _woLastMile && _woLastMile > 0;
+        const _woNextPm      = _woOverdue ? _woLastMile : Math.ceil((rh + 1) / _woInterval) * _woInterval;
+        const sisaPM  = eq.pm_interval_hours ? _woNextPm - rh : null;
         const sisaTOH = lc?.toh?.remaining;
         const sisaGOH = lc?.goh?.remaining;
-        const ecoPct = lc?.eco?.pct;
+        const ecoPct  = lc?.eco?.pct;
+        // Threshold proporsional: 10% interval, min 50 HM
+        const _pmUrgentLine  = Math.max(50, Math.round(_woInterval * 0.1));
+        const _tohUrgentLine = eq.toh_interval_hours ? Math.max(200, Math.round(Number(eq.toh_interval_hours) * 0.05)) : 500;
+        const _gohUrgentLine = eq.goh_interval_hours ? Math.max(500, Math.round(Number(eq.goh_interval_hours) * 0.05)) : 500;
 
         // Tentukan milestone yg paling urgent (untuk title WO)
         let primaryMilestone = 'PM';
         let primaryUrgency = 'Routine';
         let primaryColor = '#16a34a';
-        if (sisaTOH != null && sisaTOH < 0) { primaryMilestone = 'TOH'; primaryUrgency = 'OVERDUE'; primaryColor = '#dc2626'; }
-        else if (sisaGOH != null && sisaGOH < 0) { primaryMilestone = 'GOH'; primaryUrgency = 'OVERDUE'; primaryColor = '#dc2626'; }
-        else if (sisaPM != null && sisaPM < 0) { primaryMilestone = 'PM'; primaryUrgency = 'OVERDUE'; primaryColor = '#dc2626'; }
-        else if (sisaTOH != null && sisaTOH < 500) { primaryMilestone = 'TOH'; primaryUrgency = 'URGENT'; primaryColor = '#d97706'; }
-        else if (sisaPM != null && sisaPM < 100) { primaryMilestone = 'PM'; primaryUrgency = 'URGENT'; primaryColor = '#d97706'; }
+        if (sisaTOH != null && sisaTOH < 0)            { primaryMilestone = 'TOH'; primaryUrgency = 'OVERDUE'; primaryColor = '#dc2626'; }
+        else if (sisaGOH != null && sisaGOH < 0)       { primaryMilestone = 'GOH'; primaryUrgency = 'OVERDUE'; primaryColor = '#dc2626'; }
+        else if (sisaPM  != null && sisaPM  < 0)       { primaryMilestone = 'PM';  primaryUrgency = 'OVERDUE'; primaryColor = '#dc2626'; }
+        else if (sisaGOH != null && sisaGOH < _gohUrgentLine) { primaryMilestone = 'GOH'; primaryUrgency = 'URGENT'; primaryColor = '#d97706'; }
+        else if (sisaTOH != null && sisaTOH < _tohUrgentLine) { primaryMilestone = 'TOH'; primaryUrgency = 'URGENT'; primaryColor = '#d97706'; }
+        else if (sisaPM  != null && sisaPM  < _pmUrgentLine)  { primaryMilestone = 'PM';  primaryUrgency = 'URGENT'; primaryColor = '#d97706'; }
 
         // Identitas
         const identitas = `
@@ -16431,7 +16459,8 @@
       const rows = eqList.slice(0, 300).map((o, i) => `<tr><td style="text-align:center">${i + 1}</td><td>${escapeHtml(o.tag || '-')}<br><span style="color:#6b7280">${escapeHtml(o.name || '')}</span></td>${availCell(o.avail)}${availCell(o.availAi)}<td style="text-align:center">${o.failEvents}</td><td style="text-align:center">${fmtH(o.downH)}</td><td style="text-align:center">${fmtH(o.mttr)}</td></tr>`).join('');
       const table = `<table><thead><tr><th>No</th><th>Equipment</th><th>Ao</th><th>Ai</th><th>Failure</th><th>Total Down</th><th>MTTR</th></tr></thead><tbody>${rows || '<tr><td colspan="7" style="text-align:center">Belum ada catatan downtime</td></tr>'}</tbody></table>`;
       const kesimpulan = `<b style="color:#dc2626">⚠️ Dampak:</b> equipment dengan availability rendah / sedang down berpotensi menghambat operasi.<br><br><b style="color:#16a34a">✅ Permohonan:</b> mohon dukungan mempercepat perbaikan (suku cadang/SPK) pada equipment Ao terendah di atas guna memulihkan kesiapan operasi.`;
-      const catMap = {}; dataAll.forEach(d2 => { const c = DT_CAT[d2.category] || 'Lainnya'; catMap[c] = (catMap[c] || 0) + (Number(d2.duration_hours) || 0); });
+      const _dtH2 = d => d.duration_hours != null ? Number(d.duration_hours) : (d.end_at ? (new Date(d.end_at) - new Date(d.start_at)) / 3600000 : (Date.now() - new Date(d.start_at).getTime()) / 3600000);
+      const catMap = {}; dataAll.forEach(d2 => { const c = DT_CAT[d2.category] || 'Lainnya'; catMap[c] = (catMap[c] || 0) + _dtH2(d2); });
       const chart = chartBars('Jam Downtime per Penyebab', Object.entries(catMap).map(([k, v]) => ({ label: k, value: Math.round(v), color: '#11335d' })));
       openSignDialog({ title: 'Laporan Availability Equipment', type: 'AVAIL', summary, chart, intro, table, kesimpulan });
     }
