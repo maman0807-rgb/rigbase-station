@@ -886,7 +886,8 @@
 
     // PM berbasis JAM (HM): pakai running_hours (diisi mekanik via Logbook) vs last_pm_hours + pm_interval_hours.
     // Hanya unit ber-HM (running_hours > 0) yang dihitung. Tampilkan yang mendekati / sudah lewat jam PM.
-    async function fetchPMDueByHours(thresholdHours = 50) {
+    // ratio: 0.2 = warning (20% sisa interval), 0.1 = critical (10% sisa interval) — proporsional per tier.
+    async function fetchPMDueByHours(ratio = 0.2) {
       const { data, error } = await state.supabase
         .from('equipment')
         .select('id, tag_number, nama_equipment, assigned_unit_id, status_operasi, running_hours, last_pm_hours, pm_interval_hours, pm_type')
@@ -914,9 +915,11 @@
           const _pmType        = (interval % 250 === 0)
                                  ? (() => { const t = getPMType(nextPmAt); return (t === 'GOH' && e.goh_interval_hours) ? 'PM3' : (t || 'PM?'); })()
                                  : `PM-${interval}HM`;
-          return { ...e, _interval: interval, _actualInterval, _pmType, _nextPmAt: nextPmAt, _used: currentHM - lastPmHm, _remaining: remaining };
+          // Threshold proporsional: 20% interval untuk warning, 10% untuk critical, min 50 HM
+          const _threshold     = Math.max(50, Math.round(interval * ratio));
+          return { ...e, _interval: interval, _actualInterval, _pmType, _nextPmAt: nextPmAt, _used: currentHM - lastPmHm, _remaining: remaining, _threshold };
         })
-        .filter(e => e._remaining <= thresholdHours)
+        .filter(e => e._remaining <= e._threshold)
         .sort((a, b) => a._remaining - b._remaining)
         .slice(0, 15);
     }
@@ -1661,8 +1664,8 @@
       try {
         const alerts = [];
 
-        // 1. PM Critical (≤ 50 HM atau sudah lewat)
-        const pmCritical = await fetchPMDueByHours(50).catch(() => []);
+        // 1. PM Critical (≤ 10% interval tiap unit atau sudah lewat)
+        const pmCritical = await fetchPMDueByHours(0.1).catch(() => []);
         if (pmCritical.length) {
           const lines = pmCritical.map(e => {
             const rem = e._remaining;
@@ -1984,7 +1987,7 @@
           <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
               <h4 class="text-base font-bold text-slate-800 mb-3 flex items-center gap-2">🔧 Mendekati Maintenance PM</h4>
-              <p class="text-xs text-slate-400 mb-3">Equipment dengan sisa HM ≤ 200 jam sebelum PM berikutnya.</p>
+              <p class="text-xs text-slate-400 mb-3">Equipment dengan sisa HM ≤ 20% interval PM tiap unit (proporsional per tier).</p>
               <div id="dash-due" class="space-y-2 text-sm">Memuat…</div>
             </div>
             <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
@@ -2028,10 +2031,10 @@
           try {
             const [stats, due, skpi, loans, pmHours, pmKm, overhaul, inspAktif] = await Promise.all([
               fetchDashboardStats(),
-              fetchPMDueByHours(200).catch(() => []),
+              fetchPMDueByHours(0.2).catch(() => []),
               fetchExpiringSkpi(60),
               fetchAllActiveLoans().catch(() => []),
-              fetchPMDueByHours(50).catch(() => []),
+              fetchPMDueByHours(0.1).catch(() => []),
               fetchPMDueByKm(500).catch(() => []),
               fetchOverhaulDue(500).catch(() => []),
               state.supabase.from('v_inspection_downtime').select('*').eq('is_holding', true).order('mulai').then(r => r).catch(() => ({ data: [] })),
@@ -2043,21 +2046,22 @@
               ${statCard('Down',            fmtNumber(stats.down),    ICONS.warning, 'bg-red-100 text-red-700')}
               ${statCard('Maintenance Due', fmtNumber(due.length),    ICONS.bell,    'bg-orange-100 text-orange-700')}
             `;
-            // Mendekati Maintenance PM (HM-based, threshold 200 jam)
+            // Mendekati Maintenance PM (HM-based, threshold proporsional 20% interval tiap unit)
             $('#dash-due').innerHTML = due.length === 0
-              ? '<div class="text-slate-400 text-sm">Tidak ada equipment yang mendekati jadwal PM (dalam 200 HM).</div>'
+              ? '<div class="text-slate-400 text-sm">Tidak ada equipment yang mendekati jadwal PM.</div>'
               : due.map(e => {
                   const rem = e._remaining;
-                  const borderCls = rem <= 0   ? 'border-red-300 bg-red-50'
-                                  : rem <= 50  ? 'border-amber-300 bg-amber-50'
+                  const critLine = Math.round(e._threshold * 0.5); // 10% interval = garis critical
+                  const borderCls = rem <= 0        ? 'border-red-300 bg-red-50'
+                                  : rem <= critLine ? 'border-amber-300 bg-amber-50'
                                   : 'border-yellow-200 bg-yellow-50';
-                  const label    = rem <= 0   ? `⛔ LEWAT ${Math.abs(Math.round(rem))} HM`
-                                 : rem <= 50  ? `⚠️ Sisa ${Math.round(rem)} HM`
+                  const label    = rem <= 0        ? `⛔ LEWAT ${Math.abs(Math.round(rem))} HM`
+                                 : rem <= critLine ? `⚠️ Sisa ${Math.round(rem)} HM`
                                  : `🟡 Sisa ${Math.round(rem)} HM`;
-                  const txtCls   = rem <= 0 ? 'text-red-700 font-bold' : rem <= 50 ? 'text-amber-700 font-semibold' : 'text-yellow-700 font-semibold';
+                  const txtCls   = rem <= 0 ? 'text-red-700 font-bold' : rem <= critLine ? 'text-amber-700 font-semibold' : 'text-yellow-700 font-semibold';
                   const urgBadge = rem <= 0
                     ? `<span class="inline-flex items-center gap-1 text-xs bg-red-600 text-white px-2.5 py-0.5 rounded-full font-extrabold tracking-wide shadow">🚨 LAKUKAN PM SEKARANG</span>`
-                    : rem <= 50
+                    : rem <= critLine
                     ? `<span class="inline-flex items-center gap-1 text-xs bg-amber-500 text-white px-2.5 py-0.5 rounded-full font-extrabold tracking-wide shadow">⚠️ JADWALKAN PM</span>`
                     : '';
                   const _pmColors = { GOH:'bg-red-600', PM6:'bg-orange-500', PM5:'bg-purple-600', PM4:'bg-blue-600', PM3:'bg-slate-500' };
@@ -2104,7 +2108,7 @@
               ? '<div class="text-slate-400 text-sm">Tidak ada unit mendekati jam PM.</div>'
               : pmHours.map(e => {
                   const over  = e._remaining < 0;
-                  const color = over ? 'text-red-700' : (e._remaining <= 20 ? 'text-amber-700' : 'text-slate-700');
+                  const color = over ? 'text-red-700' : (e._remaining <= Math.round(e._threshold * 0.5) ? 'text-amber-700' : 'text-slate-700');
                   return `<button onclick="setEquipmentView('detail','${e.id}'); navigate('equipment')" class="w-full text-left flex items-center justify-between hover:bg-slate-50 px-2 py-1.5 rounded">
                     <div class="min-w-0">
                       <div class="font-semibold text-navy text-sm truncate">${escapeHtml(e.tag_number)}</div>
