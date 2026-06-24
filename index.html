@@ -897,27 +897,23 @@
       if (error) throw error;
       return (data || [])
         .map(e => {
-          const interval       = Number(e.pm_interval_hours) || 250;
-          const currentHM      = Number(e.running_hours || 0);
-          const lastPmHm       = Number(e.last_pm_hours || 0);
-          // Grid absolute berbasis interval masing-masing (bukan hardcode 250)
-          const lastMilestone  = Math.floor(currentHM / interval) * interval;
-          const isOverdue      = lastPmHm < lastMilestone && lastMilestone > 0;
-          const nextPmAt       = isOverdue
-                                 ? lastMilestone
-                                 : Math.ceil((currentHM + 1) / interval) * interval;
-          const remaining      = nextPmAt - currentHM;
-          const _actualInterval = nextPmAt % 10000 === 0 ? 10000 :
-                                  nextPmAt % 2000  === 0 ? 2000  :
-                                  nextPmAt % 1000  === 0 ? 1000  :
-                                  nextPmAt % 500   === 0 ? 500   : 250;
+          const interval  = Number(e.pm_interval_hours) || 250;
+          const currentHM = Number(e.running_hours || 0);
+          const lastPmHm  = Number(e.last_pm_hours || 0);
+          // Cumulative: next PM = lastPm + interval. Jika sudah lewat, tunjuk milestone yg terlewat.
+          const usedHM    = currentHM - lastPmHm;
+          const isOverdue = usedHM >= interval;
+          const nextPmAt  = isOverdue
+                            ? lastPmHm + Math.floor(usedHM / interval) * interval  // milestone terlewat terakhir
+                            : lastPmHm + interval;                                  // milestone berikutnya
+          const remaining = nextPmAt - currentHM;  // negatif jika overdue
           // Guard: interval kelipatan 250 → bisa dapat PM type label
-          const _pmType        = (interval % 250 === 0)
-                                 ? (() => { const t = getPMType(nextPmAt); return (t === 'GOH' && e.goh_interval_hours) ? 'PM3' : (t || 'PM?'); })()
-                                 : `PM-${interval}HM`;
+          const _pmType   = (interval % 250 === 0)
+                            ? (() => { const t = getPMType(nextPmAt); return (t === 'GOH' && e.goh_interval_hours) ? 'PM3' : (t || 'PM?'); })()
+                            : `PM-${interval}HM`;
           // Threshold proporsional: 20% interval untuk warning, 10% untuk critical, min 50 HM
-          const _threshold     = Math.max(50, Math.round(interval * ratio));
-          return { ...e, _interval: interval, _actualInterval, _pmType, _nextPmAt: nextPmAt, _used: currentHM - lastPmHm, _remaining: remaining, _threshold };
+          const _threshold = Math.max(50, Math.round(interval * ratio));
+          return { ...e, _interval: interval, _actualInterval: interval, _pmType, _nextPmAt: nextPmAt, _used: usedHM, _remaining: remaining, _threshold };
         })
         .filter(e => e._remaining <= e._threshold)
         .sort((a, b) => a._remaining - b._remaining)
@@ -6956,14 +6952,14 @@
                        : `<span class="text-green-700">✅ OK (sisa ${Math.floor((minDue - today) / 86400000)} hari ke batas min)</span>`;
           ploInfo = { minDue, maxDue, sisaHari, status };
         }
-        const _eqInterval    = Number(eq.pm_interval_hours) || 250;
-        const _currentHM     = Number(eq.running_hours || 0);
-        const _lastPmHm      = Number(eq.last_pm_hours || 0);
-        const _lastMilestone = Math.floor(_currentHM / _eqInterval) * _eqInterval;
-        const _isOverdue     = _lastPmHm < _lastMilestone && _lastMilestone > 0;
-        const _nextPmHm      = _isOverdue
-                               ? _lastMilestone
-                               : Math.ceil((_currentHM + 1) / _eqInterval) * _eqInterval;
+        const _eqInterval = Number(eq.pm_interval_hours) || 250;
+        const _currentHM  = Number(eq.running_hours || 0);
+        const _lastPmHm   = Number(eq.last_pm_hours || 0);
+        const _usedHM     = _currentHM - _lastPmHm;
+        const _isOverdue  = _usedHM >= _eqInterval;
+        const _nextPmHm   = _isOverdue
+                            ? _lastPmHm + Math.floor(_usedHM / _eqInterval) * _eqInterval
+                            : _lastPmHm + _eqInterval;
         // Sisa ke PM — grid-anchored (sinkron dengan dashboard), negatif jika overdue
         const sisaPM = (eq.pm_type !== 'plo' && eq.pm_type !== 'time' && eq.running_hours != null && eq.pm_interval_hours)
           ? (() => { const rem = _nextPmHm - _currentHM;
@@ -15930,11 +15926,14 @@
         const rh = Number(eq.running_hours) || 0;
         const lc = computeLifecycle(eq);
 
-        // Hitung sisa milestone — grid-anchored (sinkron dashboard)
-        const _woInterval    = Number(eq.pm_interval_hours) || 250;
-        const _woLastMile    = Math.floor(rh / _woInterval) * _woInterval;
-        const _woOverdue     = Number(eq.last_pm_hours || 0) < _woLastMile && _woLastMile > 0;
-        const _woNextPm      = _woOverdue ? _woLastMile : Math.ceil((rh + 1) / _woInterval) * _woInterval;
+        // Hitung sisa milestone — cumulative dari last_pm_hours
+        const _woInterval = Number(eq.pm_interval_hours) || 250;
+        const _woLastPm   = Number(eq.last_pm_hours || 0);
+        const _woUsed     = rh - _woLastPm;
+        const _woOverdue  = _woUsed >= _woInterval;
+        const _woNextPm   = _woOverdue
+                            ? _woLastPm + Math.floor(_woUsed / _woInterval) * _woInterval
+                            : _woLastPm + _woInterval;
         const sisaPM  = eq.pm_interval_hours ? _woNextPm - rh : null;
         const sisaTOH = lc?.toh?.remaining;
         const sisaGOH = lc?.goh?.remaining;
