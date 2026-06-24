@@ -7457,25 +7457,39 @@
     // ── Pemasangan Tab ──────────────────────────────────────────
     async function renderPemasanganTab(eq, container) {
       try {
-        // Fetch data paralel: sebagai induk + sebagai anak
-        const [anakRows, riwayatRows, totalRow] = await Promise.all([
-          // Anak yang terpasang di equipment ini (sebagai induk)
+        // Fetch data paralel. Riwayat tanpa join (hindari schema-cache issue tabel baru);
+        // induk tag di-resolve lewat batch query terpisah.
+        const [anakRows, riwayatRows, aktifView, totalRow] = await Promise.all([
+          // Anak yang terpasang di equipment ini (sebagai induk) — pakai VIEW
           state.supabase.from('v_hm_anak_aktif').select('*').eq('induk_id', eq.id)
             .then(r => r.data || []),
-          // Riwayat pemasangan equipment ini (sebagai anak)
+          // Riwayat pemasangan equipment ini (sebagai anak) — tanpa join
           eq.parent_equipment_id
-            ? state.supabase.from('pemasangan')
-                .select('*, induk:induk_id(tag_number, nama_equipment, running_hours)')
+            ? state.supabase.from('pemasangan').select('*')
                 .eq('anak_tag', eq.tag_number)
                 .order('tanggal_pasang', { ascending: false })
                 .then(r => r.data || [])
             : Promise.resolve([]),
+          // Sesi aktif anak (dari view — ada hm_running live + induk_tag)
+          eq.parent_equipment_id
+            ? state.supabase.from('v_hm_anak_aktif').select('*').eq('anak_tag', eq.tag_number)
+                .maybeSingle().then(r => r.data)
+            : Promise.resolve(null),
           // Total HM akumulatif (sebagai anak)
           eq.parent_equipment_id
             ? state.supabase.from('v_hm_anak_total').select('*').eq('anak_tag', eq.tag_number)
                 .maybeSingle().then(r => r.data)
             : Promise.resolve(null),
         ]);
+
+        // Resolve induk tag_number untuk riwayat (batch 1 query)
+        const indukIds = [...new Set((riwayatRows || []).map(r => r.induk_id).filter(Boolean))];
+        const indukMap = {};
+        if (indukIds.length) {
+          const { data: indukList } = await state.supabase.from('equipment')
+            .select('id, tag_number, running_hours').in('id', indukIds);
+          (indukList || []).forEach(e => { indukMap[e.id] = e; });
+        }
 
         const isAnak  = !!eq.parent_equipment_id;
         const isInduk = anakRows.length > 0;
@@ -7540,14 +7554,16 @@
 
         // ── SEBAGAI ANAK ──
         if (isAnak) {
-          const aktif = riwayatRows.find(r => !r.tanggal_lepas);
+          // aktifView = baris dari v_hm_anak_aktif (sudah ada hm_running live & induk_tag)
+          // aktifRaw  = baris dari pemasangan (untuk id modal lepas)
+          const aktifRaw = riwayatRows.find(r => !r.tanggal_lepas);
           html += `
           <div>
             <h4 class="font-bold text-navy text-base uppercase tracking-wider mb-3">Status Pemasangan</h4>
             <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
               <div class="bg-blue-50 rounded-lg p-3 text-center">
                 <div class="text-xs text-blue-600 font-medium mb-1">HM Session Ini</div>
-                <div class="text-xl font-bold text-blue-800">${fmt2(aktif?.hm_running ?? null)}</div>
+                <div class="text-xl font-bold text-blue-800">${fmt2(aktifView?.hm_running ?? null)}</div>
               </div>
               <div class="bg-navy/5 rounded-lg p-3 text-center">
                 <div class="text-xs text-slate-600 font-medium mb-1">Total Akumulatif</div>
@@ -7555,18 +7571,19 @@
               </div>
               <div class="bg-slate-50 rounded-lg p-3 text-center">
                 <div class="text-xs text-slate-600 font-medium mb-1">Induk Sekarang</div>
-                <div class="text-sm font-bold text-slate-700 truncate">${escapeHtml(aktif?.induk?.tag_number || aktif?.induk_tag || '—')}</div>
+                <div class="text-sm font-bold text-slate-700 truncate">${escapeHtml(aktifView?.induk_tag || '—')}</div>
               </div>
               <div class="bg-slate-50 rounded-lg p-3 text-center">
                 <div class="text-xs text-slate-600 font-medium mb-1">Terpasang Sejak</div>
-                <div class="text-sm font-bold text-slate-700">${aktif ? fmtD(aktif.tanggal_pasang) : '—'}</div>
+                <div class="text-sm font-bold text-slate-700">${aktifView ? fmtD(aktifView.tanggal_pasang) : '—'}</div>
               </div>
             </div>`;
 
-          if (aktif) {
+          if (aktifRaw) {
+            const indukHmNow = indukMap[aktifRaw.induk_id]?.running_hours || 0;
             html += `
             <div class="flex justify-end mb-4">
-              <button onclick="showLepasAnakModal('${aktif.id}','${escapeHtml(eq.tag_number)}',${aktif.punya_meter_sendiri},${aktif.induk?.running_hours||0},${eq.running_hours||0})"
+              <button onclick="showLepasAnakModal('${aktifRaw.id}','${escapeHtml(eq.tag_number)}',${aktifRaw.punya_meter_sendiri},${indukHmNow},${eq.running_hours||0})"
                 class="bg-red-50 border border-red-200 text-red-600 text-xs font-semibold px-4 py-2 rounded-lg hover:bg-red-100">
                 Lepas dari Induk
               </button>
@@ -7588,7 +7605,7 @@
                 </thead>
                 <tbody>
                   ${riwayatRows.length ? riwayatRows.map(r => {
-                    const indukTag = r.induk?.tag_number || '—';
+                    const indukTag = indukMap[r.induk_id]?.tag_number || r.induk_id?.slice(0,8) + '…' || '—';
                     const hmSesi = r.punya_meter_sendiri
                       ? (r.hm_meter_lepas != null ? r.hm_meter_lepas - r.hm_meter_pasang : null)
                       : (r.hm_induk_lepas != null ? r.hm_induk_lepas - r.hm_induk_pasang : null);
