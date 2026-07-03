@@ -7840,6 +7840,15 @@
             (photos || []).forEach(p => { (photosByEvent[p.downtime_event_id] = photosByEvent[p.downtime_event_id] || []).push(p); });
           } catch (e) { /* tabel mungkin belum ada — skip */ }
         }
+        // Fetch progress log per downtime event
+        const progressByEvent = {};
+        if (dtIds.length) {
+          try {
+            const { data: prog } = await state.supabase.from('downtime_progress')
+              .select('*').in('downtime_event_id', dtIds).order('changed_at');
+            (prog || []).forEach(p => { (progressByEvent[p.downtime_event_id] = progressByEvent[p.downtime_event_id] || []).push(p); });
+          } catch (e) { /* skip */ }
+        }
 
         // Gabung events ke timeline yg sama, sort by date desc
         const events = [];
@@ -7921,6 +7930,33 @@
             status: d.end_at ? null : (isGejala ? 'gejala' : 'down'),
             photos: beforePhotos,
             eventId: d.id,
+          });
+
+          // 1b) PROGRESS milestones — dari downtime_progress log
+          const progLog = progressByEvent[d.id] || [];
+          const WS_META = {
+            diagnosis:         { icon: '🔍', label: 'Diagnosis',         color: 'bg-yellow-500' },
+            tunggu_part:       { icon: '⏳', label: 'Tunggu Part',        color: 'bg-orange-500' },
+            perbaikan:         { icon: '🔧', label: 'Diperbaiki',         color: 'bg-blue-500'   },
+            uji_coba:          { icon: '🔬', label: 'Uji Coba',           color: 'bg-purple-500' },
+            tunggu_konfirmasi: { icon: '✅', label: 'Tunggu Konfirmasi',  color: 'bg-teal-500'   },
+            selesai:           { icon: '✔️', label: 'Selesai',            color: 'bg-green-600'  },
+          };
+          progLog.forEach((p, i) => {
+            const m = WS_META[p.status] || { icon: '📋', label: p.status, color: 'bg-slate-500' };
+            const prev = i > 0 ? progLog[i - 1] : null;
+            const durMs = prev ? new Date(p.changed_at) - new Date(prev.changed_at) : null;
+            const durLabel = durMs ? ` · ${fmtH(durMs / 3600000)}` : '';
+            events.push({
+              group: 'downtime', kind: 'progress',
+              subgroup: isGejala ? 'gejala' : 'downtime',
+              date: p.changed_at,
+              title: `${m.icon} ${m.label}`,
+              detail: `${p.changed_by ? `👷 ${escapeHtml(p.changed_by)}` : ''}${durLabel}${p.catatan ? `<br>📝 ${escapeHtml(p.catatan)}` : ''}`,
+              detailIsHtml: true,
+              color: m.color,
+              eventId: d.id,
+            });
           });
 
           // 2) PART milestones — group by event_date; detail = caption foto saja
@@ -13880,6 +13916,11 @@
     async function markDowntimeDone(id) {
       const { error } = await state.supabase.from('downtime_events').update({ end_at: new Date().toISOString() }).eq('id', id);
       if (error) { toast('Gagal: ' + error.message, 'error'); return; }
+      await state.supabase.from('downtime_progress').insert({
+        downtime_event_id: id,
+        status: 'selesai',
+        changed_by: state.profile?.nama || state.profile?.username || '—',
+      });
       toast('Ditandai selesai.', 'success');
       renderAvailabilityPage(document.getElementById('ram-content'));
     }
@@ -13888,6 +13929,11 @@
     async function updateWorkStatus(id, status) {
       const { error } = await state.supabase.from('downtime_events').update({ work_status: status }).eq('id', id);
       if (error) { toast('Gagal update status: ' + error.message, 'error'); return; }
+      await state.supabase.from('downtime_progress').insert({
+        downtime_event_id: id,
+        status,
+        changed_by: state.profile?.nama || state.profile?.username || '—',
+      });
       toast('Status pekerjaan diperbarui.', 'success');
       renderAvailabilityPage(document.getElementById('ram-content'));
     }
