@@ -13679,7 +13679,7 @@
                 <td class="px-3 py-2"><span class="text-xs font-semibold border rounded-full px-2 py-0.5 ${badgeCls}">${badgeLabel}</span></td>
                 <td class="px-3 py-2 text-xs text-slate-500 max-w-[180px]"><div class="truncate" title="${escapeHtml(d.notes||'')}">${escapeHtml(d.notes || '—')}</div></td>
                 <td class="px-3 py-2 text-right whitespace-nowrap">
-                  <button onclick="markDowntimeDone('${d.id}')" class="px-2 py-1 rounded bg-green-100 hover:bg-green-200 text-green-700 text-xs font-semibold">✓ Part Tiba</button>
+                  <button onclick="updateWorkStatus('${d.id}', 'perbaikan')" class="px-2 py-1 rounded bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs font-semibold">🔧 Part Tiba → Mulai Perbaikan</button>
                   <button onclick="openDowntimeEdit('${d.id}')" class="px-2 py-1 rounded bg-navy hover:bg-navy-700 text-white text-xs">✏</button>
                 </td>
               </tr>`;
