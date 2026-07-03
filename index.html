@@ -12703,6 +12703,17 @@
     const TERENCANA_CATS = ['pm', 'inspeksi_terjadwal'];
     // Gejala = early warning; alat MASIH JALAN. Tidak masuk perhitungan availability/MTBF/MTTR.
     const GEJALA_CAT = 'gejala';
+    const WORK_STATUS = {
+      diagnosis:          { label: 'Diagnosis',         pct: 15, cls: 'bg-yellow-100 text-yellow-800 border-yellow-300',  icon: '🔍' },
+      tunggu_part:        { label: 'Tunggu Part',        pct: 35, cls: 'bg-orange-100 text-orange-800 border-orange-300',  icon: '⏳' },
+      perbaikan:          { label: 'Diperbaiki',         pct: 65, cls: 'bg-blue-100 text-blue-800 border-blue-300',        icon: '🔧' },
+      uji_coba:           { label: 'Uji Coba',           pct: 85, cls: 'bg-purple-100 text-purple-800 border-purple-300',  icon: '🔬' },
+      tunggu_konfirmasi:  { label: 'Tunggu Konfirmasi',  pct: 95, cls: 'bg-green-100 text-green-800 border-green-300',     icon: '✅' },
+    };
+    function wsBar(pct) {
+      const col = pct >= 85 ? 'bg-green-500' : pct >= 60 ? 'bg-blue-500' : pct >= 35 ? 'bg-orange-400' : 'bg-yellow-400';
+      return `<div class="w-full bg-slate-100 rounded-full h-1.5 mt-1"><div class="${col} h-1.5 rounded-full" style="width:${pct}%"></div></div>`;
+    }
     let availPeriodDays = 365;
 
     // ============================================================
@@ -13418,9 +13429,10 @@
         return `<tr class="border-b border-slate-100 bg-purple-50/40">
           <td class="px-3 py-2 text-sm font-bold text-navy">${escapeHtml(r.rig || '—')} <span class="ml-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-100 text-purple-700">🔒 Siklus</span></td>
           <td class="px-3 py-2 text-sm">Inspeksi Terjadwal <span class="ml-1 font-mono text-[11px] text-purple-600">${escapeHtml(r.inspection_code)}</span></td>
+          <td class="px-3 py-2 text-xs text-slate-400 italic" colspan="2">${r.open_count} temuan open · tutup di Modul Inspeksi</td>
           <td class="px-3 py-2 text-sm">${r.mulai ? new Date(r.mulai).toLocaleString('id-ID') : '—'}</td>
           <td class="px-3 py-2 text-sm text-red-600 font-semibold">${fmtH(durH)}</td>
-          <td class="px-3 py-2 text-right text-xs text-slate-400 italic">${r.open_count} temuan open · tutup di Modul Inspeksi</td>
+          <td class="px-3 py-2"></td>
         </tr>`;
       }).join('');
       // MTTR & MTBF hanya dari FAILURE_CATS (Breakdown + Troubleshoot)
@@ -13486,13 +13498,34 @@
         </div>` : '';
 
       const kpi = (label, val, sub) => `<div class="bg-white rounded-xl border border-slate-200 p-4"><div class="text-xs text-slate-500 mb-1">${label}</div><div class="text-2xl font-extrabold text-slate-900">${val}</div>${sub ? `<div class="text-[11px] text-slate-400 mt-0.5">${sub}</div>` : ''}</div>`;
-      const ongoingRows = ongoing.map(d => `<tr class="border-b border-slate-100">
-        <td class="px-3 py-2 text-sm font-mono text-navy">${escapeHtml(d.equipment_tag || '—')}</td>
-        <td class="px-3 py-2 text-sm">${escapeHtml(DT_CAT[d.category] || '-')}</td>
-        <td class="px-3 py-2 text-sm">${escapeHtml(d.start_at ? new Date(d.start_at).toLocaleString('id-ID') : '—')}</td>
-        <td class="px-3 py-2 text-sm text-red-600 font-semibold">${fmtH((now - new Date(d.start_at).getTime()) / 3600000)}</td>
-        <td class="px-3 py-2 text-right whitespace-nowrap"><button onclick="markDowntimeDone('${d.id}')" class="px-2 py-1 rounded bg-green-100 hover:bg-green-200 text-green-700 text-xs font-semibold">✓ Selesai</button> <button onclick="openDowntimeEdit('${d.id}')" class="px-2 py-1 rounded bg-navy hover:bg-navy-700 text-white text-xs">✏</button></td>
-      </tr>`).join('');
+      const ongoingRows = ongoing.map(d => {
+        const ws  = WORK_STATUS[d.work_status] || WORK_STATUS['diagnosis'];
+        const opts = Object.entries(WORK_STATUS).map(([k, v]) =>
+          `<option value="${k}" ${(d.work_status||'diagnosis')===k?'selected':''}>${v.icon} ${v.label}</option>`).join('');
+        return `<tr class="border-b border-slate-100 hover:bg-slate-50">
+          <td class="px-3 py-2">
+            <div class="text-sm font-mono font-bold text-navy">${escapeHtml(d.equipment_tag || '—')}</div>
+            ${d.equipment_name ? `<div class="text-xs text-slate-400 mt-0.5">${escapeHtml(d.equipment_name)}</div>` : ''}
+          </td>
+          <td class="px-3 py-2 text-sm">${escapeHtml(DT_CAT[d.category] || '-')}</td>
+          <td class="px-3 py-2">
+            <select onchange="updateWorkStatus('${d.id}', this.value)"
+              class="text-xs font-semibold border rounded-lg px-2 py-1 outline-none cursor-pointer ${ws.cls} w-full">
+              ${opts}
+            </select>
+            ${wsBar(ws.pct)}
+          </td>
+          <td class="px-3 py-2 text-xs text-slate-500 max-w-[160px]">
+            <div class="truncate" title="${escapeHtml(d.notes||'')}">${escapeHtml(d.notes || '—')}</div>
+          </td>
+          <td class="px-3 py-2 text-sm text-slate-500">${escapeHtml(d.start_at ? new Date(d.start_at).toLocaleString('id-ID') : '—')}</td>
+          <td class="px-3 py-2 text-sm text-red-600 font-semibold">${fmtH((now - new Date(d.start_at).getTime()) / 3600000)}</td>
+          <td class="px-3 py-2 text-right whitespace-nowrap">
+            <button onclick="markDowntimeDone('${d.id}')" class="px-2 py-1 rounded bg-green-100 hover:bg-green-200 text-green-700 text-xs font-semibold">✓ Selesai</button>
+            <button onclick="openDowntimeEdit('${d.id}')" class="px-2 py-1 rounded bg-navy hover:bg-navy-700 text-white text-xs">✏</button>
+          </td>
+        </tr>`;
+      }).join('');
       const gejalaRows = gejalaOngoing.map(d => `<tr class="border-b border-slate-100">
         <td class="px-3 py-2 text-sm font-mono text-navy">${escapeHtml(d.equipment_tag || '—')}</td>
         <td class="px-3 py-2 text-sm">${escapeHtml(d.notes || '—')}</td>
@@ -13558,7 +13591,7 @@
         </div>
         ${(ongoing.length || inspOngoing.length) ? `<div class="bg-white rounded-xl border border-red-200 overflow-hidden">
           <div class="px-4 py-3 border-b border-slate-100 font-semibold text-red-700 text-sm">🔴 Sedang Down (${ongoing.length + inspOngoing.length}) <span class="ml-2 text-xs font-normal text-slate-400">🔒 = dari Siklus Inspeksi, read-only</span></div>
-          <div class="overflow-x-auto"><table class="w-full"><thead><tr class="bg-slate-50 text-left text-xs font-bold text-slate-600"><th class="px-3 py-2">Equipment / Rig</th><th class="px-3 py-2">Penyebab</th><th class="px-3 py-2">Mulai</th><th class="px-3 py-2">Lama</th><th class="px-3 py-2"></th></tr></thead><tbody>${inspRows}${ongoingRows}</tbody></table></div>
+          <div class="overflow-x-auto"><table class="w-full"><thead><tr class="bg-slate-50 text-left text-xs font-bold text-slate-600"><th class="px-3 py-2">Equipment</th><th class="px-3 py-2">Penyebab</th><th class="px-3 py-2 min-w-[160px]">Status Pekerjaan</th><th class="px-3 py-2 min-w-[140px]">Catatan</th><th class="px-3 py-2">Mulai</th><th class="px-3 py-2">Lama</th><th class="px-3 py-2"></th></tr></thead><tbody>${inspRows}${ongoingRows}</tbody></table></div>
         </div>` : ''}
         ${gejalaOngoing.length ? `<div class="bg-amber-50 rounded-xl border border-amber-300 overflow-hidden">
           <div class="px-4 py-3 border-b border-amber-200 font-semibold text-amber-800 text-sm flex items-center justify-between">
@@ -13794,6 +13827,14 @@
       renderAvailabilityPage(document.getElementById('ram-content'));
     }
     window.markDowntimeDone = markDowntimeDone;
+
+    async function updateWorkStatus(id, status) {
+      const { error } = await state.supabase.from('downtime_events').update({ work_status: status }).eq('id', id);
+      if (error) { toast('Gagal update status: ' + error.message, 'error'); return; }
+      toast('Status pekerjaan diperbarui.', 'success');
+      renderAvailabilityPage(document.getElementById('ram-content'));
+    }
+    window.updateWorkStatus = updateWorkStatus;
 
     // ============================================================
     // FASE 5 — ALERT SNOOZE (anti-mabok untuk Telegram alerts)
