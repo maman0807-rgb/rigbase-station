@@ -12897,7 +12897,7 @@
     async function renderKelayakanPage(host) {
       let eqHm = [], eqKm = [], dtAll = [];
       try {
-        const fields = 'id, tag_number, nama_equipment, assigned_unit_id, running_hours, pm_interval_hours, last_pm_hours, last_pm_date, toh_interval_hours, goh_interval_hours, economic_life_hours, last_toh_hours, last_goh_hours, last_goh_date, pm_type';
+        const fields = 'id, tag_number, nama_equipment, assigned_unit_id, running_hours, pm_interval_hours, last_pm_hours, last_pm_date, toh_interval_hours, goh_interval_hours, economic_life_hours, last_toh_hours, last_goh_hours, last_goh_date, pm_type, tanggal_masuk_operasi';
         const [hm, km, dt] = await Promise.all([
           state.supabase.from('equipment').select(fields).gt('running_hours', 0).neq('pm_type', 'km'),
           state.supabase.from('equipment').select(fields).gt('running_hours', 0).eq('pm_type', 'km'),
@@ -13061,10 +13061,13 @@
           const lc = computeLifecycle(x);  // sama utk HM/KM (field semantik di-overload by pm_type)
           const d = dAgg[x.id] || { fails: 0, downH: 0 };
           const rh = Number(x.running_hours) || 0;
+          // per-equipment period (dari tanggal_masuk_operasi, konsisten dengan renderAvailabilityPage)
+          const eqActiveMs = x.tanggal_masuk_operasi ? new Date(x.tanggal_masuk_operasi).getTime() : start;
+          const eqPeriodH  = Math.max(1, (now - Math.max(start, eqActiveMs)) / 3600000);
           // Pedoman: MTBF = Total Operating Time / Jumlah Failure (dalam periode yang sama)
-          const eqOpH = Math.max(0, periodH - d.downH);
+          const eqOpH = Math.max(0, eqPeriodH - d.downH);
           const mtbf = d.fails > 0 ? eqOpH / d.fails : null;
-          const avail = Math.max(0, Math.min(100, eqOpH / periodH * 100));
+          const avail = Math.max(0, Math.min(100, eqOpH / eqPeriodH * 100));
           const cycle = Number(x.toh_interval_hours) || Number(x.goh_interval_hours) || 0;
           let rel = 'na';
           if (d.fails === 0) rel = 'green';
@@ -13246,7 +13249,8 @@
             const clipped = Math.max(0, Math.min(end, m.end) - Math.max(s, m.start)) / 3600000;
             downH += clipped;
             if (!TERENCANA_CATS.includes(e.category)) downH_unplanned += clipped;
-            if (FAILURE_CATS.includes(e.category)) failures++;
+            // hanya hitung failure di bulan ia mulai (bukan tiap bulan ia spanning)
+            if (FAILURE_CATS.includes(e.category) && s >= m.start) failures++;
           });
           const Ao = +Math.max(0, Math.min(100, (periodH - downH)           / periodH * 100)).toFixed(1);
           const Ai = +Math.max(0, Math.min(100, (periodH - downH_unplanned) / periodH * 100)).toFixed(1);
@@ -13469,7 +13473,10 @@
         })
         .sort((a, b) => b.durH - a.durH);
       // Inspeksi Terjadwal — dari v_inspection_downtime, read-only
-      const inspOngoing = inspData.filter(r => r.is_holding);
+      const filteredRigName = availFilter.unit_id
+        ? (state.parentUnits || []).find(u => String(u.id) === String(availFilter.unit_id))?.name || null
+        : null;
+      const inspOngoing = inspData.filter(r => r.is_holding && (!filteredRigName || r.rig === filteredRigName));
       const inspRows = inspOngoing.map(r => {
         const durH = (now - new Date(r.mulai).getTime()) / 3600000;
         return `<tr class="border-b border-slate-100 bg-purple-50/40">
@@ -13541,7 +13548,7 @@
       }).join('');
       const rigSection = Object.keys(rigMap).length > 1 ? `
         <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
-          <div class="px-4 py-3 border-b border-slate-100 font-semibold text-slate-800 text-sm">📊 Rekap RAM per Rig (${availPeriodDays} hari) <span class="ml-2 text-xs font-normal text-slate-400">rata² availability semua equipment di rig tersebut</span></div>
+          <div class="px-4 py-3 border-b border-slate-100 font-semibold text-slate-800 text-sm">📊 Rekap RAM per Rig (${availPeriodDays} hari) <span class="ml-2 text-xs font-normal text-slate-400">availability berbobot (Σ uptime / Σ periode semua equipment di rig)</span></div>
           <div class="overflow-x-auto"><table class="w-full"><thead class="bg-slate-50"><tr class="text-left text-xs font-bold text-slate-600">
             <th class="px-3 py-2">Rig</th><th class="px-3 py-2 text-center">Alat</th><th class="px-3 py-2">Ao</th><th class="px-3 py-2">Ai</th><th class="px-3 py-2 text-center">Failure</th><th class="px-3 py-2">MTTR</th><th class="px-3 py-2">MTBF</th>
           </tr></thead><tbody>${rigRows || '<tr><td colspan="7" class="px-3 py-4 text-center text-slate-400 text-sm">Tidak ada data.</td></tr>'}</tbody></table></div>
@@ -13822,6 +13829,14 @@
           const { data, error } = await state.supabase.from('downtime_events').insert(payload).select('id').single(); if (error) throw error;
           savedId = data.id;
           isNewRecord = true;
+          // log status awal agar history tab langsung terisi
+          if (payload.category !== GEJALA_CAT) {
+            await state.supabase.from('downtime_progress').insert({
+              downtime_event_id: savedId, status: 'diagnosis',
+              changed_by: state.profile?.nama || state.profile?.username || '—',
+              catatan: null,
+            });
+          }
         }
         await uploadDowntimePhotos(savedId);
         toast('Downtime tersimpan.', 'success'); closeModal();
