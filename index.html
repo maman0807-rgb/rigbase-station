@@ -977,7 +977,7 @@
       if (ecoLife > 0) { out.eco = { used: rh, life: ecoLife, remaining: ecoLife - rh, pct: rh / ecoLife * 100 }; }
       let verdict = 'keep';
       if (ecoLife > 0 && rh >= ecoLife) verdict = 'replace';
-      else if ((ecoLife > 0 && rh >= ecoLife * 0.9) || (out.goh && out.goh.remaining < 0)) verdict = 'watch';
+      else if ((ecoLife > 0 && rh >= ecoLife * 0.9) || (out.goh && out.goh.remaining < 0) || (out.toh && out.toh.remaining < 0)) verdict = 'watch';
       out.verdict = verdict;
       return out;
     }
@@ -16714,6 +16714,12 @@
         notes: newNotes,
       }).eq('id', id);
       if (error) { toast('Gagal eskalasi: ' + error.message, 'error'); return; }
+      // log initial status setelah eskalasi agar history tab terisi
+      await state.supabase.from('downtime_progress').insert({
+        downtime_event_id: id, status: 'diagnosis',
+        changed_by: state.profile?.nama || state.profile?.username || '—',
+        catatan: note ? `Eskalasi dari gejala: ${note}` : 'Eskalasi dari gejala',
+      });
       toast('Gejala dieskalasi ke ' + DT_CAT[newCat] + '.', 'success');
       renderAvailabilityPage(document.getElementById('ram-content'));
       // 📲 FASE 1 — Real-time Telegram alert: GEJALA DIESKALASI
@@ -17069,7 +17075,7 @@
           state.supabase.from('fmea_entries').select('equipment_tag,equipment_name,severity,occurrence,detection,rpn,recommended_action').order('rpn', { ascending: false }),
           state.supabase.from('materials').select('part_number,description,category,stok'),
           state.supabase.from('downtime_events').select('*'),
-          state.supabase.from('equipment').select('id,tag_number,nama_equipment,assigned_unit_id'),
+          state.supabase.from('equipment').select('id,tag_number,nama_equipment,assigned_unit_id,tanggal_masuk_operasi'),
         ]);
         for (const x of r) if (x.error) throw x.error;
         su = r[0].data || []; se = r[1].data || []; fm = r[2].data || []; mats = r[3].data || []; dt = r[4].data || []; eqAll = r[5].data || [];
@@ -17102,11 +17108,26 @@
       const sCspp = sec('📦 3. CSPP — Suku Cadang Kritis') + `<p><b style="color:#dc2626">${critHabis.length} suku cadang Critical habis stok</b> — prioritas pengadaan.</p>`
         + tbl(['#', 'Part Number', 'Deskripsi', 'Status'], cRows);
 
-      // AVAILABILITY
-      const now = Date.now(), periodH = 365 * 24, start = now - 365 * 86400000;
-      const agg = {}; dt.forEach(d => { const k = d.equipment_id; if (!agg[k]) agg[k] = { events: 0, downH: 0 }; agg[k].events++; const s = new Date(d.start_at).getTime(), e = d.end_at ? new Date(d.end_at).getTime() : now; agg[k].downH += Math.max(0, Math.min(e, now) - Math.max(s, start)) / 3600000; });
-      const avAll = eqAll.map(x => { const a = agg[x.id] || { events: 0, downH: 0 }; return { tag: x.tag_number, name: x.nama_equipment, events: a.events, avail: Math.max(0, Math.min(100, (periodH - a.downH) / periodH * 100)) }; });
-      const fleetAvail = avAll.length ? avAll.reduce((s, v) => s + v.avail, 0) / avAll.length : 100;
+      // AVAILABILITY — konsisten dengan renderAvailabilityPage (per-equipment period, weighted aggregate)
+      const now = Date.now(), start = now - 365 * 86400000;
+      const agg = {};
+      dt.forEach(d => {
+        if (d.category === GEJALA_CAT) return;
+        const k = d.equipment_id; if (!agg[k]) agg[k] = { events: 0, downH: 0 };
+        agg[k].events++;
+        const s = new Date(d.start_at).getTime(), e = d.end_at ? new Date(d.end_at).getTime() : now;
+        agg[k].downH += Math.max(0, Math.min(e, now) - Math.max(s, start)) / 3600000;
+      });
+      const avAll = eqAll.map(x => {
+        const a = agg[x.id] || { events: 0, downH: 0 };
+        const eqActiveMs = x.tanggal_masuk_operasi ? new Date(x.tanggal_masuk_operasi).getTime() : start;
+        const eqPeriodH = Math.max(1, (now - Math.max(start, eqActiveMs)) / 3600000);
+        return { tag: x.tag_number, name: x.nama_equipment, events: a.events, eqPeriodH, downH: a.downH, avail: Math.max(0, Math.min(100, (eqPeriodH - a.downH) / eqPeriodH * 100)) };
+      });
+      // weighted aggregate (Σ uptime / Σ periode), bukan simple average
+      const _tPeriod = avAll.reduce((s, o) => s + o.eqPeriodH, 0);
+      const _tDown   = avAll.reduce((s, o) => s + o.downH, 0);
+      const fleetAvail = _tPeriod > 0 ? Math.max(0, (_tPeriod - _tDown) / _tPeriod * 100) : 100;
       const sedangDown = dt.filter(d => !d.end_at).length;
       const avRows = avAll.filter(x => x.events > 0).sort((a, b) => a.avail - b.avail).slice(0, 15).map((o, i) => { const st = o.avail >= 95 ? 'color:#16a34a' : o.avail >= 85 ? 'background:#fffbeb;color:#d97706' : 'background:#fef2f2;color:#dc2626'; return `<tr><td style="text-align:center">${i + 1}</td><td>${escapeHtml(o.tag || '-')} — ${escapeHtml(o.name || '')}</td><td style="text-align:center;font-weight:bold;${st}">${o.avail.toFixed(1)}%</td><td style="text-align:center">${o.events}</td></tr>`; }).join('');
       const sAvail = sec('🟢 4. Availability — Kesiapan Equipment') + `<p>Availability rata-rata fleet (365 hari): <b>${fleetAvail.toFixed(1)}%</b> · Sedang down: <b>${sedangDown}</b>.</p>`
