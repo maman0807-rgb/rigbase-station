@@ -11269,8 +11269,14 @@
       const periodIds = (periods||[]).map(p=>p.id);
       if (!periodIds.length) { toast('Tidak ada data Final untuk tahun ini.','warn'); return; }
 
-      const { data: entries } = await state.supabase.from('payroll_entries')
-        .select('*').in('period_id',periodIds).then(r=>r).catch(()=>({data:[]}));
+      // Paginated — 100 kary × 12 bln = 1200 baris, melewati default 1000 Supabase
+      const entries = [];
+      for (let f = 0; ; f += 1000) {
+        const { data: batch } = await state.supabase.from('payroll_entries')
+          .select('*').in('period_id', periodIds).range(f, f + 999).then(r=>r).catch(()=>({data:[]}));
+        entries.push(...(batch || []));
+        if (!batch || batch.length < 1000) break;
+      }
       const empMap = Object.fromEntries((payrollState.employees||[]).map(e=>[e.id,e]));
 
       // Agregat per karyawan
