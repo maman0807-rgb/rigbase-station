@@ -12174,12 +12174,16 @@
     async function renderFmeaPage(host) {
       let rows = [];
       try {
-        const [fr, er] = await Promise.all([
-          state.supabase.from('fmea_entries').select('*').order('rpn', { ascending: false }),
-          state.supabase.from('equipment').select('id, kategori_id, assigned_unit_id'),
-        ]);
-        if (fr.error) throw fr.error; if (er.error) throw er.error;
-        rows = fr.data || [];
+        const er = await state.supabase.from('equipment').select('id, kategori_id, assigned_unit_id');
+        if (er.error) throw er.error;
+        // Paginate fmea_entries — bisa >1000 di fleet besar
+        for (let f = 0; ; f += 1000) {
+          const { data: batch, error: fe } = await state.supabase
+            .from('fmea_entries').select('*').order('rpn', { ascending: false }).range(f, f + 999);
+          if (fe) throw fe;
+          rows.push(...(batch || []));
+          if (!batch || batch.length < 1000) break;
+        }
         const eqCat = {}, eqUnit = {}; (er.data || []).forEach(e => { eqCat[e.id] = e.kategori_id; eqUnit[e.id] = e.assigned_unit_id; });
         rows.forEach(r => { const gn = getCategoryName(eqCat[r.equipment_id]); const c = (gn && gn !== '—') ? gn : 'Lainnya'; r._group = FMEA_SUPERGROUP[c] || c; r._unitId = eqUnit[r.equipment_id] || null; });
       } catch (e) {
@@ -14142,15 +14146,19 @@
       const host = document.getElementById('recurring-host');
       if (!host) return;
       try {
-        // Fetch all findings (non-NA)
-        const { data: findings, error } = await state.supabase
-          .from('inspection_findings')
-          .select('id, equipment_id, equipment_name_snapshot, bagian, category, finding, recommendation, tgl_ditemukan, status, inspection_id')
-          .neq('category', 'N/A')
-          .order('tgl_ditemukan', { ascending: false })
-          .limit(5000);
-        if (error) throw error;
-        const fs = findings || [];
+        // Fetch all findings (non-NA) — paginated karena bisa >1000
+        const findings = [];
+        for (let f = 0; ; f += 1000) {
+          const { data: batch, error } = await state.supabase
+            .from('inspection_findings')
+            .select('id, equipment_id, equipment_name_snapshot, bagian, category, finding, recommendation, tgl_ditemukan, status, inspection_id')
+            .neq('category', 'N/A')
+            .order('tgl_ditemukan', { ascending: false }).range(f, f + 999);
+          if (error) throw error;
+          findings.push(...(batch || []));
+          if (!batch || batch.length < 1000) break;
+        }
+        const fs = findings;
 
         // Fetch inspections untuk dapat siklus name
         const { data: inspections } = await state.supabase.from('inspections')
@@ -17124,7 +17132,6 @@
         const r = await Promise.all([
           state.supabase.from('v_stress_per_unit').select('*'),
           state.supabase.from('v_stress_per_equipment').select('*').order('total_stress', { ascending: false }).limit(10),
-          state.supabase.from('fmea_entries').select('equipment_tag,equipment_name,severity,occurrence,detection,rpn,recommended_action').order('rpn', { ascending: false }),
           // materials: pakai count dulu, tapi untuk laporan cukup critical saja
           state.supabase.from('materials').select('part_number,description,category,stok').eq('category', 'Critical'),
           // filter events dalam 365+1 hari terakhir atau yang masih open
@@ -17132,7 +17139,16 @@
           state.supabase.from('equipment').select('id,tag_number,nama_equipment,assigned_unit_id,tanggal_masuk_operasi'),
         ]);
         for (const x of r) if (x.error) throw x.error;
-        su = r[0].data || []; se = r[1].data || []; fm = r[2].data || []; mats = r[3].data || []; dt = r[4].data || []; eqAll = r[5].data || [];
+        su = r[0].data || []; se = r[1].data || []; mats = r[2].data || []; dt = r[3].data || []; eqAll = r[4].data || [];
+        // Paginate fmea_entries
+        for (let f = 0; ; f += 1000) {
+          const { data: batch, error: fe } = await state.supabase
+            .from('fmea_entries').select('equipment_tag,equipment_name,severity,occurrence,detection,rpn,recommended_action')
+            .order('rpn', { ascending: false }).range(f, f + 999);
+          if (fe) throw fe;
+          fm.push(...(batch || []));
+          if (!batch || batch.length < 1000) break;
+        }
       } catch (e) { toast('Gagal memuat data laporan: ' + e.message, 'error'); return; }
 
       const n = v => Number(v) || 0;
