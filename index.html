@@ -3765,7 +3765,8 @@
     window.submitCreateUser = submitCreateUser;
 
     async function deleteUserProfile(userId, email) {
-      if (!confirm(`Hapus user "${email}" dari app?\n\nUser tidak bisa login lagi ke eRAMHoist.\n(Data auth Supabase tetap ada — hapus manual di Supabase Dashboard jika perlu.)`)) return;
+      const ok = await confirmDialog({ title: 'Hapus User?', message: `Hapus "${email}" dari app? User tidak bisa login lagi ke eRAMHoist. (Auth Supabase tetap ada — hapus manual di Supabase Dashboard jika perlu.)`, confirmText: 'Hapus', danger: true });
+      if (!ok) return;
       try {
         const { error } = await state.supabase.from('profiles').delete().eq('id', userId);
         if (error) throw error;
@@ -12608,7 +12609,8 @@
     window.submitRcaForm = submitRcaForm;
 
     async function verifyRca(rcaId, eqId) {
-      if (!confirm('Tandai RCA ini sebagai Verified?')) return;
+      const ok = await confirmDialog({ title: 'Verifikasi RCA', message: 'Tandai RCA ini sebagai Verified?', confirmText: 'Verify' });
+      if (!ok) return;
       const { error } = await state.supabase.from('rca_records')
         .update({ status: 'Verified', actual_verification_date: new Date().toISOString().slice(0,10) })
         .eq('id', rcaId);
@@ -12824,7 +12826,8 @@
         const parts = [];
         if (parent.cof_score != null) parts.push(`CoF ${parent.cof_score}`);
         if (parent.target_mtbf_hours != null) parts.push(`Target MTBF ${parent.target_mtbf_hours} jam`);
-        if (!confirm(`Warisi ${parts.join(' & ')} dari "${parent.nama_equipment}"?`)) return;
+        const okInh = await confirmDialog({ title: 'Warisi Nilai?', message: `Warisi ${parts.join(' & ')} dari "${parent.nama_equipment}"?`, confirmText: 'Warisi' });
+        if (!okInh) return;
         const update = {};
         if (parent.cof_score != null) update.cof_score = parent.cof_score;
         if (parent.target_mtbf_hours != null) update.target_mtbf_hours = parent.target_mtbf_hours;
@@ -12900,10 +12903,11 @@
       let eqHm = [], eqKm = [], dtAll = [];
       try {
         const fields = 'id, tag_number, nama_equipment, assigned_unit_id, running_hours, pm_interval_hours, last_pm_hours, last_pm_date, toh_interval_hours, goh_interval_hours, economic_life_hours, last_toh_hours, last_goh_hours, last_goh_date, pm_type, tanggal_masuk_operasi';
+        const _kelStart = new Date(Date.now() - 366 * 86400000).toISOString();
         const [hm, km, dt] = await Promise.all([
           state.supabase.from('equipment').select(fields).gt('running_hours', 0).neq('pm_type', 'km'),
           state.supabase.from('equipment').select(fields).gt('running_hours', 0).eq('pm_type', 'km'),
-          state.supabase.from('downtime_events').select('*'),
+          state.supabase.from('downtime_events').select('*').or(`start_at.gte.${_kelStart},end_at.is.null`),
         ]);
         if (hm.error) throw hm.error; if (km.error) throw km.error; if (dt.error) throw dt.error;
         eqHm = hm.data || []; eqKm = km.data || []; dtAll = dt.data || [];
@@ -13042,7 +13046,7 @@
         <div class="bg-green-50 border border-green-200 rounded-xl p-4 text-sm text-green-800">
           ✅ Tidak ada equipment yg overdue maintenance atau mendekati threshold. Semua aman.
         </div>`;
-      const periodDays = 365, now = Date.now(), start = now - periodDays * 86400000, periodH = periodDays * 24;
+      const periodDays = 365, now = Date.now(), start = now - periodDays * 86400000;
       const dAgg = {};
       dtAll.forEach(d => {
         if (d.category === GEJALA_CAT) return;
@@ -13235,13 +13239,13 @@
         });
 
         const monthData = months.map(m => {
-          // Hitung jumlah equipment yang sudah beroperasi di bulan ini (berdasar tanggal_masuk_operasi)
-          const monthEqCount = eqAll.filter(x => {
-            if (!filteredEqIds.has(x.id)) return false;
+          // Hitung total periode jam aktual per equipment (prorate kalau masuk operasi di tengah bulan)
+          const periodH = eqAll.reduce((sum, x) => {
+            if (!filteredEqIds.has(x.id)) return sum;
             const comm = x.tanggal_masuk_operasi ? new Date(x.tanggal_masuk_operasi).getTime() : 0;
-            return comm <= m.end;
-          }).length || 1;
-          const periodH = m.days * 24 * monthEqCount;
+            if (comm > m.end) return sum; // belum commissioning bulan ini
+            return sum + Math.max(0, m.end - Math.max(m.start, comm)) / 3600000;
+          }, 0) || (m.days * 24);
           let downH = 0, downH_unplanned = 0, failures = 0;
           events.forEach(e => {
             if (!filteredEqIds.has(e.equipment_id) || e.category === GEJALA_CAT) return;
@@ -13400,8 +13404,10 @@
     async function renderAvailabilityPage(host) {
       let eqAll = [], inspData = [];
       try {
+        // filter max 366 hari (availPeriodDays maks 365) atau masih open — hindari >1000 row
+        const _dtStart = new Date(Date.now() - 366 * 86400000).toISOString();
         const [dt, eq, insp] = await Promise.all([
-          state.supabase.from('downtime_events').select('*').order('start_at', { ascending: false }),
+          state.supabase.from('downtime_events').select('*').or(`start_at.gte.${_dtStart},end_at.is.null`).order('start_at', { ascending: false }),
           state.supabase.from('equipment').select('id, tag_number, nama_equipment, assigned_unit_id, tanggal_masuk_operasi, cof_score, target_mtbf_hours, kategori_id'),
           state.supabase.from('v_inspection_downtime').select('*').order('mulai', { ascending: false }),
         ]);
@@ -13835,7 +13841,7 @@
           if (payload.category !== GEJALA_CAT) {
             await state.supabase.from('downtime_progress').insert({
               downtime_event_id: savedId, status: 'diagnosis',
-              changed_by: state.profile?.nama || state.profile?.username || '—',
+              changed_by: state.profile?.full_name || state.profile?.email || '—',
               catatan: null,
             });
           }
@@ -13926,7 +13932,8 @@
     }
 
     async function deleteDowntimePhoto(id, path, eventId) {
-      if (!confirm('Hapus foto ini?')) return;
+      const ok = await confirmDialog({ title: 'Hapus Foto?', message: 'Foto ini akan dihapus permanen.', confirmText: 'Hapus', danger: true });
+      if (!ok) return;
       try {
         await deleteStorageFile('downtime-photos', path);
         const { error } = await state.supabase.from('downtime_photos').delete().eq('id', id); if (error) throw error;
@@ -13957,7 +13964,7 @@
       await state.supabase.from('downtime_progress').insert({
         downtime_event_id: id,
         status: 'selesai',
-        changed_by: state.profile?.nama || state.profile?.username || '—',
+        changed_by: state.profile?.full_name || state.profile?.email || '—',
         catatan,
       });
       toast('Ditandai selesai.', 'success');
@@ -13978,7 +13985,7 @@
       await state.supabase.from('downtime_progress').insert({
         downtime_event_id: id,
         status,
-        changed_by: state.profile?.nama || state.profile?.username || '—',
+        changed_by: state.profile?.full_name || state.profile?.email || '—',
         catatan,
       });
       toast('Status pekerjaan diperbarui.', 'success');
@@ -14074,7 +14081,8 @@
     // Cabut Snooze (unsnooze) — kalau action sudah selesai sebelum waktu habis
     async function cabutSnooze(snoozeId, equipmentId) {
       if (!isSrMekanikOrAbove()) { toast('Khusus Sr Mekanik ke atas.', 'warn'); return; }
-      if (!confirm('Cabut snooze ini? Alert untuk equipment ini akan aktif kembali mulai briefing berikutnya.')) return;
+      const okSn = await confirmDialog({ title: 'Cabut Snooze?', message: 'Alert untuk equipment ini akan aktif kembali mulai briefing berikutnya.', confirmText: 'Cabut Snooze', danger: true });
+      if (!okSn) return;
       try {
         // Ambil snooze info utk Telegram alert
         const { data: snz } = await state.supabase.from('alert_snooze').select('alert_kind, reason').eq('id', snoozeId).single();
@@ -15312,7 +15320,8 @@
       const absChange = Math.abs(delta);
       const pctChange = oldHM > 0 ? (absChange / oldHM) * 100 : 0;
       if (pctChange > 20 || absChange > 1000) {
-        if (!confirm(`⚠️ Perubahan BESAR (${delta > 0 ? '+' : ''}${fmtNumber(delta, ' ' + unit)}, ${pctChange.toFixed(0)}%).\n\nYakin angka ini benar?\n\nKalau salah, klik Cancel dan koreksi.`)) return;
+        const okBig = await confirmDialog({ title: '⚠️ Perubahan Besar', message: `Perubahan ${delta > 0 ? '+' : ''}${fmtNumber(delta, ' ' + unit)} (${pctChange.toFixed(0)}%) terlalu besar. Yakin angka ini benar? Kalau salah, klik Batal dan koreksi.`, confirmText: 'Ya, Yakin', danger: true });
+        if (!okBig) return;
       }
       try {
         // Update equipment
@@ -15322,6 +15331,18 @@
           updated_at: new Date().toISOString(),
         }).eq('id', equipmentId);
         if (updErr) throw updErr;
+        // Cascade ke children yang follow_parent_hm = true
+        const { data: followers } = await state.supabase.from('equipment')
+          .select('id, tag_number')
+          .eq('parent_equipment_id', equipmentId)
+          .eq('follow_parent_hm', true);
+        if (followers && followers.length) {
+          await state.supabase.from('equipment').update({
+            running_hours: newHM,
+            updated_by: state.user.id,
+            updated_at: new Date().toISOString(),
+          }).in('id', followers.map(f => f.id));
+        }
         // Audit log
         await logActivity('hm_revised', 'equipment', equipmentId, tagDisplay, {
           old_hm: oldHM,
@@ -15359,9 +15380,10 @@
       if (!isSrMekanikOrAbove()) { toast('Khusus Sr Mekanik ke atas.', 'warn'); return; }
       const newValue = !currentValue;
       const confirmMsg = newValue
-        ? '🔗 Aktifkan auto-sync HM dari parent?\n\nSetiap kali parent equipment HM update (via Logbook atau Revisi HM), equipment ini AKAN otomatis ikut update ke HM yg sama.\n\nCocok untuk TRANS/DW yg jalan bareng engine.'
-        : '🔓 Lepas auto-sync HM?\n\nEquipment ini TIDAK akan otomatis follow HM parent lagi. HM harus di-update terpisah (via Logbook atau Revisi HM manual).';
-      if (!confirm(confirmMsg)) return;
+        ? 'Setiap kali parent equipment HM di-update (Logbook / Revisi HM), equipment ini AKAN otomatis ikut. Cocok untuk TRANS/DW yang jalan bareng engine.'
+        : 'Equipment ini tidak akan otomatis follow HM parent lagi. HM harus di-update terpisah via Logbook atau Revisi HM manual.';
+      const okSync = await confirmDialog({ title: newValue ? '🔗 Aktifkan Auto-sync HM?' : '🔓 Lepas Auto-sync HM?', message: confirmMsg, confirmText: newValue ? 'Aktifkan' : 'Lepas', danger: !newValue });
+      if (!okSync) return;
       try {
         const { error } = await state.supabase.from('equipment').update({
           follow_parent_hm: newValue,
@@ -16727,7 +16749,7 @@
       // log initial status setelah eskalasi agar history tab terisi
       await state.supabase.from('downtime_progress').insert({
         downtime_event_id: id, status: 'diagnosis',
-        changed_by: state.profile?.nama || state.profile?.username || '—',
+        changed_by: state.profile?.full_name || state.profile?.email || '—',
         catatan: note ? `Eskalasi dari gejala: ${note}` : 'Eskalasi dari gejala',
       });
       toast('Gejala dieskalasi ke ' + DT_CAT[newCat] + '.', 'success');
@@ -17078,6 +17100,7 @@
     async function cetakLaporanGabungan(sel) {
       sel = sel || { stress: true, fmea: true, cspp: true, avail: true };
       let su = [], se = [], fm = [], mats = [], dt = [], eqAll = [];
+      const _lapStart = new Date(Date.now() - 366 * 86400000).toISOString(); // +1 hari margin
       try {
         const r = await Promise.all([
           state.supabase.from('v_stress_per_unit').select('*'),
@@ -17085,7 +17108,8 @@
           state.supabase.from('fmea_entries').select('equipment_tag,equipment_name,severity,occurrence,detection,rpn,recommended_action').order('rpn', { ascending: false }),
           // materials: pakai count dulu, tapi untuk laporan cukup critical saja
           state.supabase.from('materials').select('part_number,description,category,stok').eq('category', 'Critical'),
-          state.supabase.from('downtime_events').select('*'),
+          // filter events dalam 365+1 hari terakhir atau yang masih open
+          state.supabase.from('downtime_events').select('*').or(`start_at.gte.${_lapStart},end_at.is.null`),
           state.supabase.from('equipment').select('id,tag_number,nama_equipment,assigned_unit_id,tanggal_masuk_operasi'),
         ]);
         for (const x of r) if (x.error) throw x.error;
