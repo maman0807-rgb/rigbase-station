@@ -13947,7 +13947,9 @@
     window.viewPhotoFullsize = viewPhotoFullsize;
 
     async function markDowntimeDone(id) {
-      const catatan = window.prompt('Catatan penyelesaian (opsional — Enter untuk lewati):') || null;
+      const _pr = window.prompt('Catatan penyelesaian (opsional — Enter untuk lewati, Batal untuk membatalkan):');
+      if (_pr === null) return;
+      const catatan = _pr.trim() || null;
       const { error } = await state.supabase.from('downtime_events').update({ end_at: new Date().toISOString() }).eq('id', id);
       if (error) { toast('Gagal: ' + error.message, 'error'); return; }
       await state.supabase.from('downtime_progress').insert({
@@ -17079,7 +17081,8 @@
           state.supabase.from('v_stress_per_unit').select('*'),
           state.supabase.from('v_stress_per_equipment').select('*').order('total_stress', { ascending: false }).limit(10),
           state.supabase.from('fmea_entries').select('equipment_tag,equipment_name,severity,occurrence,detection,rpn,recommended_action').order('rpn', { ascending: false }),
-          state.supabase.from('materials').select('part_number,description,category,stok'),
+          // materials: pakai count dulu, tapi untuk laporan cukup critical saja
+          state.supabase.from('materials').select('part_number,description,category,stok').eq('category', 'Critical'),
           state.supabase.from('downtime_events').select('*'),
           state.supabase.from('equipment').select('id,tag_number,nama_equipment,assigned_unit_id,tanggal_masuk_operasi'),
         ]);
@@ -17108,8 +17111,8 @@
       const sFmea = sec('⚠️ 2. FMEA — Analisa Mode Kegagalan') + `<p>Total ${fm.length} mode kegagalan · <b style="color:#dc2626">${kritis} Kritis (≥200)</b> · ${tinggi} Tinggi. RPN tertinggi:</p>`
         + tbl(['#', 'Equipment', 'S', 'O', 'D', 'RPN', 'Rekomendasi'], fmRows);
 
-      // CSPP
-      const critHabis = mats.filter(m => String(m.category || '').toLowerCase() === 'critical' && n(m.stok) === 0);
+      // CSPP — mats sudah difilter hanya Critical dari query
+      const critHabis = mats.filter(m => n(m.stok) === 0);
       const cRows = critHabis.slice(0, 25).map((m, i) => `<tr><td style="text-align:center">${i + 1}</td><td>${escapeHtml(m.part_number || '-')}</td><td>${escapeHtml(m.description || '')}</td><td style="text-align:center;background:#fef2f2;color:#dc2626;font-weight:bold">HABIS</td></tr>`).join('');
       const sCspp = sec('📦 3. CSPP — Suku Cadang Kritis') + `<p><b style="color:#dc2626">${critHabis.length} suku cadang Critical habis stok</b> — prioritas pengadaan.</p>`
         + tbl(['#', 'Part Number', 'Deskripsi', 'Status'], cRows);
