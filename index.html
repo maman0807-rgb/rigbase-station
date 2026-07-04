@@ -17087,12 +17087,12 @@
     // ============================================================
     // 10u. RISK DECISION MATRIX — PoF × CoF per equipment
     // ============================================================
-    PAGES.matrix = async function () {
+    PAGES.matrix = function () {
       const div = document.createElement('div');
       div.className = 'page space-y-4';
       div.innerHTML = '<div class="text-slate-400 text-sm py-10 text-center">Memuat data…</div>';
-      document.getElementById('ram-content').replaceChildren(div);
 
+      (async () => {
       const now   = Date.now();
       const since = new Date(now - 365 * 24 * 3600000).toISOString(); // 12 bulan terakhir
 
@@ -17224,6 +17224,9 @@
       // simpan data untuk drill-down
       window.__matrixItems = items;
       window.__matrixCells = cells;
+      })();
+
+      return div;
     };
 
     window.showMatrixCell = function(p, c) {
