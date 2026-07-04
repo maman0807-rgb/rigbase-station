@@ -2905,9 +2905,9 @@
         // 2. Update last_pm_hours + last_pm_date → reset counter PM
         const pmDate = startV ? new Date(startV).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
         const eqUpdate = { last_pm_hours: rhVal, last_pm_date: pmDate };
-        // Bila GOH → reset last_goh_hours & last_goh_date supaya countdown overhaul ikut reset
-        if (pmType === 'GOH') { eqUpdate.last_goh_hours = rhVal; eqUpdate.last_goh_date = pmDate; }
-        // Bila TOH (milestone 5000/6000/8000/10000 yang bukan GOH) → reset last_toh_hours
+        // Bila GOH → reset last_goh_hours + last_toh_hours (GOH mencakup TOH)
+        if (pmType === 'GOH') { eqUpdate.last_goh_hours = rhVal; eqUpdate.last_goh_date = pmDate; eqUpdate.last_toh_hours = rhVal; }
+        // Bila TOH → reset last_toh_hours saja
         if (pmType === 'TOH') { eqUpdate.last_toh_hours = rhVal; }
         const { error: eqErr } = await state.supabase
           .from('equipment').update(eqUpdate).eq('id', equipmentId);
@@ -2920,7 +2920,7 @@
         if (state.equipmentList) {
           const eq2 = state.equipmentList.find(x => x.id === equipmentId);
           if (eq2) { eq2.last_pm_hours = rhVal; eq2.last_pm_date = pmDate;
-            if (pmType === 'GOH') { eq2.last_goh_hours = rhVal; eq2.last_goh_date = pmDate; }
+            if (pmType === 'GOH') { eq2.last_goh_hours = rhVal; eq2.last_goh_date = pmDate; eq2.last_toh_hours = rhVal; }
             if (pmType === 'TOH') { eq2.last_toh_hours = rhVal; }
           }
         }
@@ -13962,7 +13962,13 @@
     window.markDowntimeDone = markDowntimeDone;
 
     async function updateWorkStatus(id, status) {
-      const catatan = window.prompt('Catatan perubahan status (opsional — Enter untuk lewati):') || null;
+      const _promptResult = window.prompt('Catatan perubahan status (opsional — Enter untuk lewati, Batal untuk membatalkan):');
+      if (_promptResult === null) {
+        // user klik Batal → batalkan perubahan, restore dropdown
+        renderAvailabilityPage(document.getElementById('ram-content'));
+        return;
+      }
+      const catatan = _promptResult.trim() || null;
       const { error } = await state.supabase.from('downtime_events').update({ work_status: status }).eq('id', id);
       if (error) { toast('Gagal update status: ' + error.message, 'error'); return; }
       await state.supabase.from('downtime_progress').insert({
