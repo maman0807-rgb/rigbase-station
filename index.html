@@ -1142,13 +1142,18 @@
     }
 
     async function fetchFindingsByInspection(inspectionId) {
-      const { data, error } = await state.supabase
-        .from('inspection_findings')
-        .select('*, equipment:equipment_id (id, tag_number, nama_equipment, kategori_id)')
-        .eq('inspection_id', inspectionId)
-        .order('no_urut');
-      if (error) throw error;
-      return data || [];
+      const all = [];
+      for (let f = 0; ; f += 1000) {
+        const { data, error } = await state.supabase
+          .from('inspection_findings')
+          .select('*, equipment:equipment_id (id, tag_number, nama_equipment, kategori_id)')
+          .eq('inspection_id', inspectionId)
+          .order('no_urut').range(f, f + 999);
+        if (error) throw error;
+        all.push(...(data || []));
+        if (!data || data.length < 1000) break;
+      }
+      return all;
     }
 
     async function fetchInspectionStats() {
@@ -4013,10 +4018,15 @@
         }
         // OPTIMIZED: 1 query untuk semua counts (bukan N+1)
         const inspIds = list.map(i => i.id);
-        const { data: allFindings } = await state.supabase
-          .from('inspection_findings')
-          .select('inspection_id, status, category')
-          .in('inspection_id', inspIds);
+        // pakai range pagination agar tidak terpotong 1000-row default
+        let allFindings = [];
+        for (let f = 0; ; f += 1000) {
+          const { data: batch } = await state.supabase
+            .from('inspection_findings').select('inspection_id, status, category')
+            .in('inspection_id', inspIds).range(f, f + 999);
+          allFindings.push(...(batch || []));
+          if (!batch || batch.length < 1000) break;
+        }
         // Group counts per siklus
         const countsMap = {};
         inspIds.forEach(id => countsMap[id] = { total: 0, open: 0, critical_open: 0, major_open: 0 });
