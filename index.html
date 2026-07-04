@@ -13410,7 +13410,7 @@
       // GEJALA = alat masih jalan → dikecualikan dari perhitungan
       const data      = dataAll.filter(d => d.category !== GEJALA_CAT);
       const gejalaAll = dataAll.filter(d => d.category === GEJALA_CAT);
-      const now = Date.now(), start = now - availPeriodDays * 86400000, periodH = availPeriodDays * 24;
+      const now = Date.now(), start = now - availPeriodDays * 86400000;
       // agregasi downtime per equipment (TANPA gejala)
       const agg = {};
       data.forEach(d => {
@@ -13460,7 +13460,13 @@
       const gejalaOngoing = gejalaAll.filter(d => !d.end_at);
       const ongoingWait = availData
         .filter(d => !d.end_at && d.category !== GEJALA_CAT && (d.category === 'tunggu_spare' || d.work_status === 'tunggu_part'))
-        .map(d => ({ ...d, durH: (now - new Date(d.start_at).getTime()) / 3600000, ldt_clean: d.category === 'tunggu_spare' }))
+        .map(d => {
+          // durH dari part_order_date kalau ada (lebih akurat), fallback ke start_at
+          const waitSince = d.part_order_date
+            ? new Date(d.part_order_date).getTime()
+            : new Date(d.start_at).getTime();
+          return { ...d, durH: (now - waitSince) / 3600000, ldt_clean: d.category === 'tunggu_spare' };
+        })
         .sort((a, b) => b.durH - a.durH);
       // Inspeksi Terjadwal — dari v_inspection_downtime, read-only
       const inspOngoing = inspData.filter(r => r.is_holding);
@@ -13635,7 +13641,7 @@
         <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
           ${kpi('🔴 Sedang Down', ongoing.length + inspOngoing.length, inspOngoing.length ? `${inspOngoing.length} dari siklus inspeksi` : 'downtime aktif')}
           ${kpi('🟡 Sedang Diselidiki', gejalaOngoing.length, 'gejala awal, alat masih jalan')}
-          ${kpi('⏳ Nunggu Part Sekarang', ongoingWait.length, ongoingWait.length ? `terlama: ${fmtH(ongoingWait[0]?.durH || 0)}` : 'tidak ada')}
+          ${kpi('⏳ Nunggu Part Sekarang', ongoingWait.length, ongoingWait.length ? `terlama: ${fmtH(ongoingWait[0]?.durH || 0)} · semua rig` : 'tidak ada · semua rig')}
           ${kpi('⏳ LDT Kumulatif (periode)', totalFleetWaitH > 0 ? fmtH(totalFleetWaitH) : '—', totalFleetWaitH > 0 ? `${eqList.filter(o=>o.waitH>0).length} alat pernah tunggu part` : 'tidak ada tunggu spare')}
         </div>
         ${(ongoing.length || inspOngoing.length) ? `<div class="bg-white rounded-xl border border-red-200 overflow-hidden">
@@ -13926,12 +13932,14 @@
     window.viewPhotoFullsize = viewPhotoFullsize;
 
     async function markDowntimeDone(id) {
+      const catatan = window.prompt('Catatan penyelesaian (opsional — Enter untuk lewati):') || null;
       const { error } = await state.supabase.from('downtime_events').update({ end_at: new Date().toISOString() }).eq('id', id);
       if (error) { toast('Gagal: ' + error.message, 'error'); return; }
       await state.supabase.from('downtime_progress').insert({
         downtime_event_id: id,
         status: 'selesai',
         changed_by: state.profile?.nama || state.profile?.username || '—',
+        catatan,
       });
       toast('Ditandai selesai.', 'success');
       renderAvailabilityPage(document.getElementById('ram-content'));
