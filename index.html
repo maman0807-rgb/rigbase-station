@@ -13508,8 +13508,11 @@
       });
       const rigRows = Object.values(rigMap).sort((a, b) => a.name.localeCompare(b.name)).map(r => {
         const re = eqList.filter(o => r.ids.includes(o.id));
-        const rAo   = re.length ? re.reduce((s, o) => s + o.avail,   0) / re.length : 100;
-        const rAi   = re.length ? re.reduce((s, o) => s + o.availAi, 0) / re.length : 100;
+        const rPeriodH   = re.reduce((s, o) => s + o.eqPeriodH, 0);
+        const rDownH     = re.reduce((s, o) => s + o.downH, 0);
+        const rDownH_unp = re.reduce((s, o) => s + o.downH_unplanned, 0);
+        const rAo = rPeriodH > 0 ? Math.max(0, (rPeriodH - rDownH)     / rPeriodH * 100) : 100;
+        const rAi = rPeriodH > 0 ? Math.max(0, (rPeriodH - rDownH_unp) / rPeriodH * 100) : 100;
         const rFail = re.reduce((s, o) => s + o.failEvents, 0);
         // Pedoman: MTTR = Σ durasi repair / Σ failure (per rig)
         const rAllDur  = re.flatMap(o => (agg[o.id] || { failDur: [] }).failDur);
@@ -13537,6 +13540,7 @@
             <th class="px-3 py-2">Rig</th><th class="px-3 py-2 text-center">Alat</th><th class="px-3 py-2">Ao</th><th class="px-3 py-2">Ai</th><th class="px-3 py-2 text-center">Failure</th><th class="px-3 py-2">MTTR</th><th class="px-3 py-2">MTBF</th>
           </tr></thead><tbody>${rigRows || '<tr><td colspan="7" class="px-3 py-4 text-center text-slate-400 text-sm">Tidak ada data.</td></tr>'}</tbody></table></div>
         </div>` : '';
+
 
       const kpi = (label, val, sub) => `<div class="bg-white rounded-xl border border-slate-200 p-4"><div class="text-xs text-slate-500 mb-1">${label}</div><div class="text-2xl font-extrabold text-slate-900">${val}</div>${sub ? `<div class="text-[11px] text-slate-400 mt-0.5">${sub}</div>` : ''}</div>`;
       const ongoingRows = ongoing.map(d => {
@@ -16946,32 +16950,44 @@
     function cetakAvailReport() {
       const dataAll = availFilteredData();
       const data = dataAll.filter(d => d.category !== GEJALA_CAT);
-      const now = Date.now(), start = now - availPeriodDays * 86400000, periodH = availPeriodDays * 24;
+      const now = Date.now(), start = now - availPeriodDays * 86400000;
       const byEq = {};
       data.forEach(d => {
         const k = d.equipment_id;
         if (!byEq[k]) byEq[k] = { tag: d.equipment_tag, name: d.equipment_name, events: 0, downH: 0, downH_unplanned: 0, failEvents: 0, failDur: [] };
         byEq[k].events++;
         const s = new Date(d.start_at).getTime(), e = d.end_at ? new Date(d.end_at).getTime() : now;
-        byEq[k].downH += Math.max(0, Math.min(e, now) - Math.max(s, start)) / 3600000;
-        if (!TERENCANA_CATS.includes(d.category)) byEq[k].downH_unplanned += Math.max(0, Math.min(e, now) - Math.max(s, start)) / 3600000;
-        if (FAILURE_CATS.includes(d.category)) {
+        const clippedH = Math.max(0, Math.min(e, now) - Math.max(s, start)) / 3600000;
+        byEq[k].downH += clippedH;
+        if (!TERENCANA_CATS.includes(d.category)) byEq[k].downH_unplanned += clippedH;
+        if (FAILURE_CATS.includes(d.category) && s >= start) {
           byEq[k].failEvents++;
-          if (d.end_at) byEq[k].failDur.push((new Date(d.end_at) - new Date(d.start_at)) / 3600000);
+          const repairEnd = d.end_at ? Math.min(new Date(d.end_at).getTime(), now) : now;
+          const repairDur = (repairEnd - Math.max(s, start)) / 3600000;
+          if (repairDur > 0) byEq[k].failDur.push(repairDur);
         }
       });
-      const eqList = Object.values(byEq).map(o => ({
-        ...o,
-        avail:   Math.max(0, Math.min(100, (periodH - o.downH)           / periodH * 100)),
-        availAi: Math.max(0, Math.min(100, (periodH - o.downH_unplanned) / periodH * 100)),
-        mttr: o.failDur.length ? o.failDur.reduce((a, b) => a + b, 0) / o.failDur.length : null,
-      })).sort((a, b) => a.avail - b.avail);
+      // pakai eqPeriodH per-equipment (dari tanggal_masuk_operasi), bukan periodH flat
+      const eqList = Object.values(byEq).map(o => {
+        const eqActive = availEqAll.find(x => x.tag_number === o.tag);
+        const eqActiveMs = eqActive?.tanggal_masuk_operasi ? new Date(eqActive.tanggal_masuk_operasi).getTime() : start;
+        const eqPeriodH = Math.max(1, (now - Math.max(start, eqActiveMs)) / 3600000);
+        return {
+          ...o, eqPeriodH,
+          avail:   Math.max(0, Math.min(100, (eqPeriodH - o.downH)           / eqPeriodH * 100)),
+          availAi: Math.max(0, Math.min(100, (eqPeriodH - o.downH_unplanned) / eqPeriodH * 100)),
+          mttr: o.failDur.length ? o.failDur.reduce((a, b) => a + b, 0) / o.failDur.length : null,
+        };
+      }).sort((a, b) => a.avail - b.avail);
       const ongoing = data.filter(d => !d.end_at).length;
-      const failData = data.filter(d => FAILURE_CATS.includes(d.category) && d.end_at);
-      const allDur = failData.map(d => (new Date(d.end_at) - new Date(d.start_at)) / 3600000);
+      const allDur = eqList.flatMap(o => o.failDur);
       const mttr = allDur.length ? allDur.reduce((a, b) => a + b, 0) / allDur.length : null;
-      const fleetAo = eqList.length ? eqList.reduce((a, b) => a + b.avail,   0) / eqList.length : 100;
-      const fleetAi = eqList.length ? eqList.reduce((a, b) => a + b.availAi, 0) / eqList.length : 100;
+      // weighted aggregate (konsisten dengan renderAvailabilityPage)
+      const totalPeriodH   = eqList.reduce((s, o) => s + o.eqPeriodH, 0);
+      const totalDownH     = eqList.reduce((s, o) => s + o.downH, 0);
+      const totalDownH_unp = eqList.reduce((s, o) => s + o.downH_unplanned, 0);
+      const fleetAo = totalPeriodH > 0 ? Math.max(0, (totalPeriodH - totalDownH)     / totalPeriodH * 100) : 100;
+      const fleetAi = totalPeriodH > 0 ? Math.max(0, (totalPeriodH - totalDownH_unp) / totalPeriodH * 100) : 100;
       const fmtH = (h) => h == null ? '—' : (h < 24 ? h.toFixed(1) + ' jam' : (h / 24).toFixed(1) + ' hari');
       const summary = `<div class="cards">
         <div class="card ${fleetAo >= 95 ? 'green' : fleetAo >= 85 ? 'amber' : 'red'}"><div class="num">${fleetAo.toFixed(1)}%</div><div class="lbl">Ao — Operational</div></div>
