@@ -1156,19 +1156,21 @@
       // OPTIMIZED: 2 query parallel (bukan 3) — fetch findings sekali, agregate di client
       const [insp, openFindings] = await Promise.all([
         state.supabase.from('inspections').select('id, status, parent_unit_id'),
-        state.supabase.from('inspection_findings').select('category').eq('status', 'Open'),
+        // pakai count agar tidak terpotong batas 1000 row default Supabase
+        state.supabase.from('inspection_findings').select('category', { count: 'exact' }).eq('status', 'Open'),
       ]);
       const inspections = insp.data || [];
       const findings = openFindings.data || [];
       const uniqueRigs = new Set(inspections.map(i => i.parent_unit_id)).size;
       const activeCycles = inspections.filter(i => i.status === 'On Progress').length;
       const criticalOpen = findings.filter(f => f.category === 'Critical').length;
+      const totalOpen = openFindings.count ?? findings.length; // count dari server, tidak terpotong 1000 row
       return {
         total_rigs_inspected: uniqueRigs,
         active_cycles: activeCycles,
         total_cycles: inspections.length,
         critical_open: criticalOpen,
-        total_open: findings.length,
+        total_open: totalOpen,
       };
     }
 
