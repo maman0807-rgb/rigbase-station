@@ -10099,6 +10099,15 @@
 
         const isDesember = payrollState.selectedPeriode.endsWith('-12');
 
+        // Untuk PPh21 Desember: ambil period_id Jan-Nov TAHUN BERJALAN saja (bukan lintas tahun)
+        let janNovPeriodIds = [];
+        if (isDesember) {
+          const currentYear = payrollState.selectedPeriode.slice(0, 4);
+          const { data: yrPeriods } = await state.supabase.from('payroll_periods')
+            .select('id').gte('periode', `${currentYear}-01`).lt('periode', `${currentYear}-12`);
+          janNovPeriodIds = (yrPeriods || []).map(p => p.id);
+        }
+
         const entries = await Promise.all((emps||[]).map(async emp => {
           const ot = otMap[emp.id] || {};
           const jk = ot.jam_lembur_kerja||0, jl = ot.jam_lembur_libur||0;
@@ -10115,11 +10124,11 @@
           const hasNpwp = !!(emp.npwp && emp.npwp.trim());
           let pph21 = 0, lebihBayarPph = 0;
           if (isDesember) {
-            // Ambil total PPh Jan-Nov
-            const { data: prevEntries } = await state.supabase
-              .from('payroll_entries').select('pph21, total_bruto, bpjs_jht, bpjs_jp')
-              .eq('employee_id', emp.id)
-              .not('period_id', 'eq', periodId);
+            // Ambil total PPh Jan-Nov TAHUN BERJALAN saja (bukan lintas tahun)
+            const { data: prevEntries } = await (janNovPeriodIds.length
+              ? state.supabase.from('payroll_entries').select('pph21, total_bruto, bpjs_jht, bpjs_jp')
+                  .eq('employee_id', emp.id).in('period_id', janNovPeriodIds)
+              : Promise.resolve({ data: [] }));
             const totalJanNov = (prevEntries||[]).reduce((s,r)=>s+(r.pph21||0),0);
             const brutoSetahun = (prevEntries||[]).reduce((s,r)=>s+(r.total_bruto||0),0)+totalBruto;
             const iuranKaryawan = (prevEntries||[]).reduce((s,r)=>s+(r.bpjs_jht||0)+(r.bpjs_jp||0),0)+bpjs.bpjsJhtKaryawan+bpjs.bpjsJpKaryawan;
