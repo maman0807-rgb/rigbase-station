@@ -13647,6 +13647,7 @@
             <thead><tr class="bg-orange-50 text-left text-xs font-bold text-slate-600">
               <th class="px-3 py-2">Equipment</th>
               <th class="px-3 py-2">Mulai Tunggu</th>
+              <th class="px-3 py-2">Tgl Order Part</th>
               <th class="px-3 py-2">Lama Tunggu</th>
               <th class="px-3 py-2">Status</th>
               <th class="px-3 py-2">Catatan</th>
@@ -13672,6 +13673,9 @@
                   ${d.equipment_name ? `<div class="text-xs text-slate-400">${escapeHtml(d.equipment_name)}</div>` : ''}
                 </td>
                 <td class="px-3 py-2 text-sm text-slate-500">${d.start_at ? new Date(d.start_at).toLocaleDateString('id-ID') : '—'}</td>
+                <td class="px-3 py-2 text-sm ${d.part_order_date ? 'text-slate-700 font-semibold' : 'text-slate-300'}">
+                  ${d.part_order_date ? new Date(d.part_order_date).toLocaleDateString('id-ID') : '—'}
+                </td>
                 <td class="px-3 py-2">
                   <div class="text-sm font-bold text-slate-800">${fmtH(durH)}</div>
                   <div class="w-24 bg-slate-100 rounded-full h-1.5 mt-1"><div class="${barCol} h-1.5 rounded-full" style="width:${barW}%"></div></div>
@@ -13733,6 +13737,9 @@
             <input id="dt-reporter" value="${escapeHtml(e.created_by_name || (existing ? '' : (state.profile?.full_name || state.profile?.email || '')))}" placeholder="mis. Sukirman (motoris shift 1)" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy">
             <p class="text-[11px] text-slate-400 mt-1">Nama orang yg melaporkan ke mekanik (bisa diisi manual). Default = nama login.</p></div>
           <div><label class="text-xs text-slate-500">Catatan</label><input id="dt-notes" value="${escapeHtml(e.notes || '')}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy"></div>
+          <div><label class="text-xs text-slate-500">Tgl Order Part (isi jika tunggu spare part)</label>
+            <input id="dt-part-order" type="date" value="${e.part_order_date || ''}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy">
+            <p class="text-[11px] text-slate-400 mt-1">Tanggal part/spare dipesan ke gudang atau supplier.</p></div>
           <div class="border-t border-slate-200 pt-3">
             <label class="text-xs font-semibold text-slate-600 uppercase">📸 Foto Pendukung (optional)</label>
             <div class="grid grid-cols-2 gap-2 mt-1">
@@ -13794,6 +13801,7 @@
         start_at: new Date(startV).toISOString(), end_at: endV ? new Date(endV).toISOString() : null,
         category: document.getElementById('dt-cat')?.value || 'lainnya',
         notes: (document.getElementById('dt-notes')?.value || '').trim() || null,
+        part_order_date: document.getElementById('dt-part-order')?.value || null,
         created_by_name: reporterName,  // PELAPOR (manual), bukan user login
       };
       let savedId = id;
