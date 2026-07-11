@@ -15,7 +15,8 @@ menghubungkan WAHA ↔ Supabase ↔ grup WhatsApp.
 **Konsep lengkap & semua keputusan desain** ada di file
 `WAHA_ERAMHOIST_KONSEP.md` (satu folder dengan prompt ini) — baca dulu
 sebelum mulai, terutama bagian "Konsep Pengisian — Selaras dengan App
-Logbook", karena ada detail penting yang TIDAK boleh dilewatkan:
+Logbook" DAN "Alur Utama: /rig → /form [rig] → Balasan Angka", karena ada
+detail penting yang TIDAK boleh dilewatkan:
 - eRAMHoist & app Logbook (`~/logbook-equipment`) **satu Supabase yang
   sama** — WAHA harus tulis ke tabel `logbook` (bukan bikin tabel baru),
   supaya tidak jadi jalur ketiga yang tidak sinkron dengan app.
@@ -24,6 +25,18 @@ Logbook", karena ada detail penting yang TIDAK boleh dilewatkan:
 - Jam jalan = delta (additive), BUKAN HM absolut — desain ini sengaja
   supaya validasi "HM tidak boleh turun" otomatis aman tanpa reject-logic
   terpisah.
+- **Operator TIDAK mengetik `tag_number` langsung.** Alur utamanya:
+  `/rig` (lihat daftar rig) → `/form [rig]` (lihat equipment rig itu,
+  bernomor, sistem simpan "sesi" untuk nomor WA itu selama 4 jam) →
+  operator balas **nomor urut saja** (`2 6 baik, 4 12 baik` — bisa banyak
+  equipment sekaligus dalam 1 pesan, dipisah koma). `/jamjalan [tag] ...`
+  tetap ada sebagai jalur cepat opsional buat yang sudah hafal tag-nya.
+- **Shift ditentukan otomatis dari jam kirim pesan** (06:00-17:59=Siang,
+  18:00-05:59=Malam) untuk jalur nomor — operator TIDAK perlu sebut shift.
+  Jalur `/jamjalan` tetap wajib sebut shift manual.
+- **Window lapor cuma soal kapan bot proaktif push**, BUKAN pembatas —
+  entry di luar window (17:00-20:00 Siang / 05:00-09:00 Malam) tetap
+  diterima kapan saja.
 
 ## Info Teknis yang Sudah Tersedia
 
@@ -59,12 +72,15 @@ Logbook", karena ada detail penting yang TIDAK boleh dilewatkan:
   - `equipment` — baca `tag_number` → `id` untuk resolve equipment dari
     command, lalu update `running_hours` (additive)
   - `wa_whitelist` — **BELUM ADA, perlu dibuat dulu** (SQL di Tahap 0)
+  - `wa_form_session` — **BELUM ADA, perlu dibuat dulu** (SQL di Tahap 0) —
+    nyimpen "sesi aktif" tiap nomor WA hasil `/form [rig]` terakhir, supaya
+    balasan angka bisa di-resolve ke equipment yang benar
 - **API Key:** service role atau anon sesuai kebutuhan node — isi lewat n8n
   Credentials, jangan hardcode
 
 ## Tugas yang Saya Minta
 
-### Tahap 0 — SQL: buat tabel `wa_whitelist`
+### Tahap 0 — SQL: buat tabel `wa_whitelist` dan `wa_form_session`
 Bukan workflow n8n, tapi SQL yang saya jalankan manual di Supabase SQL
 Editor. Tolong generate SQL untuk:
 ```sql
@@ -76,10 +92,18 @@ CREATE TABLE wa_whitelist (
   aktif      boolean default true,
   created_at timestamptz default now()
 );
+
+CREATE TABLE wa_form_session (
+  nomor_wa     text primary key,
+  rig          text not null,
+  mapping      jsonb not null,   -- { "1": "TT-100A", "2": "DC-100A", ... }
+  generated_at timestamptz default now()
+);
 ```
-Plus RLS policy dasar (proyek ini pakai RLS di semua tabel — ikuti pola yang
-sudah ada di eRAMHoist, lihat tabel `pemasangan` sebagai referensi kalau
-perlu contoh). Sertakan juga `NOTIFY pgrst, 'reload schema';` di akhir.
+Plus RLS policy dasar untuk keduanya (proyek ini pakai RLS di semua tabel —
+ikuti pola yang sudah ada di eRAMHoist, lihat tabel `pemasangan` sebagai
+referensi kalau perlu contoh). Sertakan juga `NOTIFY pgrst, 'reload
+schema';` di akhir.
 
 ### Tahap 1 — Workflow sederhana (test end-to-end kirim pesan)
 1. Trigger: Manual Trigger
@@ -90,49 +114,94 @@ perlu contoh). Sertakan juga `NOTIFY pgrst, 'reload schema';` di akhir.
 Jangan lanjut ke tahap berikutnya sebelum saya konfirmasi tahap ini berhasil
 kirim ke grup.
 
-### Tahap 2 — Workflow Pull: terima & proses command `/jamjalan`
+### Tahap 2 — Workflow Pull: `/rig`, `/form [rig]`, dan entry (2 jalur)
+Satu webhook, tapi n8n perlu route ke 4 cabang logic berbeda tergantung isi
+pesan. Urutan pengecekan (pesan yang tidak match semuanya → stop tanpa balas):
+
+**Router awal (semua cabang):**
 1. Trigger: Webhook (menerima event pesan masuk dari WAHA)
-2. Node IF/Filter: cek prefix command `/jamjalan` DAN nomor pengirim ada di
-   `wa_whitelist` dengan `aktif=true` — kalau tidak match keduanya, **stop
-   tanpa balas** (tidak ganggu chat biasa di grup)
-3. Node Function: parse command —
-   format `/jamjalan [tag_number] [siang|malam] [jam] [baik|waspada|rusak] [catatan opsional]`
-   - Validasi format: 4 argumen wajib pertama harus ada & valid, kalau
-     tidak → balas pesan error format (lihat contoh di konsep doc)
-   - Mapping kondisi: `baik→baik`, `waspada→perlu_perhatian`, `rusak→rusak`
-4. Node Supabase: query `wa_whitelist` by nomor pengirim → ambil `id, nama, rig`
-5. Node Supabase: query `equipment` by `tag_number` → ambil `id, running_hours`
-   - Kalau tag tidak ditemukan → balas error "Tag tidak dikenali"
-6. Node IF: kalau whitelist row `rig` **terisi** (bukan admin) → cek
-   equipment yang di-entry harus milik rig itu, tolak kalau beda rig
-7. Node Supabase: INSERT ke tabel `logbook` —
-   `reporter_id = wa_whitelist.id` (BUKAN nomor WA mentah — lihat catatan
-   penting di konsep doc), `reporter_name`, `reporter_role` ('operator'
-   atau 'admin' tergantung `rig IS NULL`), `shift`, `condition`,
-   `shift_hours`, `temuan` (dari catatan opsional), `status: 'pending'`
-8. Node Supabase: UPDATE `equipment.running_hours` =
-   `running_hours + shift_hours` (additive, tidak perlu cek turun karena
-   selalu nambah)
-9. Node HTTP Request: reply (quote) ke grup dengan pesan konfirmasi —
-   beda format kalau `reporter_role='admin'` (sertakan nama admin +
-   keterangan "pengganti sementara", lihat contoh format di konsep doc)
+2. Node Supabase: query `wa_whitelist` by nomor pengirim, `aktif=true` —
+   kalau tidak ketemu → **stop, tidak balas** (bukan target bot)
+3. Node Switch/IF, route berdasar isi pesan:
 
-Simpan sebagai `workflow-waha-jamjalan-entry.json`.
+**Cabang A — `/rig`**
+- Node Supabase: query semua rig unik dari tabel `equipment` (`SELECT
+  DISTINCT rig ...` atau kolom setara — sesuaikan nama kolom rig di skema
+  eRAMHoist, cek dulu strukturnya)
+- Node Function: format jadi daftar bernomor
+- Node HTTP Request: kirim balasan ke grup
 
-### Tahap 3 — Workflow Push: laporan & reminder terjadwal
-1. Trigger: Schedule, jalan **06:00 WIB dan 18:00 WIB** (dua schedule
-   trigger terpisah atau satu dengan cron yang cover keduanya)
-2. Node Supabase: query `equipment` (filter rig aktif) + `logbook` entries
-   hari ini/shift ini
-3. Node Function: hitung equipment yang **sudah** vs **belum** entry shift
-   berjalan (siang untuk trigger 06:00 → shift sebelumnya='malam' semalam;
-   18:00 → shift 'siang' hari ini — sesuaikan logika periode sesuai jadwal)
-4. Node Function: format 2 bagian pesan — laporan (equipment yang sudah
-   entry + jam jalan + kondisi) dan reminder (equipment yang belum, dengan
-   format command sebagai bantuan)
+**Cabang B — `/form [rig]`**
+- Node Supabase: query `equipment` filter by rig itu → ambil `id,
+  tag_number` semua equipment-nya
+- Node Function: bikin numbering (urutan konsisten, misal alfabetis by
+  `tag_number`) → bangun `mapping` JSON `{ "1": "TT-100A", "2": "DC-100A", ... }`
+- Node Supabase: UPSERT ke `wa_form_session` (`nomor_wa`, `rig`, `mapping`,
+  `generated_at = now()`) — **timpa sesi lama nomor itu kalau ada**
+- Node HTTP Request: kirim balasan daftar bernomor + instruksi cara balas
+  (lihat format di konsep doc)
+
+**Cabang C — balasan angka (jalur utama, mis. `2 6 baik, 4 12 baik`)**
+- Deteksi: pesan **tidak** diawali `/` DAN diawali angka
+- Node Supabase: ambil `wa_form_session` by nomor pengirim
+  - Kalau tidak ada / `generated_at` lebih dari 4 jam lalu → balas
+    `"Sesi sudah tidak berlaku, kirim /form [rig] dulu."`, stop
+- Node Function: **split pesan by koma** → tiap segmen parse
+  `[nomor] [jam] [kondisi] [catatan opsional]` → lookup `nomor` di
+  `mapping` sesi → dapat `tag_number` per segmen
+  - Shift: **hitung otomatis dari jam pesan diterima** — 06:00-17:59 WIB
+    (Asia/Jakarta) = Siang, 18:00-05:59 = Malam (lihat detail di konsep doc
+    bagian "Shift, Window Lapor & Deteksi Otomatis")
+  - Mapping kondisi: `baik→baik`, `waspada→perlu_perhatian`, `rusak→rusak`
+- Lanjut ke langkah insert bersama (lihat "Insert bersama" di bawah) untuk
+  **tiap segmen**, lalu **satu balasan gabungan** mencakup semua segmen
+  dalam pesan itu (bukan reply terpisah per segmen)
+
+**Cabang D — `/jamjalan [tag_number] [siang|malam] [jam] [kondisi] [catatan]` (jalur cepat opsional)**
+- Node Function: parse command, validasi 4 argumen wajib pertama ada &
+  valid, kalau tidak → balas error format
+- Node Supabase: query `equipment` by `tag_number` langsung (tidak butuh
+  sesi `/form`) — kalau tag tidak ditemukan → balas "Tag tidak dikenali"
+- Shift **wajib disebut manual** di jalur ini (beda dari Cabang C)
+- Lanjut ke "Insert bersama" di bawah, balasan konfirmasi 1 entry
+
+**Insert bersama (dipakai Cabang C & D, per equipment yang di-entry):**
+1. Node IF: kalau `wa_whitelist.rig` **terisi** (bukan admin) → equipment
+   yang di-entry harus milik rig itu, tolak kalau beda rig
+2. Node Supabase: INSERT ke tabel `logbook` — `reporter_id =
+   wa_whitelist.id` (BUKAN nomor WA mentah — lihat catatan penting di
+   konsep doc), `reporter_name`, `reporter_role` ('operator' atau 'admin'
+   tergantung `rig IS NULL`), `shift`, `condition`, `shift_hours`,
+   `temuan` (dari catatan opsional), `status: 'pending'`
+3. Node Supabase: UPDATE `equipment.running_hours` = `running_hours +
+   shift_hours` (additive, tidak perlu cek turun karena selalu nambah)
+4. Balasan konfirmasi — beda format kalau `reporter_role='admin'`
+   (sertakan nama admin + keterangan "pengganti sementara", lihat contoh
+   format di konsep doc). Untuk Cabang C dengan >1 segmen, gabung semua
+   hasil jadi satu list dalam satu balasan (lihat contoh format di konsep doc)
+
+Simpan sebagai `workflow-waha-entry.json`.
+
+### Tahap 3 — Workflow Push: laporan + daftar equipment terjadwal
+1. Trigger: Schedule, jalan **17:00 WIB** (awal window lapor Siang) dan
+   **05:00 WIB** (awal window lapor Malam) — dua schedule trigger terpisah,
+   timezone Asia/Jakarta
+2. Node Supabase: query semua rig + equipment-nya + `logbook` entries
+   shift yang baru selesai (Siang untuk trigger 17:00 → shift Siang hari
+   ini; Malam untuk trigger 05:00 → shift Malam semalam)
+3. Node Function: per rig, tentukan equipment yang **sudah** vs **belum**
+   entry shift itu — **cukup status ✅/⚠️ per equipment, TANPA nomor.**
+   Push ini kirim ke grup (bukan ke 1 nomor spesifik), jadi TIDAK
+   upsert `wa_form_session` di tahap ini — sesi cuma dibuat per-operator
+   saat mereka sendiri kirim `/form [rig]` (Cabang B, Tahap 2). Kalau push
+   ini ikut assign nomor, operator berbeda yang balas ke broadcast yang
+   sama bisa salah acu equipment
+4. Node Function: format pesan — ringkasan status per rig (✅/⚠️) + ajakan
+   eksplisit `/form [rig]` untuk lihat nomor & lapor (lihat contoh format
+   di konsep doc, bagian "Format teks final")
 5. Node HTTP Request: kirim ke grup via WAHA
 
-Simpan sebagai `workflow-waha-laporan-reminder.json`.
+Simpan sebagai `workflow-waha-laporan-jadwal.json`.
 
 ### Tahap 4 — Workflow Monitoring session WAHA
 1. Trigger: Schedule tiap 1 jam

@@ -40,21 +40,27 @@ WAHA 100% gratis & open source (versi 2026.6.1+, semua fitur eks-"Plus" sudah ma
 ## Cara Bot Mengenali Pesan yang Ditujukan Untuknya
 
 Kombinasi (keduanya harus match):
-1. **Prefix command**, `/jamjalan [tag_number] [siang|malam] [jam] [baik|waspada|rusak] [catatan opsional]`
+1. **Prefix command** (`/rig`, `/form [rig]`, `/jamjalan ...`) ATAU **balasan angka** (`[nomor] [jam] [kondisi] [catatan opsional]`, boleh beberapa dipisah koma) selama nomor pengirim punya **sesi `/form` aktif**
 2. **Nomor pengirim ada di whitelist**
 
-Kode equipment pakai `tag_number` asli (lihat keputusan di bawah, bukan shortcode custom).
+Kode equipment pakai `tag_number` asli untuk jalur cepat `/jamjalan`. Untuk jalur utama (`/rig` → `/form` → nomor), operator tidak perlu ingat/ketik `tag_number` sama sekali — cukup nomor urut yang ditampilkan bot (lihat "Alur Utama: /rig → /form → Nomor" di bagian Konsep Pengisian).
 
-## Tiga Jenis Pesan Otomatis
+## Empat Jenis Pesan/Interaksi
 
-1. **Push — Laporan Jam Jalan**
-   Terjadwal (n8n cron), rekap jam jalan & HM terakhir tiap rig ke grup.
+1. **Push — Laporan + Daftar Equipment per Window Shift**
+   Terjadwal (n8n cron), 1x di awal tiap window lapor — **17:00 WIB** (shift Siang) dan **05:00 WIB** (shift Malam). Isi: rekap jam jalan yang sudah masuk + daftar equipment bernomor per rig untuk yang belum lapor (setara hasil `/form [rig]`, di-broadcast otomatis ke grup untuk semua rig sekaligus).
 
-2. **Push — Reminder/Form Entry**
-   Terjadwal atau on-demand (`/form [rig]`). Menampilkan daftar equipment yang **belum** di-entry shift ini, termasuk tag + cara isi. Generate otomatis dari Supabase (bukan hardcode), sehingga ikut update kalau ada child unit baru/berubah di eRAMHoist.
+2. **Pull — `/rig`**
+   On-demand, siapa saja di whitelist. Balas daftar semua rig bernomor, tanpa batasan (semua nomor lihat semua rig — lihat keputusan di bagian "Belum Diputuskan").
 
-3. **Pull — Entry Jam Jalan dari Operator**
-   Webhook WAHA → n8n filter (whitelist + prefix `/jamjalan`) → parse tag/shift/jam/kondisi/catatan → validasi rig sesuai whitelist → **insert ke tabel `logbook`** (skema sama dengan app Logbook, lihat bagian "Konsep Pengisian" di bawah) → update `equipment.running_hours` (additive) → **reply** (quote) ke pesan command asli sebagai konfirmasi.
+3. **Pull — `/form [rig]`**
+   On-demand. Balas daftar equipment rig itu bernomor + upsert **sesi aktif** untuk nomor WA itu (berlaku 4 jam) supaya balasan angka berikutnya bisa di-resolve ke equipment yang benar.
+
+4. **Pull — Entry Jam Jalan** (2 jalur, sama-sama berujung insert ke `logbook`)
+   - **Jalur utama:** balasan angka (`2 6 baik, 4 12 baik`) → resolve nomor via sesi `/form` aktif → equipment
+   - **Jalur cepat opsional:** `/jamjalan [tag_number] [siang|malam] [jam] [kondisi] [catatan]` → langsung pakai tag, tidak butuh sesi/`/form` dulu, shift wajib disebut manual di jalur ini (beda dari jalur utama yang deteksi shift otomatis dari jam kirim)
+
+   Setelah resolve equipment (+ shift): validasi rig sesuai whitelist → **insert ke tabel `logbook`** (skema sama dengan app Logbook, lihat bagian "Konsep Pengisian" di bawah) → update `equipment.running_hours` (additive) → **reply** (quote) ke pesan command asli sebagai konfirmasi.
 
 ## Handling Pesan Bersamaan / Grup Rame
 
@@ -133,7 +139,74 @@ WHERE table_name = 'logbook' AND column_name = 'reporter_id';
 ```
 Kalau ternyata kolomnya `text` (bukan `uuid`), desain di atas tetap jalan tanpa perlu diubah — `wa_whitelist.id` valid dicast ke text juga.
 
-### Command final
+### Shift, Window Lapor & Deteksi Otomatis (finalisasi 11 Jul 2026, revisi "lebih santai")
+
+| Shift | Jam operasi | Window lapor |
+|---|---|---|
+| **Siang** | 06:00 – 18:00 | **17:00 – 20:00** |
+| **Malam** | 18:00 – 06:00 | **05:00 – 09:00** |
+
+- **Push otomatis** dikirim 1x di awal tiap window: **17:00 WIB** (Siang) dan **05:00 WIB** (Malam) — tidak ada reminder susulan, sesuai keputusan "lebih santai" (operator punya 3-4 jam untuk lapor kapan saja dalam window itu)
+- **Shift ditentukan otomatis dari jam kirim pesan, relatif ke JAM SHIFT ASLI (bukan window lapor):** pesan masuk 06:00–17:59 → shift **Siang**; pesan masuk 18:00–05:59 → shift **Malam**
+- **Entry di LUAR window tetap diterima** — window cuma soal kapan bot proaktif nge-push, bukan pembatas kapan operator boleh lapor. Operator lapor jam 12:00 (tengah shift Siang) tetap tercatat shift Siang, tidak ditolak
+- Deteksi ini berlaku untuk **jalur utama** (balasan angka). Jalur cepat `/jamjalan` tetap wajib sebut shift manual (`siang`/`malam`) karena operator mungkin lapor lintas-shift pakai jalur ini
+
+### Alur Utama: `/rig` → `/form [rig]` → Balasan Angka (finalisasi 11 Jul 2026)
+
+**Kenapa dibuat begini:** satu rig bisa punya banyak equipment (>2), dan `tag_number` sebagian panjang (`GS-KB150A-DEUTZ`) — berisiko salah ketik kalau operator harus mengetik tag lengkap tiap kali. Solusinya: operator lihat daftar bernomor dari bot, balas pakai nomor saja, bisa banyak equipment sekaligus dalam satu pesan.
+
+**1. `/rig`** — bot balas daftar semua rig, bernomor:
+```
+Daftar Rig:
+1. BW-100A
+2. BW-100B
+3. H35KD
+4. KB150A
+5. KB150B
+```
+
+**2. `/form [rig]`** — bot balas daftar equipment rig itu, bernomor, DAN simpan sesi:
+```
+Equipment BW-100A (berlaku 4 jam):
+1. TT-100A
+2. DC-100A
+3. GS-KB150A-DEUTZ
+4. BPM-100A
+5. HJ-H35KD
+
+Balas nomornya, contoh:
+2 6 baik
+Bisa sekaligus beberapa, pisah koma:
+2 6 baik, 4 12 baik
+```
+
+Setiap `/form [rig]` yang berhasil, n8n **upsert** ke tabel sesi (menimpa sesi lama nomor itu kalau ada):
+```sql
+CREATE TABLE wa_form_session (
+  nomor_wa     text primary key,
+  rig          text not null,
+  mapping      jsonb not null,   -- { "1": "TT-100A", "2": "DC-100A", ... }
+  generated_at timestamptz default now()
+);
+```
+Sesi berlaku **4 jam** dari `generated_at`. Kalau operator balas angka tapi sesinya sudah expired/belum pernah `/form` → bot tolak: `"Sesi sudah tidak berlaku, kirim /form [rig] dulu."`
+
+**3. Balasan angka** — format per entry: `[nomor] [jam] [kondisi] [catatan opsional]`, **tanpa** kata "jamjalan" (sudah dalam konteks sesi `/form`). Beberapa entry dalam satu pesan dipisah koma:
+```
+2 6 baik, 4 12 baik, 5 8 waspada oli rembes
+```
+n8n parse per segmen (split by koma) → tiap segmen: nomor pertama → lookup `mapping[nomor]` dari sesi aktif nomor WA itu → dapat `tag_number` → proses sama seperti alur `/jamjalan` (resolve equipment, shift otomatis dari jam kirim, insert `logbook`, update `running_hours`) → **satu balasan konfirmasi mencakup semua entry** dalam pesan itu, bukan reply terpisah per entry.
+
+### Command final (2 jalur)
+
+**Jalur utama** (setelah `/form [rig]`):
+```
+/rig
+/form BW-100A
+2 6 baik, 4 12 baik, 5 8 waspada oli rembes
+```
+
+**Jalur cepat opsional** (langsung, tanpa `/form`):
 ```
 /jamjalan TT-100A siang 8 baik
 /jamjalan DC-100A malam 6 rusak gearbox bunyi kasar
@@ -146,7 +219,7 @@ Format: `/jamjalan [tag_number] [siang|malam] [jam] [baik|waspada|rusak] [catata
 
 - [x] Endpoint & auth WAHA (API key, base URL Railway) — sudah beres, lihat bagian "Setup WAHA yang Sudah Jalan" di bawah
 - [x] Format kode equipment — **keputusan (11 Jul 2026): pakai `tag_number` asli langsung**, bukan shortcode terpisah. Contoh: `/jamjalan TT-100A siang 8 baik`. Alasan: sebagian besar tag sudah pendek, dan shortcode custom butuh tabel mapping tambahan yang harus disinkronkan tiap ada equipment baru/berubah.
-- [x] Jadwal pesan — **keputusan: 06:00 WIB** (laporan HM semalam + reminder) dan **18:00 WIB** (laporan HM hari itu + reminder sebelum shift ganti malam)
+- [x] Jadwal pesan — **keputusan final (revisi 11 Jul 2026, "lebih santai"): 17:00 WIB** (awal window lapor shift Siang, window 17:00-20:00) dan **05:00 WIB** (awal window lapor shift Malam, window 05:00-09:00). 1x push per window, tanpa reminder susulan. Entry di luar window tetap diterima, shift ditentukan otomatis dari jam kirim relatif ke jam shift asli (06:00-18:00=Siang, 18:00-06:00=Malam) — lihat detail di bagian "Shift, Window Lapor & Deteksi Otomatis"
 - [x] Struktur tabel whitelist — **keputusan (update 11 Jul 2026, revisi untuk skenario operator sakit):**
   ```sql
   CREATE TABLE wa_whitelist (
@@ -163,20 +236,39 @@ Format: `/jamjalan [tag_number] [siang|malam] [jam] [baik|waspada|rusak] [catata
   **Skenario operator sakit/absen:** admin (rig=NULL) bisa entry HM menggantikan operator rig manapun tanpa perlu ubah whitelist. Ada **lebih dari 1 nomor admin** yang di-whitelist dengan rig=NULL (bukan cuma 1), supaya ada backup kalau satu admin juga tidak available.
 
   **Transparansi:** pesan konfirmasi untuk entry dari admin (rig=NULL) ditandai beda dari entry operator biasa, termasuk nama admin (karena admin lebih dari 1 orang, perlu jelas siapa yang entry) — lihat contoh di bagian format teks di bawah.
-- [x] Format teks final tiap jenis pesan — **draft (update 11 Jul 2026, sesuai command `/jamjalan`):**
+- [x] Format teks final tiap jenis pesan — **draft (revisi 11 Jul 2026, alur `/rig` → `/form` → nomor):**
   ```
-  📋 Laporan Jam Jalan — Rig BW-100A — 11 Jul 2026, 06:00
-  ✅ TT-100A: 480 jam (+8, shift malam) — baik
-  ✅ DC-100A: 1250 jam (+6, shift malam) — waspada: gearbox bunyi kasar
-  ⚠️ Belum entry: GS-KB150A-DEUTZ
+  📋 Waktunya Lapor — Shift Malam (window 05:00-09:00)
 
-  ⏰ Reminder — belum entry shift siang:
-  - GS-KB150A-DEUTZ
-  Format: /jamjalan [tag_number] [siang|malam] [jam] [baik|waspada|rusak] [catatan opsional]
+  Rig BW-100A:
+  1. TT-100A ✅ sudah (480 jam)
+  2. DC-100A ⚠️ belum
+  3. GS-KB150A-DEUTZ ⚠️ belum
 
-  ✅ Tercatat: TT-100A +8 jam (total 480 jam) — baik
+  Balas: /form BW-100A untuk lihat nomor lengkap & lapor
 
-  ✅ Tercatat: TT-100A +8 jam (total 480 jam) — baik (dientry oleh Admin: Budi — pengganti sementara)
+  Daftar Rig:
+  1. BW-100A
+  2. BW-100B
+  3. H35KD
+  4. KB150A
+  5. KB150B
+  Balas /form [nama rig] untuk lihat equipment-nya
+
+  Equipment BW-100A (berlaku 4 jam):
+  1. TT-100A
+  2. DC-100A
+  3. GS-KB150A-DEUTZ
+  Balas nomornya, contoh: 2 6 baik
+  Bisa sekaligus: 2 6 baik, 4 12 baik
+
+  ✅ Tercatat:
+  - DC-100A +8 jam (total 480 jam) — baik
+  - GS-KB150A-DEUTZ +6 jam (total 326 jam) — waspada: oli rembes
+
+  ✅ Tercatat: DC-100A +8 jam (total 480 jam) — baik (dientry oleh Admin: Budi — pengganti sementara)
+
+  ❌ Sesi sudah tidak berlaku, kirim /form [rig] dulu.
 
   ❌ Format salah. Contoh: /jamjalan TT-100A siang 8 baik
   ```
