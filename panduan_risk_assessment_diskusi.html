@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<title>Panduan Diskusi Risk Assessment — eRAMHoist</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, sans-serif; font-size: 13px; color: #1e293b; background: #f8fafc; padding: 20px; }
+  .page { max-width: 900px; margin: 0 auto; background: white; padding: 32px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+  h1 { font-size: 20px; color: #0f172a; border-bottom: 3px solid #1e3a5f; padding-bottom: 10px; margin-bottom: 6px; }
+  h2 { font-size: 15px; color: #1e3a5f; margin: 24px 0 8px; padding: 6px 10px; background: #e8eef5; border-left: 4px solid #1e3a5f; border-radius: 0 4px 4px 0; }
+  h3 { font-size: 13px; color: #334155; margin: 14px 0 6px; }
+  .subtitle { font-size: 12px; color: #64748b; margin-bottom: 20px; }
+  table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 12px; }
+  th { background: #1e3a5f; color: white; padding: 8px 10px; text-align: left; }
+  td { padding: 7px 10px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+  tr:nth-child(even) td { background: #f8fafc; }
+  .cof-5 { background: #fee2e2 !important; font-weight: bold; }
+  .cof-4 { background: #ffedd5 !important; font-weight: bold; }
+  .cof-3 { background: #fef9c3 !important; }
+  .cof-2 { background: #dcfce7 !important; }
+  .cof-1 { background: #f0fdf4 !important; }
+  .risk-extreme { background: #dc2626; color: white; padding: 2px 8px; border-radius: 10px; font-weight: bold; font-size: 11px; }
+  .risk-high    { background: #ea580c; color: white; padding: 2px 8px; border-radius: 10px; font-weight: bold; font-size: 11px; }
+  .risk-medium  { background: #ca8a04; color: white; padding: 2px 8px; border-radius: 10px; font-size: 11px; }
+  .risk-low     { background: #16a34a; color: white; padding: 2px 8px; border-radius: 10px; font-size: 11px; }
+  .box { border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; margin: 10px 0; }
+  .box-amber { border-color: #f59e0b; background: #fffbeb; }
+  .box-blue  { border-color: #3b82f6; background: #eff6ff; }
+  .box-red   { border-color: #ef4444; background: #fef2f2; }
+  .checklist { list-style: none; }
+  .checklist li { padding: 5px 0; border-bottom: 1px solid #f1f5f9; }
+  .checklist li::before { content: "☐ "; font-size: 14px; color: #64748b; }
+  .matrix-table td { text-align: center; font-weight: bold; font-size: 11px; width: 60px; }
+  .m-e { background: #dc2626; color: white; }
+  .m-h { background: #ea580c; color: white; }
+  .m-m { background: #ca8a04; color: white; }
+  .m-l { background: #16a34a; color: white; }
+  .m-hd { background: #1e3a5f; color: white; font-size: 10px; }
+  .qa { background: #f1f5f9; border-radius: 6px; padding: 10px 14px; margin: 6px 0; }
+  .qa .q { font-weight: bold; color: #1e3a5f; margin-bottom: 4px; }
+  .qa .a { color: #475569; font-size: 12px; }
+  @media print {
+    body { background: white; padding: 0; }
+    .page { box-shadow: none; padding: 20px; }
+    .no-print { display: none; }
+    h2 { break-before: avoid; }
+  }
+  .print-btn { position: fixed; top: 20px; right: 20px; background: #1e3a5f; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: bold; }
+</style>
+</head>
+<body>
+<button class="print-btn no-print" onclick="window.print()">🖨 Cetak / PDF</button>
+<div class="page">
+
+  <h1>Panduan Diskusi Risk Assessment Equipment</h1>
+  <div class="subtitle">
+    Ref: Pedoman Pemeliharaan PT Pertamina EP · No. A04-005/PEP23000/2023-S9, 22 Mei 2023<br>
+    Disiapkan oleh: Tim Mekanik · eRAMHoist System
+  </div>
+
+  <!-- TUJUAN -->
+  <h2>1. Tujuan Diskusi</h2>
+  <div class="box box-blue">
+    <p>Risk Assessment ini bertujuan untuk menentukan <b>prioritas pemeliharaan</b> setiap equipment berdasarkan dua faktor:</p>
+    <br>
+    <table style="width:auto">
+      <tr>
+        <th style="width:160px">Faktor</th>
+        <th>Penjelasan</th>
+        <th style="width:180px">Sumber Data</th>
+      </tr>
+      <tr>
+        <td><b>PoF</b> (Probability of Failure)</td>
+        <td>Seberapa sering alat ini rusak? Dihitung otomatis dari MTBF di sistem.</td>
+        <td>Data downtime historis (sistem)</td>
+      </tr>
+      <tr>
+        <td><b>CoF</b> (Consequence of Failure)</td>
+        <td>Kalau alat ini gagal sekarang, seberapa besar dampaknya ke operasi?</td>
+        <td><b>Input manual oleh tim (diskusi ini)</b></td>
+      </tr>
+    </table>
+    <br>
+    <p><b>Risk Level = PoF × CoF</b> → menentukan strategi pemeliharaan (RCM / Time-based / Monitoring)</p>
+  </div>
+
+  <!-- SKALA CoF -->
+  <h2>2. Skala CoF — Pilih yang Paling Tepat</h2>
+  <p style="margin-bottom:8px;color:#64748b">Pertanyaan utama: <i>"Kalau alat ini gagal saat sedang operasi, apa yang terjadi?"</i></p>
+  <table>
+    <tr>
+      <th style="width:50px">CoF</th>
+      <th style="width:130px">Label</th>
+      <th>Kondisi di Rig</th>
+      <th style="width:140px">Contoh Equipment</th>
+    </tr>
+    <tr class="cof-5"><td>5</td><td>Catastrophic</td><td>Fatality, well blowout, kerusakan lingkungan besar, aset hilang total</td><td>BOP Stack, Accumulator</td></tr>
+    <tr class="cof-4"><td>4</td><td>Major</td><td>Safety incident serius, seluruh rig shutdown, NPT sangat panjang (>72 jam)</td><td>Drawworks, Top Drive, Crown Block</td></tr>
+    <tr class="cof-3"><td>3</td><td>Significant</td><td>Operasi drilling berhenti total, NPT > 24 jam, perlu mobilisasi part/vendor</td><td>Mud Pump, Generator, SCR/VFD</td></tr>
+    <tr class="cof-2"><td>2</td><td>Moderate</td><td>Partial shutdown, bisa disiasati sementara, NPT 4–24 jam</td><td>Shale Shaker, Air Compressor, Pompa</td></tr>
+    <tr class="cof-1"><td>1</td><td>Minor</td><td>NPT < 4 jam, workaround mudah, tidak langsung impact drilling</td><td>Forklift, Truck, Compactor</td></tr>
+    <tr><td>0</td><td>Negligible</td><td>Tidak ada dampak ke operasi, bisa diabaikan sementara</td><td>Fasilitas pendukung non-kritis</td></tr>
+  </table>
+
+  <!-- FAKTOR PENENTU -->
+  <h2>3. Faktor yang Mempengaruhi CoF</h2>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    <div class="box">
+      <h3>🔼 CoF NAIK kalau:</h3>
+      <ul style="list-style:disc;padding-left:16px;line-height:2">
+        <li>Tidak ada backup / redundansi</li>
+        <li>Part harus import / lead time lama</li>
+        <li>Langsung berkaitan dengan well safety</li>
+        <li>Pernah menyebabkan shutdown panjang</li>
+        <li>Vendor/teknisi khusus dibutuhkan</li>
+        <li>Equipment satu-satunya di rig</li>
+      </ul>
+    </div>
+    <div class="box">
+      <h3>🔽 CoF TURUN kalau:</h3>
+      <ul style="list-style:disc;padding-left:16px;line-height:2">
+        <li>Ada backup / unit paralel tersedia</li>
+        <li>Part lokal / mudah didapat</li>
+        <li>Bisa dibypass atau diisolasi</li>
+        <li>Tim bisa perbaiki sendiri (L1–L3)</li>
+        <li>Dampak hanya ke operasi non-kritis</li>
+        <li>Workaround sudah pernah dilakukan</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- RISK MATRIX -->
+  <h2>4. Risk Matrix — Hasil PoF × CoF</h2>
+  <div style="display:grid;grid-template-columns:auto 1fr;gap:20px;align-items:start">
+    <div>
+      <table class="matrix-table" style="width:auto">
+        <tr>
+          <td class="m-hd" style="width:50px">CoF →<br>PoF ↓</td>
+          <td class="m-hd">0</td><td class="m-hd">1</td><td class="m-hd">2</td>
+          <td class="m-hd">3</td><td class="m-hd">4</td><td class="m-hd">5</td>
+        </tr>
+        <tr><td class="m-hd">A (>8000j)</td><td class="m-l">L</td><td class="m-l">L</td><td class="m-l">L</td><td class="m-l">L</td><td class="m-m">M</td><td class="m-m">M</td></tr>
+        <tr><td class="m-hd">B (4–8k j)</td><td class="m-l">L</td><td class="m-l">L</td><td class="m-m">M</td><td class="m-m">M</td><td class="m-h">H</td><td class="m-h">H</td></tr>
+        <tr><td class="m-hd">C (2–4k j)</td><td class="m-l">L</td><td class="m-m">M</td><td class="m-m">M</td><td class="m-h">H</td><td class="m-h">H</td><td class="m-e">E</td></tr>
+        <tr><td class="m-hd">D (500–2k)</td><td class="m-l">L</td><td class="m-m">M</td><td class="m-h">H</td><td class="m-h">H</td><td class="m-e">E</td><td class="m-e">E</td></tr>
+        <tr><td class="m-hd">E (&lt;500j)</td><td class="m-m">M</td><td class="m-h">H</td><td class="m-h">H</td><td class="m-e">E</td><td class="m-e">E</td><td class="m-e">E</td></tr>
+      </table>
+    </div>
+    <div>
+      <table style="margin:0">
+        <tr><th>Risk Level</th><th>Strategi Pemeliharaan</th><th>Inspeksi</th></tr>
+        <tr><td><span class="risk-extreme">Extreme</span></td><td>RCM-based, monitoring intensif 24/7, spare parts always-on</td><td>Predictive / Continuous</td></tr>
+        <tr><td><span class="risk-high">High</span></td><td>RCM-based, spare parts tersedia, resources standby</td><td>Condition-based monitoring</td></tr>
+        <tr><td><span class="risk-medium">Medium</span></td><td>Time-based per manual book manufacturer</td><td>Periodic time-based</td></tr>
+        <tr><td><span class="risk-low">Low</span></td><td>Run-to-fail / monitoring condition</td><td>On-demand / kalau ada gejala</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- PERTANYAAN DISKUSI -->
+  <h2>5. Pertanyaan Panduan Diskusi</h2>
+  <p style="color:#64748b;margin-bottom:10px">Cetak form ini untuk setiap equipment. Isi satu lembar per equipment.</p>
+
+  <!-- Header equipment -->
+  <table style="margin-bottom:10px">
+    <tr>
+      <th style="width:35%">Nama Equipment</th>
+      <th style="width:18%">Tag Number</th>
+      <th style="width:22%">Rig / Unit</th>
+      <th style="width:15%">CoF Saat Ini</th>
+      <th style="width:10%">CoF Final</th>
+    </tr>
+    <tr>
+      <td style="height:28px">&nbsp;</td>
+      <td>&nbsp;</td>
+      <td>&nbsp;</td>
+      <td style="text-align:center;color:#94a3b8;font-size:11px">(dari sistem / usulan)</td>
+      <td style="text-align:center;font-size:18px;font-weight:bold">&nbsp;</td>
+    </tr>
+  </table>
+
+  <!-- 5 Pertanyaan dalam tabel -->
+  <table>
+    <tr>
+      <th style="width:28px">#</th>
+      <th style="width:42%">Pertanyaan</th>
+      <th style="width:25%">Jawaban / Catatan</th>
+      <th>Implikasi CoF</th>
+    </tr>
+    <tr>
+      <td style="text-align:center;font-weight:bold;color:#1e3a5f">1</td>
+      <td>"Kalau equipment ini tiba-tiba gagal saat rig sedang drilling, operasi bisa lanjut atau harus berhenti?"</td>
+      <td style="height:36px">&nbsp;</td>
+      <td style="font-size:11px;color:#475569">Berhenti total → CoF 3–5<br>Bisa disiasati → CoF 1–2<br>Tidak impact → CoF 0</td>
+    </tr>
+    <tr>
+      <td style="text-align:center;font-weight:bold;color:#1e3a5f">2</td>
+      <td>"Ada backup-nya tidak? Kalau ini mati, ada unit lain yang bisa menggantikan?"</td>
+      <td style="height:36px">&nbsp;</td>
+      <td style="font-size:11px;color:#475569">Tidak ada backup → CoF naik<br>Ada backup siap pakai → CoF turun 1 level</td>
+    </tr>
+    <tr>
+      <td style="text-align:center;font-weight:bold;color:#1e3a5f">3</td>
+      <td>"Berapa lama kira-kira waktu perbaikan kalau equipment ini rusak? Part-nya mudah dapat tidak?"</td>
+      <td style="height:36px">&nbsp;</td>
+      <td style="font-size:11px;color:#475569">&gt;24 jam / import → CoF 3+<br>4–24 jam → CoF 2<br>&lt;4 jam / part lokal → CoF 1</td>
+    </tr>
+    <tr>
+      <td style="text-align:center;font-weight:bold;color:#1e3a5f">4</td>
+      <td>"Pernah tidak equipment ini rusak dan menyebabkan rig shutdown atau NPT panjang?"</td>
+      <td style="height:36px">&nbsp;</td>
+      <td style="font-size:11px;color:#475569">Pernah & dampak besar → naikkan CoF sesuai kejadian</td>
+    </tr>
+    <tr>
+      <td style="text-align:center;font-weight:bold;color:#1e3a5f">5</td>
+      <td>"Ada risiko safety langsung tidak kalau ini gagal? Bisa membahayakan personel atau sumur?"</td>
+      <td style="height:36px">&nbsp;</td>
+      <td style="font-size:11px;color:#475569">Risiko fatality / blowout → CoF 5<br>Safety incident → CoF 4</td>
+    </tr>
+  </table>
+
+  <!-- Cara menentukan CoF Final -->
+  <div class="box box-blue" style="margin-top:10px;font-size:12px">
+    <b>Cara menentukan CoF Final dari 5 jawaban di atas (bukan dirata-rata):</b>
+    <table style="margin-top:8px;font-size:12px">
+      <tr>
+        <th style="width:28px">Urutan</th>
+        <th style="width:40%">Langkah</th>
+        <th>Penjelasan</th>
+      </tr>
+      <tr>
+        <td style="text-align:center;font-weight:bold">1</td>
+        <td><b>Cek Q5 dulu</b> — ada risiko safety / fatality?</td>
+        <td>Kalau <b>YA</b> → CoF langsung <b>4 atau 5</b>. Stop, tidak perlu lanjut ke bawah. Safety selalu override.</td>
+      </tr>
+      <tr>
+        <td style="text-align:center;font-weight:bold">2</td>
+        <td><b>Q1 sebagai baseline</b> — impact ke operasi drilling</td>
+        <td>Ini angka awal CoF. Contoh: "drilling berhenti total" → baseline CoF 3.</td>
+      </tr>
+      <tr>
+        <td style="text-align:center;font-weight:bold">3</td>
+        <td><b>Q2 bisa turunkan</b> — ada backup siap pakai?</td>
+        <td>Kalau ada backup yang benar-benar siap pakai → kurangi 1 dari baseline. Kalau backup ada tapi jarang siap → tetap.</td>
+      </tr>
+      <tr>
+        <td style="text-align:center;font-weight:bold">4</td>
+        <td><b>Q3 konfirmasi</b> — lead time perbaikan</td>
+        <td>Kalau lead time jauh lebih lama dari yang diperkirakan di Q1 → naikkan CoF. Kalau sesuai → konfirmasi angka.</td>
+      </tr>
+      <tr>
+        <td style="text-align:center;font-weight:bold">5</td>
+        <td><b>Q4 validasi historis</b> — pernah terjadi lebih parah?</td>
+        <td>Kejadian nyata lebih berat dari perkiraan? → naikkan ke angka yang pernah terjadi. <i>Pengalaman lapangan lebih kuat dari teori.</i></td>
+      </tr>
+      <tr style="background:#fef9c3">
+        <td style="text-align:center;font-weight:bold">✓</td>
+        <td><b>CoF Final = angka tertinggi yang valid</b></td>
+        <td>Jangan dirata-rata. Kalau ada satu faktor yang mengarah ke CoF lebih tinggi dan masuk akal → pakai yang tertinggi. Risk assessment selalu <i>konservatif</i>.</td>
+      </tr>
+    </table>
+    <p style="margin-top:8px;color:#92400e"><b>Contoh:</b> Q1 → CoF 3 (drilling berhenti), Q2 → ada backup (-1 = CoF 2), Q3 → part import (+1 = CoF 3), Q4 → pernah NPT 36 jam (konfirmasi 3), Q5 → tidak ada safety risk. <b>CoF Final = 3.</b></p>
+  </div>
+
+  <!-- Baris kesimpulan -->
+  <table style="margin-top:10px">
+    <tr>
+      <th style="width:50%">Alasan perubahan CoF (jika berbeda dari usulan sistem)</th>
+      <th style="width:25%">Tanggal Diskusi</th>
+      <th>Paraf</th>
+    </tr>
+    <tr><td style="height:32px">&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>
+  </table>
+
+  <!-- CHECKLIST SEBELUM PRESENTASI -->
+  <h2>6. Checklist Sebelum Presentasi ke Spv</h2>
+  <div class="box box-amber">
+    <ul class="checklist">
+      <li>Buka file <b>risk_assessment_template.csv</b> di Excel</li>
+      <li>Filter per Rig / Unit (BW-100A, H35KD, KB150A/B/C)</li>
+      <li>Tandai equipment yang CoF-nya masih ragu (highlight kuning)</li>
+      <li>Siapkan data downtime 1 tahun terakhir dari eRAMHoist (tab Availability)</li>
+      <li>Fokus diskusi ke equipment dengan CoF 3–5 dulu (paling impactful)</li>
+      <li>Catat semua perubahan CoF beserta alasannya</li>
+      <li>Setelah diskusi selesai, update CoF di eRAMHoist via tab Info → Risk Assessment</li>
+    </ul>
+  </div>
+
+  <!-- RINGKASAN FITUR BARU eRAMHoist -->
+  <h2>7. Fitur Baru di eRAMHoist (Update Juni 2026)</h2>
+  <table>
+    <tr><th>Fitur</th><th>Lokasi di App</th><th>Keterangan</th></tr>
+    <tr>
+      <td><b>Risk Assessment</b></td>
+      <td>Equipment → tab Info → section Risk Assessment</td>
+      <td>Input CoF, Tgl Operasi, Target MTBF. PoF & Risk Level auto-hitung.</td>
+    </tr>
+    <tr>
+      <td><b>Warisi CoF dari Parent</b></td>
+      <td>Equipment → tab Info → tombol amber</td>
+      <td>Child component otomatis ambil CoF dari parent equipment. Efisien untuk set massal.</td>
+    </tr>
+    <tr>
+      <td><b>CoF Badge</b></td>
+      <td>Equipment List (kolom paling kanan)</td>
+      <td>Langsung terlihat equipment mana yang sudah/belum ada CoF-nya.</td>
+    </tr>
+    <tr>
+      <td><b>RCA Tab</b></td>
+      <td>Equipment → tab 🔎 RCA</td>
+      <td>Form 5-Whys untuk Root Cause Analysis. Auto-trigger alert kalau failure >1× dalam 12 bulan.</td>
+    </tr>
+    <tr>
+      <td><b>Fix MTBF Formula</b></td>
+      <td>RAM Dashboard → Availability</td>
+      <td>MTBF sekarang = Σ(jam operasi) / Σ(failure) sesuai pedoman. Sebelumnya ada 2 formula berbeda.</td>
+    </tr>
+    <tr>
+      <td><b>Fix MTTR Formula</b></td>
+      <td>RAM Dashboard → Availability</td>
+      <td>MTTR sekarang termasuk open repair (alat yang sedang diperbaiki). Sebelumnya diabaikan.</td>
+    </tr>
+    <tr>
+      <td><b>Fix Availability Basis Waktu</b></td>
+      <td>RAM Dashboard → Availability</td>
+      <td>Ao/Ai sekarang dihitung dari tanggal alat aktif, bukan kalender tetap. Alat baru tidak lagi tampak buruk.</td>
+    </tr>
+  </table>
+
+  <div class="box box-red" style="margin-top:20px">
+    <b>⚠ Catatan Penting:</b> Risk Level (Low/Medium/High/Extreme) di sistem baru akan muncul setelah:
+    <ol style="padding-left:20px;margin-top:6px;line-height:2">
+      <li>CoF Score diisi di tab Info equipment</li>
+      <li>Ada data downtime yang tercatat (untuk MTBF → PoF otomatis)</li>
+    </ol>
+    Equipment yang belum pernah rusak = PoF default A (Unlikely) → Risk Level = CoF saja yang menentukan.
+  </div>
+
+  <div style="margin-top:30px;padding-top:12px;border-top:1px solid #e2e8f0;font-size:11px;color:#94a3b8;text-align:center">
+    eRAMHoist · Pemeliharaan Peralatan Rig · PT Pertamina EP · Juni 2026
+  </div>
+
+</div>
+</body>
+</html>

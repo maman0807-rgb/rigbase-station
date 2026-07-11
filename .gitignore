@@ -40,3 +40,5 @@ operator_credentials.csv
 
 # Supabase CLI working metadata (jangan di-commit)
 supabase/.temp/
+
+.vercel

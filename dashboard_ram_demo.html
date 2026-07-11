@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RAM Dashboard Demo — eRAMHoist</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>tailwind.config = { theme: { extend: { colors: {
+    navy: { DEFAULT:'#0f2d5a', 700:'#0a2044' },
+    safety: '#f97316'
+  } } } }</script>
+</head>
+<body class="bg-slate-100 text-slate-900 font-sans min-h-screen">
+<div class="max-w-5xl mx-auto p-4 space-y-4">
+
+  <!-- Header -->
+  <div class="bg-navy text-white rounded-xl px-5 py-4 flex items-center gap-3 flex-wrap">
+    <div>
+      <div class="text-lg font-bold">e<span class="text-safety">RAM</span>Hoist
+        <span class="text-blue-200 font-normal text-base">— Availability Dashboard</span>
+        <span class="ml-2 bg-safety/20 text-safety text-xs px-2 py-0.5 rounded-full font-semibold">DEMO</span>
+      </div>
+      <div class="text-xs text-blue-300 mt-0.5">
+        Inspeksi Terjadwal ditarik otomatis dari <code class="bg-white/10 px-1 rounded">v_inspection_downtime</code>
+        · Breakdown &amp; Troubleshoot tetap input manual
+      </div>
+    </div>
+    <div class="ml-auto flex items-center gap-2">
+      <span class="text-blue-300 text-sm">Periode:</span>
+      <select id="sel-period" onchange="refresh()"
+        class="bg-navy-700 border border-blue-400/60 text-white px-2 py-1.5 rounded-lg outline-none text-sm">
+        <option value="30">30 hari</option>
+        <option value="90">90 hari</option>
+        <option value="365" selected>1 tahun</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- SIMULASI VIEW — titik kunci integrasi -->
+  <div class="bg-white rounded-xl border-2 border-purple-200 shadow-sm overflow-hidden">
+    <div class="px-4 py-3 bg-purple-50 border-b border-purple-200 flex items-center justify-between flex-wrap gap-2">
+      <div>
+        <div class="font-bold text-purple-800 text-sm">📋 v_inspection_downtime — Output View (Simulasi)</div>
+        <div class="text-xs text-purple-600 mt-0.5">
+          Di produksi: data ini dari Supabase, di-mapping otomatis ke events Inspeksi Terjadwal.
+          Klik <b>Tutup Semua</b> untuk simulasi semua temuan di-close.
+        </div>
+      </div>
+      <div class="text-xs text-purple-500 font-mono bg-purple-100 px-2 py-1 rounded">
+        SELECT * FROM v_inspection_downtime
+      </div>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="bg-slate-50 text-left text-xs font-bold text-slate-600 border-b border-slate-200">
+            <th class="px-3 py-2">inspection_code</th>
+            <th class="px-3 py-2">rig</th>
+            <th class="px-3 py-2">mulai</th>
+            <th class="px-3 py-2 text-center">open_count</th>
+            <th class="px-3 py-2 text-center">is_holding</th>
+            <th class="px-3 py-2">selesai</th>
+            <th class="px-3 py-2 text-center">Aksi (Simulasi)</th>
+          </tr>
+        </thead>
+        <tbody id="view-table-body"></tbody>
+      </table>
+    </div>
+    <div class="px-4 py-2 bg-slate-50 border-t border-slate-100 text-xs text-slate-400">
+      ↳ Tiap baris di-mapping ke 1 event <code>penyebab:'Inspeksi Terjadwal'</code> · is_holding=true → selesai=null → rig masih ditahan
+    </div>
+  </div>
+
+  <!-- KPI Cards -->
+  <div id="kpi-row" class="grid grid-cols-2 md:grid-cols-5 gap-3"></div>
+
+  <!-- Sedang Down -->
+  <div id="ongoing-section"></div>
+
+  <!-- Per Unit -->
+  <div id="unit-section"></div>
+
+  <!-- Riwayat -->
+  <div id="history-section"></div>
+
+  <!-- Catatan -->
+  <div class="bg-blue-50 border border-blue-200 rounded-xl p-4 text-xs text-slate-600 space-y-1.5">
+    <div class="font-semibold text-blue-800 mb-1">📌 Titik Ekstensi — Dari Demo ke Produksi</div>
+    <div>1. Ganti <code class="bg-white px-1 rounded border border-blue-200">viewData</code> dengan hasil
+      <code class="bg-white px-1 rounded border border-blue-200">supabase.from('v_inspection_downtime').select('*')</code></div>
+    <div>2. Ganti <code class="bg-white px-1 rounded border border-blue-200">manualEvents</code> dengan hasil
+      <code class="bg-white px-1 rounded border border-blue-200">supabase.from('downtime_events').select('*')</code></div>
+    <div>3. Gabungkan keduanya → <code class="bg-white px-1 rounded border border-blue-200">buildEvents()</code> → lempar ke <code class="bg-white px-1 rounded border border-blue-200">hitungRAM()</code></div>
+    <div>4. Entry <code class="bg-white px-1 rounded border border-blue-200">bd-mast</code> + <code class="bg-white px-1 rounded border border-blue-200">ts-mast</code> di manualEvents → hapus dari
+      <code class="bg-white px-1 rounded border border-blue-200">downtime_events</code> setelah view terbukti jalan di produksi</div>
+    <div class="pt-2 border-t border-blue-200 text-slate-500">
+      <b>KATEGORI Inspeksi Terjadwal:</b> failure:true · downtime:true · terencana:true
+      → masuk MTBF/MTTR · potong Ao · <b>tidak potong Ai</b>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // ============================================================
+  // KATEGORI — flags per penyebab downtime
+  // failure:true   → masuk MTBF & MTTR
+  // downtime:true  → menahan rig (masuk Availability)
+  // terencana:true → hanya potong Ao, TIDAK potong Ai
+  // ============================================================
+  const KATEGORI = {
+    'Breakdown':          { failure: true,  downtime: true,  terencana: false },
+    'Troubleshoot':       { failure: true,  downtime: true,  terencana: false },
+    'Tunggu Spare':       { failure: false, downtime: true,  terencana: false },
+    'PM':                 { failure: false, downtime: true,  terencana: true  },
+    'Mobilisasi':         { failure: false, downtime: true,  terencana: true  },
+    'Inspeksi Terjadwal': { failure: true,  downtime: true,  terencana: true  },
+  };
+
+  // ============================================================
+  // hitungRAM(events, periodDays) — engine kalkulasi
+  // JANGAN ubah logika inti ini. Cukup beri data events dengan flag tepat.
+  // ============================================================
+  function hitungRAM(events, periodDays) {
+    const now     = Date.now();
+    const pStart  = now - periodDays * 86400000;
+    const periodH = periodDays * 24;
+    const byUnit  = {};
+
+    events.forEach(ev => {
+      const fl = KATEGORI[ev.penyebab] || { failure: false, downtime: true, terencana: false };
+      if (!fl.downtime) return;
+
+      const key = ev.unitId || ev.equipmentId || 'unknown';
+      if (!byUnit[key]) byUnit[key] = {
+        id: key, name: ev.unitName || ev.equipmentName || key,
+        downH_all: 0, downH_unplanned: 0, fails: 0, failDurs: [], ongoing: [],
+      };
+      const u = byUnit[key];
+
+      const s        = new Date(ev.mulai).getTime();
+      const e        = ev.selesai ? new Date(ev.selesai).getTime() : now;
+      const clippedH = Math.max(0, (Math.min(e, now) - Math.max(s, pStart)) / 3600000);
+
+      u.downH_all += clippedH;
+      if (!fl.terencana) u.downH_unplanned += clippedH;
+      if (fl.failure) {
+        u.fails++;
+        if (ev.selesai) u.failDurs.push((e - s) / 3600000);
+      }
+      if (!ev.selesai) u.ongoing.push(ev);
+    });
+
+    const units     = Object.values(byUnit);
+    const aoFn      = u => Math.max(0, Math.min(100, (periodH - u.downH_all)       / periodH * 100));
+    const aiFn      = u => Math.max(0, Math.min(100, (periodH - u.downH_unplanned) / periodH * 100));
+    const fleetAo   = units.length ? units.reduce((s, u) => s + aoFn(u), 0) / units.length : 100;
+    const fleetAi   = units.length ? units.reduce((s, u) => s + aiFn(u), 0) / units.length : 100;
+    const failUnits = units.filter(u => u.fails > 0);
+    const mtbf      = failUnits.length
+      ? failUnits.reduce((s, u) => s + (periodH - u.downH_all) / u.fails, 0) / failUnits.length
+      : null;
+    const allDurs   = units.flatMap(u => u.failDurs);
+    const mttr      = allDurs.length ? allDurs.reduce((a, b) => a + b, 0) / allDurs.length : null;
+    const ongoing   = events.filter(ev => !ev.selesai);
+
+    return { units, fleetAo, fleetAi, mtbf, mttr, ongoing, periodH, aoFn, aiFn };
+  }
+
+  // ============================================================
+  // viewData — simulasi output v_inspection_downtime
+  // Di produksi: supabase.from('v_inspection_downtime').select('*')
+  // ============================================================
+  const viewData = [
+    {
+      inspection_id:  'ins-2026-003',
+      parent_unit_id: 'rig-tiga',
+      rig:            'RIG TIGA',
+      inspection_code:'INS-2026-003',
+      mulai:          '2026-05-15T00:00:00',
+      open_count:     3,
+      is_holding:     true,
+      selesai:        null,
+    },
+  ];
+
+  // ============================================================
+  // manualEvents — input manual Breakdown, Troubleshoot, PM, dll
+  // Di produksi: supabase.from('downtime_events').select('*')
+  //
+  // CATATAN: bd-mast & ts-mast = kejadian yang SAMA dengan INS-2026-003.
+  // Hapus dari downtime_events di DB setelah view terbukti jalan.
+  // ============================================================
+  const manualEvents = [
+    { id:'bd-mast',   source:'manual', unitId:'rig-tiga', unitName:'RIG TIGA',
+      equipmentId:'eq-mast', equipmentName:'MAST H35KD',
+      penyebab:'Breakdown',    mulai:'2026-04-10T08:00:00', selesai:'2026-04-12T14:00:00',
+      catatan:'Crown block pin patah' },
+    { id:'ts-mast',   source:'manual', unitId:'rig-tiga', unitName:'RIG TIGA',
+      equipmentId:'eq-mast', equipmentName:'MAST H35KD',
+      penyebab:'Troubleshoot', mulai:'2026-05-01T06:00:00', selesai:'2026-05-02T18:00:00',
+      catatan:'Hydraulic cylinder weeping' },
+    { id:'pm-r2-001', source:'manual', unitId:'rig-dua',  unitName:'RIG DUA',
+      equipmentId:'eq-eng-r2', equipmentName:'Engine CAT 3512B',
+      penyebab:'PM',           mulai:'2026-04-20T07:00:00', selesai:'2026-04-21T15:00:00',
+      catatan:'PM 250 jam terlaksana' },
+    { id:'bd-r2-001', source:'manual', unitId:'rig-dua',  unitName:'RIG DUA',
+      equipmentId:'eq-pump-r2', equipmentName:'Mud Pump 1',
+      penyebab:'Breakdown',    mulai:'2026-03-20T10:00:00', selesai:'2026-03-21T12:00:00',
+      catatan:'Liner crack, ganti liner set' },
+  ];
+
+  // ============================================================
+  // Langkah 3 — mapping view row → event (satu baris = satu event)
+  // ============================================================
+  function viewToEvent(row) {
+    return {
+      id:             row.inspection_id,
+      source:         'inspeksi',
+      unitId:         String(row.parent_unit_id),
+      unitName:       row.rig,
+      inspectionCode: row.inspection_code,
+      penyebab:       'Inspeksi Terjadwal',
+      mulai:          row.mulai,
+      selesai:        row.selesai,       // null = masih menahan rig
+      openCount:      row.open_count,
+      catatan:        row.open_count > 0
+                        ? `${row.open_count} temuan masih Open`
+                        : 'Semua temuan Closed',
+    };
+  }
+
+  // Gabungkan manual + inspeksi → input hitungRAM()
+  function buildEvents() {
+    return [...manualEvents, ...viewData.map(viewToEvent)];
+  }
+
+  // ============================================================
+  // Simulasi: tutup semua temuan pada satu siklus
+  // Di produksi: user close findings di Modul Inspeksi → view auto-update
+  // ============================================================
+  function simulateTutupSemua(inspectionCode) {
+    const row = viewData.find(r => r.inspection_code === inspectionCode);
+    if (!row || !row.is_holding) return;
+    const now = new Date();
+    now.setHours(17, 0, 0, 0);  // simulasi closing jam 17:00 hari ini
+    row.open_count = 0;
+    row.is_holding = false;
+    row.selesai    = now.toISOString();
+    refresh();
+  }
+
+  // Simulasi: reset kembali ke kondisi awal
+  function simulasiReset(inspectionCode) {
+    const row = viewData.find(r => r.inspection_code === inspectionCode);
+    if (!row) return;
+    row.open_count = 3;
+    row.is_holding = true;
+    row.selesai    = null;
+    refresh();
+  }
+
+  // ============================================================
+  // HELPERS
+  // ============================================================
+  function fmtH(h) {
+    h = Number(h) || 0;
+    return h < 24 ? h.toFixed(1) + ' jam' : (h / 24).toFixed(1) + ' hari';
+  }
+  function fmtDate(iso) {
+    if (!iso) return '—';
+    return new Date(iso).toLocaleDateString('id-ID', { day:'2-digit', month:'short', year:'numeric' });
+  }
+  function availBg(p) {
+    return p >= 95 ? 'border-green-300 bg-green-50'
+         : p >= 85 ? 'border-amber-300 bg-amber-50'
+                   : 'border-red-300 bg-red-50';
+  }
+  function availTxt(p) {
+    return p >= 95 ? 'text-green-700' : p >= 85 ? 'text-amber-700' : 'text-red-700';
+  }
+  function pctBadge(p) {
+    const cls = p >= 95 ? 'bg-green-100 text-green-700'
+              : p >= 85 ? 'bg-amber-100 text-amber-700'
+                        : 'bg-red-100 text-red-700';
+    return `<span class="px-2 py-0.5 rounded-full text-xs font-semibold ${cls}">${p.toFixed(1)}%</span>`;
+  }
+
+  // ============================================================
+  // RENDER: Tabel View Simulasi
+  // ============================================================
+  function renderViewTable() {
+    const rows = viewData.map(row => {
+      const holdBadge = row.is_holding
+        ? '<span class="px-2 py-0.5 rounded text-xs font-bold bg-red-100 text-red-700">true ⛔</span>'
+        : '<span class="px-2 py-0.5 rounded text-xs font-bold bg-green-100 text-green-700">false ✅</span>';
+      const openBadge = row.open_count > 0
+        ? `<span class="font-bold text-red-600">${row.open_count}</span>`
+        : `<span class="font-bold text-green-600">0</span>`;
+      const selesaiTxt = row.selesai ? fmtDate(row.selesai) : '<span class="text-slate-400">NULL</span>';
+      const action = row.is_holding
+        ? `<button onclick="simulateTutupSemua('${row.inspection_code}')"
+             class="px-3 py-1 rounded-lg bg-green-100 hover:bg-green-200 text-green-700 text-xs font-semibold whitespace-nowrap">
+             ✓ Tutup Semua (simulasi)
+           </button>`
+        : `<span class="text-green-600 text-xs font-semibold mr-2">✓ Semua Closed</span>
+           <button onclick="simulasiReset('${row.inspection_code}')"
+             class="px-2 py-1 rounded-lg border border-slate-300 hover:bg-slate-100 text-xs text-slate-500">
+             ↺ Reset
+           </button>`;
+      return `<tr class="border-b border-slate-100 ${row.is_holding ? 'bg-red-50/30' : 'bg-green-50/30'}">
+        <td class="px-3 py-2 font-mono text-purple-700 font-semibold">${row.inspection_code}</td>
+        <td class="px-3 py-2 font-bold text-navy">${row.rig}</td>
+        <td class="px-3 py-2 text-slate-600">${fmtDate(row.mulai)}</td>
+        <td class="px-3 py-2 text-center">${openBadge}</td>
+        <td class="px-3 py-2 text-center">${holdBadge}</td>
+        <td class="px-3 py-2">${selesaiTxt}</td>
+        <td class="px-3 py-2 text-center">${action}</td>
+      </tr>`;
+    }).join('');
+    document.getElementById('view-table-body').innerHTML = rows ||
+      '<tr><td colspan="7" class="px-3 py-4 text-center text-slate-400 text-sm">Tidak ada siklus aktif.</td></tr>';
+  }
+
+  // ============================================================
+  // RENDER: KPI Cards
+  // ============================================================
+  function renderKPI(res) {
+    const card = (lbl, val, sub, extra = '') =>
+      `<div class="bg-white rounded-xl border ${extra} p-4 shadow-sm">
+        <div class="text-xs text-slate-500 mb-1">${lbl}</div>
+        <div class="text-2xl font-extrabold">${val}</div>
+        ${sub ? `<div class="text-[11px] text-slate-400 mt-0.5">${sub}</div>` : ''}
+      </div>`;
+    const delta = (res.fleetAi - res.fleetAo).toFixed(1);
+    document.getElementById('kpi-row').innerHTML =
+      card('Ao — Operational Availability',
+        `<span class="${availTxt(res.fleetAo)}">${res.fleetAo.toFixed(1)}%</span>`,
+        'Semua downtime termasuk planned', availBg(res.fleetAo)) +
+      card('Ai — Inherent Availability',
+        `<span class="${availTxt(res.fleetAi)}">${res.fleetAi.toFixed(1)}%</span>`,
+        `Hanya unplanned · Δ +${delta}% vs Ao`, availBg(res.fleetAi)) +
+      card('🔴 Sedang Down', `<span class="${res.ongoing.length ? 'text-red-600' : 'text-green-600'}">${res.ongoing.length}</span>`,
+        res.ongoing.length ? 'unit / rig ditahan' : 'semua beroperasi') +
+      card('MTBF',
+        `<span class="text-slate-900">${res.mtbf != null ? fmtH(res.mtbf) : '—'}</span>`,
+        res.mtbf != null ? 'rata² antar kerusakan' : 'belum ada failure') +
+      card('MTTR',
+        `<span class="text-slate-900">${res.mttr != null ? fmtH(res.mttr) : '—'}</span>`,
+        res.mttr != null ? 'rata² durasi perbaikan' : '—');
+  }
+
+  // ============================================================
+  // RENDER: Sedang Down
+  // ============================================================
+  function renderOngoing(res) {
+    if (!res.ongoing.length) {
+      document.getElementById('ongoing-section').innerHTML =
+        `<div class="bg-green-50 border border-green-200 rounded-xl p-4 text-sm text-green-800 font-semibold">
+          ✅ Tidak ada rig / equipment yang sedang down.
+        </div>`;
+      return;
+    }
+    const rows = res.ongoing.map(ev => {
+      const isInspeksi = ev.source === 'inspeksi';
+      const durH = (Date.now() - new Date(ev.mulai).getTime()) / 3600000;
+      const srcBadge = isInspeksi
+        ? `<span class="ml-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-100 text-purple-700">🔒 Siklus Inspeksi</span>`
+        : '';
+      const actions = isInspeksi
+        ? `<span class="text-[11px] text-purple-500 italic">Tutup di Modul Inspeksi</span>`
+        : `<button onclick="alert('Produksi: form Selesai')"
+             class="px-2 py-1 rounded bg-green-100 hover:bg-green-200 text-green-700 text-xs font-semibold">✓ Selesai</button>
+           <button onclick="alert('Produksi: form Edit')"
+             class="ml-1 px-2 py-1 rounded bg-navy text-white text-xs">✏</button>`;
+      const ref = ev.inspectionCode
+        ? `<span class="font-mono text-purple-700 text-xs">${ev.inspectionCode}</span>`
+        : (ev.equipmentName || '—');
+      const ket = ev.openCount
+        ? `<span class="text-red-600 font-semibold text-xs">${ev.openCount} temuan Open</span>`
+        : ev.catatan || '';
+      return `<tr class="border-b border-slate-100 ${isInspeksi ? 'bg-purple-50/30' : ''}">
+        <td class="px-3 py-2 text-sm font-bold text-navy">${ev.unitName || '—'}</td>
+        <td class="px-3 py-2 text-sm">${ev.penyebab}${srcBadge}</td>
+        <td class="px-3 py-2 text-sm text-slate-500">${ref}</td>
+        <td class="px-3 py-2 text-sm">${fmtDate(ev.mulai)}</td>
+        <td class="px-3 py-2 text-sm text-red-600 font-bold">${fmtH(durH)}</td>
+        <td class="px-3 py-2 text-sm">${ket}</td>
+        <td class="px-3 py-2 text-right whitespace-nowrap">${actions}</td>
+      </tr>`;
+    }).join('');
+    document.getElementById('ongoing-section').innerHTML =
+      `<div class="bg-white rounded-xl border border-red-200 overflow-hidden shadow-sm">
+        <div class="px-4 py-3 border-b border-red-100 font-semibold text-red-700 text-sm">
+          🔴 Sedang Down (${res.ongoing.length})
+          <span class="ml-2 text-xs font-normal text-slate-400">
+            🔒 = dari Siklus Inspeksi, read-only
+          </span>
+        </div>
+        <div class="overflow-x-auto"><table class="w-full">
+          <thead><tr class="bg-slate-50 text-left text-xs font-bold text-slate-600">
+            <th class="px-3 py-2">Unit / Rig</th><th class="px-3 py-2">Penyebab</th>
+            <th class="px-3 py-2">Ref</th><th class="px-3 py-2">Mulai</th>
+            <th class="px-3 py-2">Lama</th><th class="px-3 py-2">Keterangan</th>
+            <th class="px-3 py-2"></th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table></div>
+      </div>`;
+  }
+
+  // ============================================================
+  // RENDER: Per Unit
+  // ============================================================
+  function renderPerUnit(res) {
+    const rows = res.units.map(u => {
+      const aoU  = res.aoFn(u);
+      const aiU  = res.aiFn(u);
+      const mtbfU = u.fails > 0 ? fmtH((res.periodH - u.downH_all) / u.fails) : '—';
+      const mttrU = u.failDurs.length
+        ? fmtH(u.failDurs.reduce((a, b) => a + b, 0) / u.failDurs.length) : '—';
+      return `<tr class="border-b border-slate-100">
+        <td class="px-3 py-2 text-sm font-bold text-navy">${u.name}</td>
+        <td class="px-3 py-2">${pctBadge(aoU)}</td>
+        <td class="px-3 py-2">${pctBadge(aiU)}</td>
+        <td class="px-3 py-2 text-sm font-semibold text-slate-700">${fmtH(u.downH_all)}</td>
+        <td class="px-3 py-2 text-sm text-slate-400">${fmtH(u.downH_unplanned)}</td>
+        <td class="px-3 py-2 text-sm text-center">${u.fails}</td>
+        <td class="px-3 py-2 text-sm">${mtbfU}</td>
+        <td class="px-3 py-2 text-sm">${mttrU}</td>
+      </tr>`;
+    }).join('');
+    document.getElementById('unit-section').innerHTML =
+      `<div class="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+        <div class="px-4 py-3 border-b border-slate-100 font-semibold text-slate-800 text-sm">
+          Availability per Unit / Rig
+          <span class="ml-2 text-xs font-normal text-slate-400">Ao = semua downtime · Ai = hanya unplanned</span>
+        </div>
+        <div class="overflow-x-auto"><table class="w-full">
+          <thead><tr class="bg-slate-50 text-left text-xs font-bold text-slate-600">
+            <th class="px-3 py-2">Unit</th><th class="px-3 py-2">Ao</th><th class="px-3 py-2">Ai</th>
+            <th class="px-3 py-2">Total Down</th><th class="px-3 py-2">Unplanned Down</th>
+            <th class="px-3 py-2 text-center">Failures</th><th class="px-3 py-2">MTBF</th><th class="px-3 py-2">MTTR</th>
+          </tr></thead>
+          <tbody>${rows || '<tr><td colspan="8" class="px-3 py-6 text-center text-slate-400 text-sm">Belum ada data.</td></tr>'}</tbody>
+        </table></div>
+      </div>`;
+  }
+
+  // ============================================================
+  // RENDER: Riwayat
+  // ============================================================
+  function renderHistory(events, periodDays) {
+    const now    = Date.now();
+    const pStart = now - periodDays * 86400000;
+    const inP    = events
+      .filter(ev => new Date(ev.mulai).getTime() >= pStart)
+      .sort((a, b) => new Date(b.mulai) - new Date(a.mulai));
+
+    const rows = inP.map(ev => {
+      const fl   = KATEGORI[ev.penyebab] || {};
+      const s    = new Date(ev.mulai).getTime();
+      const e    = ev.selesai ? new Date(ev.selesai).getTime() : now;
+      const durH = (e - s) / 3600000;
+      const srcDot = ev.source === 'inspeksi'
+        ? '<span class="text-purple-600 text-[10px] ml-1">🔒</span>' : '';
+      const statusBadge = ev.selesai
+        ? '<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-green-100 text-green-700">✓ closed</span>'
+        : '<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-100 text-red-600 animate-pulse">● ongoing</span>';
+      const failBadge = fl.failure
+        ? '<span class="text-[10px] text-red-600 font-bold">✓ MTBF</span>'
+        : '<span class="text-[10px] text-slate-300">—</span>';
+      const planBadge = fl.terencana
+        ? '<span class="text-[10px] text-blue-600 font-semibold">planned</span>'
+        : '<span class="text-[10px] text-orange-500">unplanned</span>';
+      return `<tr class="border-b border-slate-100 hover:bg-slate-50">
+        <td class="px-3 py-2 text-xs text-slate-400 whitespace-nowrap">${fmtDate(ev.mulai)}</td>
+        <td class="px-3 py-2 text-sm font-bold text-navy">${ev.unitName || '—'}</td>
+        <td class="px-3 py-2 text-sm text-slate-500">${ev.equipmentName || ev.inspectionCode || '—'}</td>
+        <td class="px-3 py-2 text-sm">${ev.penyebab}${srcDot}</td>
+        <td class="px-3 py-2 text-sm font-semibold">${fmtH(durH)}</td>
+        <td class="px-3 py-2 text-center">${failBadge}</td>
+        <td class="px-3 py-2 text-center">${planBadge}</td>
+        <td class="px-3 py-2 text-xs text-slate-400 max-w-xs truncate">${ev.catatan || ''}</td>
+        <td class="px-3 py-2 text-center">${statusBadge}</td>
+      </tr>`;
+    }).join('');
+
+    document.getElementById('history-section').innerHTML =
+      `<div class="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+        <div class="px-4 py-3 border-b border-slate-100 font-semibold text-slate-800 text-sm">
+          Riwayat Downtime dalam Periode (${inP.length} event)
+        </div>
+        <div class="overflow-x-auto"><table class="w-full">
+          <thead><tr class="bg-slate-50 text-left text-xs font-bold text-slate-600">
+            <th class="px-3 py-2">Tanggal</th><th class="px-3 py-2">Unit</th>
+            <th class="px-3 py-2">Equipment / Ref</th><th class="px-3 py-2">Penyebab</th>
+            <th class="px-3 py-2">Durasi</th><th class="px-3 py-2 text-center">MTBF?</th>
+            <th class="px-3 py-2 text-center">Tipe</th><th class="px-3 py-2">Catatan</th>
+            <th class="px-3 py-2 text-center">Status</th>
+          </tr></thead>
+          <tbody>${rows || '<tr><td colspan="9" class="px-3 py-6 text-center text-slate-400 text-sm">Tidak ada event dalam periode ini.</td></tr>'}</tbody>
+        </table></div>
+      </div>`;
+  }
+
+  // ============================================================
+  // MAIN
+  // ============================================================
+  function refresh() {
+    const periodDays = Number(document.getElementById('sel-period').value) || 365;
+    const events     = buildEvents();
+    const res        = hitungRAM(events, periodDays);
+    renderViewTable();
+    renderKPI(res);
+    renderOngoing(res);
+    renderPerUnit(res);
+    renderHistory(events, periodDays);
+  }
+
+  refresh();
+</script>
+</body>
+</html>

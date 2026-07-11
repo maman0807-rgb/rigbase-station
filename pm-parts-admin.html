@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PM Parts Template — eRAMHoist</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2/dist/tailwind.min.css" rel="stylesheet">
+  <style>
+    .navy { color: #1E3A8A; }
+    .bg-navy { background: #1E3A8A; }
+    input:focus, select:focus { outline: 2px solid #1E3A8A; outline-offset: 1px; }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+  <div class="max-w-5xl mx-auto px-4 py-6">
+    <!-- Header -->
+    <div class="flex items-center justify-between mb-6">
+      <div>
+        <h1 class="text-2xl font-bold navy">📦 PM Parts Template</h1>
+        <p class="text-gray-500 text-sm mt-1">Kelola daftar spare parts per equipment per interval PM — eRAMHoist</p>
+      </div>
+      <a href="index.html" class="text-sm text-gray-500 hover:text-gray-700 border border-gray-300 rounded-lg px-3 py-1.5 hover:bg-white transition">← Kembali ke App</a>
+    </div>
+
+    <!-- Login gate -->
+    <div id="login-section" class="bg-white rounded-xl shadow p-6 max-w-md mx-auto">
+      <h2 class="font-bold text-gray-800 mb-4">Login</h2>
+      <div class="space-y-3">
+        <div>
+          <label class="text-sm font-medium text-gray-600">Email</label>
+          <input id="login-email" type="email" class="w-full mt-1 border rounded-lg px-3 py-2 text-sm" placeholder="email@domain.com">
+        </div>
+        <div>
+          <label class="text-sm font-medium text-gray-600">Password</label>
+          <input id="login-pass" type="password" class="w-full mt-1 border rounded-lg px-3 py-2 text-sm" placeholder="••••••••">
+        </div>
+        <button onclick="doLogin()" class="w-full bg-navy text-white py-2 rounded-lg text-sm font-semibold hover:opacity-80 transition">Masuk</button>
+        <p id="login-err" class="text-red-500 text-xs hidden"></p>
+      </div>
+    </div>
+
+    <!-- Main content (hidden until login) -->
+    <div id="main-section" class="hidden space-y-5">
+
+      <!-- Filter bar -->
+      <div class="bg-white rounded-xl shadow p-4 flex gap-4 flex-wrap items-end">
+        <div class="flex-1 min-w-48">
+          <label class="text-sm font-medium text-gray-600">Equipment</label>
+          <select id="sel-equipment" class="w-full mt-1 border rounded-lg px-3 py-2 text-sm" onchange="onEquipmentChange()">
+            <option value="">-- Pilih Equipment --</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-sm font-medium text-gray-600">Interval PM (HM)</label>
+          <select id="sel-interval" class="mt-1 border rounded-lg px-3 py-2 text-sm w-36">
+            <option value="250">250 HM</option>
+            <option value="500">500 HM</option>
+            <option value="1000">1000 HM</option>
+            <option value="2000">2000 HM</option>
+          </select>
+        </div>
+        <button onclick="loadParts()" class="bg-navy text-white px-5 py-2 rounded-lg text-sm font-semibold hover:opacity-80 transition">Load Parts</button>
+      </div>
+
+      <!-- Parts table -->
+      <div class="bg-white rounded-xl shadow p-4">
+        <div class="flex justify-between items-center mb-4">
+          <div>
+            <h2 class="font-bold text-gray-800" id="table-title">Daftar Parts</h2>
+            <p class="text-xs text-gray-400" id="table-subtitle">Pilih equipment dan interval lalu klik Load Parts</p>
+          </div>
+          <button onclick="addRow()" id="btn-add" class="hidden bg-green-600 text-white px-3 py-1.5 rounded-lg text-sm font-semibold hover:bg-green-700 transition">+ Tambah Part</button>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm" id="parts-table">
+            <thead class="bg-gray-100 text-gray-600">
+              <tr>
+                <th class="text-left p-2 font-semibold">Nama Part</th>
+                <th class="text-left p-2 font-semibold">Part Number</th>
+                <th class="text-left p-2 font-semibold">Link ke Gudang</th>
+                <th class="text-center p-2 font-semibold w-20">Qty</th>
+                <th class="text-center p-2 font-semibold w-24">Unit</th>
+                <th class="text-center p-2 font-semibold w-16">Wajib</th>
+                <th class="text-center p-2 font-semibold w-12">Hapus</th>
+              </tr>
+            </thead>
+            <tbody id="parts-tbody">
+              <tr><td colspan="7" class="text-center p-8 text-gray-400 text-sm">Pilih equipment dan interval untuk memuat parts</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="mt-4 flex gap-3 items-center">
+          <button onclick="saveParts()" id="btn-save" class="hidden bg-navy text-white px-6 py-2 rounded-lg text-sm font-semibold hover:opacity-80 transition">💾 Simpan Semua</button>
+          <span id="save-status" class="text-sm text-gray-500"></span>
+        </div>
+      </div>
+
+      <!-- Preview: semua equipment yang sudah punya template -->
+      <div class="bg-white rounded-xl shadow p-4">
+        <h2 class="font-bold text-gray-800 mb-3">📋 Ringkasan Template (semua equipment)</h2>
+        <div id="summary-content" class="text-sm text-gray-400">Memuat…</div>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    const SUPABASE_URL = 'https://olmowzrlokajhniqijfq.supabase.co';
+    const SUPABASE_KEY = 'sb_publishable_cbkPjUGchF_PwQo5ZlM3zQ_gRl-phYL';
+    const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    let allMaterials = [];
+    let currentEquipmentId = null;
+    let rowCount = 0;
+
+    // ---- Auth ----
+    async function doLogin() {
+      const email = document.getElementById('login-email').value.trim();
+      const pass  = document.getElementById('login-pass').value;
+      const errEl = document.getElementById('login-err');
+      errEl.classList.add('hidden');
+      const { error } = await sb.auth.signInWithPassword({ email, password: pass });
+      if (error) {
+        errEl.textContent = '❌ ' + error.message;
+        errEl.classList.remove('hidden');
+      }
+    }
+    document.getElementById('login-pass').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+
+    sb.auth.onAuthStateChange((event, session) => {
+      if (session?.user) {
+        document.getElementById('login-section').classList.add('hidden');
+        document.getElementById('main-section').classList.remove('hidden');
+        init();
+      } else {
+        document.getElementById('login-section').classList.remove('hidden');
+        document.getElementById('main-section').classList.add('hidden');
+      }
+    });
+
+    // ---- Init ----
+    async function init() {
+      await Promise.all([loadEquipment(), loadMaterials()]);
+      loadSummary();
+    }
+
+    async function loadEquipment() {
+      const { data } = await sb.from('equipment').select('id, nama_equipment, tag_number').order('tag_number');
+      const sel = document.getElementById('sel-equipment');
+      (data || []).forEach(eq => {
+        const opt = document.createElement('option');
+        opt.value = eq.id;
+        opt.textContent = `${eq.tag_number} — ${eq.nama_equipment}`;
+        sel.appendChild(opt);
+      });
+    }
+
+    async function loadMaterials() {
+      const all = [];
+      for (let f = 0; ; f += 1000) {
+        const { data, error } = await sb.from('materials').select('id, description, satuan, stok, part_number').range(f, f + 999);
+        if (error) break;
+        all.push(...(data || []));
+        if (!data || data.length < 1000) break;
+      }
+      allMaterials = all;
+    }
+
+    function onEquipmentChange() {
+      currentEquipmentId = document.getElementById('sel-equipment').value || null;
+    }
+
+    // ---- Load existing parts ----
+    async function loadParts() {
+      const eqId = document.getElementById('sel-equipment').value;
+      if (!eqId) { alert('Pilih equipment dulu'); return; }
+      const interval = document.getElementById('sel-interval').value;
+      currentEquipmentId = eqId;
+
+      const { data, error } = await sb
+        .from('pm_parts_template')
+        .select('*')
+        .eq('equipment_id', eqId)
+        .eq('interval_hm', interval)
+        .order('is_mandatory', { ascending: false })
+        .order('part_name');
+
+      if (error) { alert('Gagal load: ' + error.message); return; }
+
+      const eqTxt = document.getElementById('sel-equipment').selectedOptions[0].text;
+      document.getElementById('table-title').textContent = `Parts PM ${interval} HM — ${eqTxt}`;
+      document.getElementById('table-subtitle').textContent = `${(data || []).length} parts terdaftar`;
+      document.getElementById('btn-add').classList.remove('hidden');
+      document.getElementById('btn-save').classList.remove('hidden');
+
+      rowCount = 0;
+      renderTable(data || []);
+    }
+
+    function renderTable(parts) {
+      const tbody = document.getElementById('parts-tbody');
+      if (parts.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" class="text-center p-6 text-gray-400 text-sm">Belum ada parts. Klik "+ Tambah Part" untuk mulai.</td></tr>`;
+        return;
+      }
+      tbody.innerHTML = '';
+      parts.forEach(p => appendRow(p));
+    }
+
+    function appendRow(p = {}) {
+      const i = rowCount++;
+      const tbody = document.getElementById('parts-tbody');
+      // Remove empty-state row if present
+      if (tbody.querySelector('[data-empty]')) tbody.innerHTML = '';
+
+      const matOptions = allMaterials.map(m =>
+        `<option value="${m.id}" ${p.material_id === m.id ? 'selected' : ''}>${m.part_number ? '[' + m.part_number + '] ' : ''}${m.description} (${m.stok} ${m.satuan})</option>`
+      ).join('');
+
+      const tr = document.createElement('tr');
+      tr.className = 'border-t align-top';
+      tr.id = `row-${i}`;
+      tr.innerHTML = `
+        <td class="p-1.5">
+          <input type="hidden" class="part-id" value="${p.id || ''}">
+          <input type="text" class="part-name w-full border rounded px-2 py-1 text-xs" value="${esc(p.part_name || '')}" placeholder="Nama part…">
+        </td>
+        <td class="p-1.5">
+          <input type="text" class="part-number w-full border rounded px-2 py-1 text-xs" value="${esc(p.part_number || '')}" placeholder="Part No.">
+        </td>
+        <td class="p-1.5">
+          <select class="material-id w-full border rounded px-2 py-1 text-xs">
+            <option value="">-- Tidak ada --</option>
+            ${matOptions}
+          </select>
+        </td>
+        <td class="p-1.5 text-center">
+          <input type="number" class="qty-required w-16 border rounded px-2 py-1 text-xs text-center" value="${p.qty_required || 1}" min="0.01" step="0.01">
+        </td>
+        <td class="p-1.5 text-center">
+          <select class="unit border rounded px-2 py-1 text-xs">
+            ${['pcs','liter','set','meter','kg','roll','m','botol'].map(u =>
+              `<option ${(p.unit || 'pcs') === u ? 'selected' : ''}>${u}</option>`
+            ).join('')}
+          </select>
+        </td>
+        <td class="p-1.5 text-center">
+          <input type="checkbox" class="is-mandatory w-4 h-4 cursor-pointer" ${p.is_mandatory !== false ? 'checked' : ''}>
+        </td>
+        <td class="p-1.5 text-center">
+          <button onclick="deleteRow('${p.id || ''}', '${i}')" class="text-red-400 hover:text-red-600 text-xl font-bold leading-none">×</button>
+        </td>`;
+      tbody.appendChild(tr);
+    }
+
+    function addRow() {
+      appendRow({});
+    }
+
+    async function deleteRow(id, rowId) {
+      if (id) {
+        const { error } = await sb.from('pm_parts_template').delete().eq('id', id);
+        if (error) { alert('Gagal hapus: ' + error.message); return; }
+      }
+      document.getElementById('row-' + rowId)?.remove();
+    }
+
+    // ---- Save ----
+    async function saveParts() {
+      const eqId = document.getElementById('sel-equipment').value;
+      const interval = parseInt(document.getElementById('sel-interval').value);
+      if (!eqId) { alert('Pilih equipment dulu'); return; }
+
+      const rows = document.querySelectorAll('#parts-tbody tr[id^="row-"]');
+      const upserts = [];
+      rows.forEach(row => {
+        const name = row.querySelector('.part-name')?.value?.trim();
+        if (!name) return;
+        const existingId = row.querySelector('.part-id')?.value;
+        const obj = {
+          equipment_id: eqId,
+          interval_hm: interval,
+          part_name: name,
+          part_number: row.querySelector('.part-number')?.value?.trim() || null,
+          material_id: row.querySelector('.material-id')?.value || null,
+          qty_required: parseFloat(row.querySelector('.qty-required')?.value) || 1,
+          unit: row.querySelector('.unit')?.value || 'pcs',
+          is_mandatory: row.querySelector('.is-mandatory')?.checked ?? true,
+          updated_at: new Date().toISOString(),
+        };
+        if (existingId) obj.id = existingId;
+        upserts.push(obj);
+      });
+
+      if (upserts.length === 0) { alert('Tidak ada data untuk disimpan'); return; }
+
+      const statusEl = document.getElementById('save-status');
+      statusEl.textContent = 'Menyimpan…';
+
+      const { error } = await sb.from('pm_parts_template').upsert(upserts, { onConflict: 'id' });
+      if (error) {
+        statusEl.textContent = '❌ Gagal: ' + error.message;
+        statusEl.className = 'text-sm text-red-500';
+      } else {
+        statusEl.textContent = '✅ Tersimpan!';
+        statusEl.className = 'text-sm text-green-600';
+        setTimeout(() => { statusEl.textContent = ''; }, 3000);
+        loadParts();
+        loadSummary();
+      }
+    }
+
+    // ---- Summary ----
+    async function loadSummary() {
+      const el = document.getElementById('summary-content');
+      const { data, error } = await sb
+        .from('pm_parts_template')
+        .select('equipment_id, interval_hm, equipment:equipment_id(tag_number, nama_equipment)');
+      if (error) { el.textContent = 'Gagal memuat'; return; }
+
+      // Group by equipment_id + interval_hm
+      const map = {};
+      (data || []).forEach(r => {
+        const key = `${r.equipment_id}_${r.interval_hm}`;
+        if (!map[key]) map[key] = { eq: r.equipment, interval: r.interval_hm, count: 0 };
+        map[key].count++;
+      });
+
+      const entries = Object.values(map).sort((a, b) =>
+        (a.eq?.tag_number || '').localeCompare(b.eq?.tag_number || '') || a.interval - b.interval
+      );
+
+      if (entries.length === 0) {
+        el.innerHTML = '<div class="text-gray-400 py-4 text-center">Belum ada template parts yang dibuat.</div>';
+        return;
+      }
+
+      el.innerHTML = `<div class="overflow-x-auto"><table class="w-full text-sm border-collapse">
+        <thead class="bg-gray-100 text-gray-600 text-xs">
+          <tr>
+            <th class="p-2 text-left font-semibold">Equipment</th>
+            <th class="p-2 text-center font-semibold">Interval PM</th>
+            <th class="p-2 text-center font-semibold">Jumlah Parts</th>
+            <th class="p-2 text-center font-semibold">Aksi</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y">
+          ${entries.map(e => `<tr class="hover:bg-gray-50">
+            <td class="p-2 font-semibold text-navy">${esc(e.eq?.tag_number || '—')}<div class="text-xs text-gray-400 font-normal">${esc(e.eq?.nama_equipment || '')}</div></td>
+            <td class="p-2 text-center">${e.interval} HM</td>
+            <td class="p-2 text-center font-bold">${e.count}</td>
+            <td class="p-2 text-center">
+              <button onclick="quickLoad('${e.eq?.tag_number || ''}', ${e.interval})" class="text-xs text-navy underline hover:text-blue-800">Edit →</button>
+            </td>
+          </tr>`).join('')}
+        </tbody>
+      </table></div>`;
+    }
+
+    function quickLoad(tagNumber, interval) {
+      const sel = document.getElementById('sel-equipment');
+      for (const opt of sel.options) {
+        if (opt.text.startsWith(tagNumber + ' —') || opt.text.startsWith(tagNumber + '—')) {
+          sel.value = opt.value;
+          break;
+        }
+      }
+      document.getElementById('sel-interval').value = interval;
+      loadParts();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function esc(str) {
+      return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+  </script>
+</body>
+</html>
