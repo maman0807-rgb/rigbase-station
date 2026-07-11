@@ -51,8 +51,10 @@ Kode equipment pakai `tag_number` asli untuk jalur cepat `/jamjalan`. Untuk jalu
 
 ## Empat Jenis Pesan/Interaksi
 
-1. **Push — Laporan (ke GRUP)**
-   Terjadwal (n8n cron), 1x di awal tiap window lapor — **17:00 WIB** (shift Siang) dan **05:00 WIB** (shift Malam), dikirim ke `chatId` grup. Isi: ringkasan status ✅/⚠️ per rig (TANPA nomor — nomor cuma valid per sesi personal, lihat catatan di Tahap 3 prompt n8n) + ajakan chat pribadi ke bot untuk `/form [rig]`.
+1. **Push — Laporan (ke GRUP)** — 2 pesan per window (revisi 12 Jul 2026)
+   - **Awal window** (**17:00 WIB** Siang / **05:00 WIB** Malam): ringkasan status ✅/⚠️ semua rig (siapa sudah, siapa belum) + ajakan chat pribadi ke bot untuk `/form [rig]`
+   - **Reminder susulan**, 15 menit sebelum window tutup (**19:45 WIB** Siang / **08:45 WIB** Malam): **cuma equipment/rig yang masih ⚠️ belum lapor** (yang sudah tidak ditampilkan lagi), supaya fokus ke yang masih outstanding
+   Keduanya dikirim ke `chatId` grup, TANPA nomor (nomor cuma valid per sesi personal, lihat catatan di Tahap 3 prompt n8n). Kalau semua rig sudah lapor sebelum jam reminder susulan → **skip, tidak usah kirim** (tidak ada yang perlu diingatkan)
 
 2. **Pull — `/rig`** (chat pribadi saja)
    On-demand, siapa saja di whitelist. Balas daftar semua rig bernomor, tanpa batasan (semua nomor lihat semua rig).
@@ -149,7 +151,7 @@ Kalau ternyata kolomnya `text` (bukan `uuid`), desain di atas tetap jalan tanpa 
 | **Siang** | 06:00 – 18:00 | **17:00 – 20:00** |
 | **Malam** | 18:00 – 06:00 | **05:00 – 09:00** |
 
-- **Push otomatis** dikirim 1x di awal tiap window: **17:00 WIB** (Siang) dan **05:00 WIB** (Malam) — tidak ada reminder susulan, sesuai keputusan "lebih santai" (operator punya 3-4 jam untuk lapor kapan saja dalam window itu)
+- **Push otomatis** — 2x per window (revisi 12 Jul 2026): awal window (**17:00 WIB** Siang / **05:00 WIB** Malam, ringkasan semua rig) dan reminder susulan 15 menit sebelum tutup (**19:45 WIB** Siang / **08:45 WIB** Malam, cuma yang masih belum lapor, di-skip kalau semua sudah selesai) — operator tetap punya waktu longgar (3-4 jam) sesuai semangat "lebih santai", reminder susulan cuma jaring pengaman terakhir
 - **Shift ditentukan otomatis dari jam kirim pesan, relatif ke JAM SHIFT ASLI (bukan window lapor):** pesan masuk 06:00–17:59 → shift **Siang**; pesan masuk 18:00–05:59 → shift **Malam**
 - **Entry di LUAR window tetap diterima** — window cuma soal kapan bot proaktif nge-push, bukan pembatas kapan operator boleh lapor. Operator lapor jam 12:00 (tengah shift Siang) tetap tercatat shift Siang, tidak ditolak
 - Deteksi ini berlaku untuk **jalur utama** (balasan angka). Jalur cepat `/jamjalan` tetap wajib sebut shift manual (`siang`/`malam`) karena operator mungkin lapor lintas-shift pakai jalur ini
@@ -222,7 +224,7 @@ Format: `/jamjalan [tag_number] [siang|malam] [jam] [baik|waspada|rusak] [catata
 
 - [x] Endpoint & auth WAHA (API key, base URL Railway) — sudah beres, lihat bagian "Setup WAHA yang Sudah Jalan" di bawah
 - [x] Format kode equipment — **keputusan (11 Jul 2026): pakai `tag_number` asli langsung**, bukan shortcode terpisah. Contoh: `/jamjalan TT-100A siang 8 baik`. Alasan: sebagian besar tag sudah pendek, dan shortcode custom butuh tabel mapping tambahan yang harus disinkronkan tiap ada equipment baru/berubah.
-- [x] Jadwal pesan — **keputusan final (revisi 11 Jul 2026, "lebih santai"): 17:00 WIB** (awal window lapor shift Siang, window 17:00-20:00) dan **05:00 WIB** (awal window lapor shift Malam, window 05:00-09:00). 1x push per window, tanpa reminder susulan. Entry di luar window tetap diterima, shift ditentukan otomatis dari jam kirim relatif ke jam shift asli (06:00-18:00=Siang, 18:00-06:00=Malam) — lihat detail di bagian "Shift, Window Lapor & Deteksi Otomatis"
+- [x] Jadwal pesan — **keputusan final (revisi 12 Jul 2026): 2x push per window.** Awal window: **17:00 WIB** (Siang, window 17:00-20:00) dan **05:00 WIB** (Malam, window 05:00-09:00) — ringkasan semua rig. Reminder susulan: **19:45 WIB** (Siang) dan **08:45 WIB** (Malam), 15 menit sebelum window tutup — cuma rig/equipment yang masih belum lapor, di-skip kalau semua sudah selesai. Entry di luar window tetap diterima, shift ditentukan otomatis dari jam kirim relatif ke jam shift asli (06:00-18:00=Siang, 18:00-06:00=Malam) — lihat detail di bagian "Shift, Window Lapor & Deteksi Otomatis"
 - [x] Struktur tabel whitelist — **keputusan (update 11 Jul 2026, revisi untuk skenario operator sakit):**
   ```sql
   CREATE TABLE wa_whitelist (
@@ -249,6 +251,12 @@ Format: `/jamjalan [tag_number] [siang|malam] [jam] [baik|waspada|rusak] [catata
   3. GS-KB150A-DEUTZ ⚠️ belum
 
   Balas: /form BW-100A untuk lihat nomor lengkap & lapor
+
+  ⏰ Reminder — masih belum lapor (window tutup 09:00):
+  Rig BW-100A: DC-100A, GS-KB150A-DEUTZ
+  Rig H35KD: semua equipment
+
+  Chat pribadi ke bot ini untuk lapor →
 
   Daftar Rig:
   1. BW-100A

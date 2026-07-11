@@ -198,23 +198,40 @@ pesan. Urutan pengecekan (pesan yang tidak match semuanya → stop tanpa balas):
 
 Simpan sebagai `workflow-waha-entry.json`.
 
-### Tahap 3 — Workflow Push: laporan + daftar equipment terjadwal
-1. Trigger: Schedule, jalan **17:00 WIB** (awal window lapor Siang) dan
-   **05:00 WIB** (awal window lapor Malam) — dua schedule trigger terpisah,
-   timezone Asia/Jakarta
-2. Node Supabase: query semua rig + equipment-nya + `logbook` entries
+### Tahap 3 — Workflow Push: laporan awal + reminder susulan (2x per window)
+**Revisi 12 Jul 2026: 2 pesan per window**, bukan cuma 1. Bisa 1 workflow
+dengan 4 schedule trigger, atau 2 workflow terpisah (awal vs reminder) —
+pilih yang lebih rapi di n8n, yang penting logic-nya sama.
+
+**A. Push awal window** — trigger **17:00 WIB** (Siang) dan **05:00 WIB**
+(Malam), timezone Asia/Jakarta:
+1. Node Supabase: query semua rig + equipment-nya + `logbook` entries
    shift yang baru selesai (Siang untuk trigger 17:00 → shift Siang hari
    ini; Malam untuk trigger 05:00 → shift Malam semalam)
-3. Node Function: per rig, tentukan equipment yang **sudah** vs **belum**
+2. Node Function: per rig, tentukan equipment yang **sudah** vs **belum**
    entry shift itu — **cukup status ✅/⚠️ per equipment, TANPA nomor.**
    Push ini kirim ke grup (bukan ke 1 nomor spesifik), jadi TIDAK
    upsert `wa_form_session` di tahap ini — sesi cuma dibuat per-operator
    saat mereka sendiri kirim `/form [rig]` (Cabang B, Tahap 2). Kalau push
    ini ikut assign nomor, operator berbeda yang balas ke broadcast yang
    sama bisa salah acu equipment
-4. Node Function: format pesan — ringkasan status per rig (✅/⚠️) + ajakan
-   eksplisit `/form [rig]` untuk lihat nomor & lapor (lihat contoh format
-   di konsep doc, bagian "Format teks final")
+3. Node Function: format pesan — ringkasan status per rig (✅/⚠️, SEMUA
+   equipment ditampilkan, sudah maupun belum) + ajakan eksplisit `/form
+   [rig]` untuk lihat nomor & lapor (lihat contoh format di konsep doc)
+4. Node HTTP Request: kirim ke grup via WAHA
+
+**B. Reminder susulan** — trigger **19:45 WIB** (Siang, 15 menit sebelum
+window 20:00 tutup) dan **08:45 WIB** (Malam, 15 menit sebelum window
+09:00 tutup):
+1. Node Supabase: query sama seperti push awal, cek ulang status
+   sudah/belum terbaru (kemungkinan ada yang sudah lapor sejak push awal)
+2. Node Function: filter **cuma rig/equipment yang MASIH belum lapor**
+   (yang sudah tidak ikut ditampilkan)
+3. Node IF: kalau hasil filter **kosong** (semua rig sudah lapor) →
+   **stop, jangan kirim apapun** — tidak perlu reminder kalau tidak ada
+   yang perlu diingatkan
+4. Node Function: format pesan reminder (lihat contoh format "⏰
+   Reminder — masih belum lapor" di konsep doc)
 5. Node HTTP Request: kirim ke grup via WAHA
 
 Simpan sebagai `workflow-waha-laporan-jadwal.json`.
