@@ -37,6 +37,13 @@ detail penting yang TIDAK boleh dilewatkan:
 - **Window lapor cuma soal kapan bot proaktif push**, BUKAN pembatas —
   entry di luar window (17:00-20:00 Siang / 05:00-09:00 Malam) tetap
   diterima kapan saja.
+- **Grup vs chat pribadi (REVISI 11 Jul 2026):** grup WhatsApp cuma
+  read-only, cuma nerima push laporan terjadwal. **SEMUA interaksi (`/rig`,
+  `/form`, balasan angka, `/jamjalan`) HANYA diproses kalau sumbernya chat
+  pribadi ke nomor bot** (`chatId` berakhiran `@c.us`), bukan grup
+  (`@g.us`) — kalau ada command dikirim di grup, abaikan total. Ini
+  menghilangkan kebutuhan quote-reply sama sekali (chat 1:1 tidak ada
+  ambiguitas), jadi Tahap 2 di bawah **tidak perlu** quote/reply-to.
 
 ## Info Teknis yang Sudah Tersedia
 
@@ -56,11 +63,14 @@ detail penting yang TIDAK boleh dilewatkan:
 - **Endpoint kirim pesan:** `POST /api/sendText` — body
   `{ "chatId": "120363237618454780@g.us", "text": "...", "session": "eramhoist2" }`
 - **Endpoint terima pesan (webhook):** perlu dikonfigurasi di WAHA supaya
-  tiap pesan masuk grup di-forward ke webhook n8n — cek dokumentasi WAHA
-  versi yang dipakai untuk cara setup webhook (event `message`)
-- **Field quote-reply:** belum dicek exact nama field-nya (`reply_to` /
-  `quotedMessageId`, tergantung versi WAHA) — **cek dokumentasi API/response
-  contoh pesan masuk dulu sebelum implementasi reply**
+  **semua pesan masuk** (grup maupun chat pribadi) di-forward ke webhook
+  n8n — cek dokumentasi WAHA versi yang dipakai untuk cara setup webhook
+  (event `message`). Filtering grup vs pribadi dilakukan di n8n (lihat
+  Tahap 2), bukan di level WAHA
+- **Tidak perlu quote-reply** — karena semua interaksi command sekarang
+  cuma di chat pribadi 1:1 (lihat "Grup vs chat pribadi" di atas), balasan
+  bot cukup `POST /api/sendText` biasa ke `chatId` pengirim, tidak perlu
+  field `reply_to`/`quotedMessageId`
 
 ### Supabase
 - **Project eRAMHoist (= project Logbook, SATU project yang sama):**
@@ -119,17 +129,21 @@ Satu webhook, tapi n8n perlu route ke 4 cabang logic berbeda tergantung isi
 pesan. Urutan pengecekan (pesan yang tidak match semuanya → stop tanpa balas):
 
 **Router awal (semua cabang):**
-1. Trigger: Webhook (menerima event pesan masuk dari WAHA)
-2. Node Supabase: query `wa_whitelist` by nomor pengirim, `aktif=true` —
+1. Trigger: Webhook (menerima event pesan masuk dari WAHA, termasuk dari
+   grup — filtering terjadi di langkah berikut)
+2. Node IF: cek `chatId` pesan masuk berakhiran `@c.us` (chat pribadi) —
+   kalau berakhiran `@g.us` (grup) → **stop total, tidak balas apapun**,
+   grup cuma boleh nerima push, bukan sumber command
+3. Node Supabase: query `wa_whitelist` by nomor pengirim, `aktif=true` —
    kalau tidak ketemu → **stop, tidak balas** (bukan target bot)
-3. Node Switch/IF, route berdasar isi pesan:
+4. Node Switch/IF, route berdasar isi pesan:
 
 **Cabang A — `/rig`**
 - Node Supabase: query semua rig unik dari tabel `equipment` (`SELECT
   DISTINCT rig ...` atau kolom setara — sesuaikan nama kolom rig di skema
   eRAMHoist, cek dulu strukturnya)
 - Node Function: format jadi daftar bernomor
-- Node HTTP Request: kirim balasan ke grup
+- Node HTTP Request: kirim balasan ke `chatId` pengirim (chat pribadi, BUKAN grup)
 
 **Cabang B — `/form [rig]`**
 - Node Supabase: query `equipment` filter by rig itu → ambil `id,
@@ -175,10 +189,12 @@ pesan. Urutan pengecekan (pesan yang tidak match semuanya → stop tanpa balas):
    `temuan` (dari catatan opsional), `status: 'pending'`
 3. Node Supabase: UPDATE `equipment.running_hours` = `running_hours +
    shift_hours` (additive, tidak perlu cek turun karena selalu nambah)
-4. Balasan konfirmasi — beda format kalau `reporter_role='admin'`
-   (sertakan nama admin + keterangan "pengganti sementara", lihat contoh
-   format di konsep doc). Untuk Cabang C dengan >1 segmen, gabung semua
-   hasil jadi satu list dalam satu balasan (lihat contoh format di konsep doc)
+4. Balasan konfirmasi — kirim langsung ke `chatId` pengirim (chat pribadi,
+   tanpa quote/reply-to, lihat catatan "Tidak perlu quote-reply" di atas),
+   beda format kalau `reporter_role='admin'` (sertakan nama admin +
+   keterangan "pengganti sementara", lihat contoh format di konsep doc).
+   Untuk Cabang C dengan >1 segmen, gabung semua hasil jadi satu list
+   dalam satu balasan (lihat contoh format di konsep doc)
 
 Simpan sebagai `workflow-waha-entry.json`.
 
@@ -220,6 +236,12 @@ Setelah semua workflow jadi, tuliskan `README-n8n-waha-eramhoist.md` berisi:
   cara dapat URL webhook dari n8n untuk didaftarkan di WAHA)
 - Cara aktifkan (toggle "Active") tiap workflow terjadwal
 - Catatan keamanan: jangan hardcode API key di JSON manapun
+- **Onboarding operator:** cara operator mulai chat pribadi ke nomor bot
+  (simpan nomor bot sebagai kontak dulu di HP mereka, baru bisa kirim
+  pesan langsung — WhatsApp tidak bisa mulai chat ke nomor yang belum
+  disimpan tanpa link `wa.me/<nomor>`, jadi sertakan juga opsi kirim link
+  `wa.me/<nomor bot tanpa +>` di pesan sosialisasi awal supaya operator
+  tinggal klik)
 
 ## Batasan & Preferensi
 

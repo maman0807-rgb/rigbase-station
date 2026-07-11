@@ -31,43 +31,46 @@ WAHA 100% gratis & open source (versi 2026.6.1+, semua fitur eks-"Plus" sudah ma
 - **Grup:** Pakai **grup existing yang sudah ada** (bukan bikin baru) — tinggal invite nomor bot sebagai member setelah connect ke WAHA.
 - Satu grup dipakai untuk **semua rig & equipment** (tidak dipisah per rig).
 
-## Model Akses di Grup
+## Model Akses — Grup vs Chat Pribadi (REVISI 11 Jul 2026, mirror pola Telegram bot)
 
-- **Whitelist nomor** → hanya nomor tertentu (PIC/operator resmi) yang bisa entry data HM
-- **Member lain** → read-only: bisa lihat laporan, proses entry, dan status hasil (transparan, mirip pola Telegram bot sekarang)
-- Bot **tidak merespon** pesan dari luar whitelist / tanpa format command → tidak mengganggu obrolan biasa di grup
+**Perubahan besar dari desain awal:** semula `/rig`, `/form`, dan entry direncanakan semua terjadi di grup — ternyata berisiko tumpang tindih kalau beberapa operator berinteraksi bersamaan di thread yang sama. Solusinya: **pisah peran grup vs chat pribadi**, sama seperti pola Telegram bot (@Eramhoist_bot) yang sudah jalan.
+
+- **Grup WhatsApp** → **read-only**. Cuma menerima push laporan terjadwal dari bot. Bot **tidak merespon command apapun** yang dikirim di grup (`/rig`, `/form`, `/jamjalan`, balasan angka — semua diabaikan kalau sumbernya `chatId` berakhiran `@g.us`), supaya tidak mengganggu obrolan biasa & tidak ada risiko tumpang tindih
+- **Chat pribadi ke nomor bot** (`chatId` berakhiran `@c.us`) → satu-satunya tempat operator berinteraksi: `/rig`, `/form [rig]`, balas nomor, atau `/jamjalan`. Karena percakapan 1:1, otomatis tidak ada masalah tumpang tindih atau ambiguitas "balasan ini punya siapa" — **tidak perlu quote-reply sama sekali** (beda dari desain awal yang mengandalkan quote di grup)
+- Operator perlu **simpan nomor bot sebagai kontak dan mulai chat pribadi** ke nomor itu — instruksi cara ini perlu masuk ke README onboarding (lihat prompt n8n, Tahap 5)
+- Push laporan ke grup selalu ajak eksplisit: "chat pribadi ke bot, ketik `/form [rig]`" sebagai call-to-action, bukan menyuruh balas di grup
 
 ## Cara Bot Mengenali Pesan yang Ditujukan Untuknya
 
-Kombinasi (keduanya harus match):
-1. **Prefix command** (`/rig`, `/form [rig]`, `/jamjalan ...`) ATAU **balasan angka** (`[nomor] [jam] [kondisi] [catatan opsional]`, boleh beberapa dipisah koma) selama nomor pengirim punya **sesi `/form` aktif**
-2. **Nomor pengirim ada di whitelist**
+Kombinasi (SEMUA harus match):
+1. **Sumber chat pribadi** — `chatId` berakhiran `@c.us`, BUKAN grup (`@g.us`). Pesan dari grup diabaikan total di titik ini, sebelum masuk pengecekan lain
+2. **Prefix command** (`/rig`, `/form [rig]`, `/jamjalan ...`) ATAU **balasan angka** (`[nomor] [jam] [kondisi] [catatan opsional]`, boleh beberapa dipisah koma) selama nomor itu punya **sesi `/form` aktif**
+3. **Nomor pengirim ada di whitelist**
 
 Kode equipment pakai `tag_number` asli untuk jalur cepat `/jamjalan`. Untuk jalur utama (`/rig` → `/form` → nomor), operator tidak perlu ingat/ketik `tag_number` sama sekali — cukup nomor urut yang ditampilkan bot (lihat "Alur Utama: /rig → /form → Nomor" di bagian Konsep Pengisian).
 
 ## Empat Jenis Pesan/Interaksi
 
-1. **Push — Laporan + Daftar Equipment per Window Shift**
-   Terjadwal (n8n cron), 1x di awal tiap window lapor — **17:00 WIB** (shift Siang) dan **05:00 WIB** (shift Malam). Isi: rekap jam jalan yang sudah masuk + daftar equipment bernomor per rig untuk yang belum lapor (setara hasil `/form [rig]`, di-broadcast otomatis ke grup untuk semua rig sekaligus).
+1. **Push — Laporan (ke GRUP)**
+   Terjadwal (n8n cron), 1x di awal tiap window lapor — **17:00 WIB** (shift Siang) dan **05:00 WIB** (shift Malam), dikirim ke `chatId` grup. Isi: ringkasan status ✅/⚠️ per rig (TANPA nomor — nomor cuma valid per sesi personal, lihat catatan di Tahap 3 prompt n8n) + ajakan chat pribadi ke bot untuk `/form [rig]`.
 
-2. **Pull — `/rig`**
-   On-demand, siapa saja di whitelist. Balas daftar semua rig bernomor, tanpa batasan (semua nomor lihat semua rig — lihat keputusan di bagian "Belum Diputuskan").
+2. **Pull — `/rig`** (chat pribadi saja)
+   On-demand, siapa saja di whitelist. Balas daftar semua rig bernomor, tanpa batasan (semua nomor lihat semua rig).
 
-3. **Pull — `/form [rig]`**
+3. **Pull — `/form [rig]`** (chat pribadi saja)
    On-demand. Balas daftar equipment rig itu bernomor + upsert **sesi aktif** untuk nomor WA itu (berlaku 4 jam) supaya balasan angka berikutnya bisa di-resolve ke equipment yang benar.
 
-4. **Pull — Entry Jam Jalan** (2 jalur, sama-sama berujung insert ke `logbook`)
+4. **Pull — Entry Jam Jalan** (chat pribadi saja, 2 jalur, sama-sama berujung insert ke `logbook`)
    - **Jalur utama:** balasan angka (`2 6 baik, 4 12 baik`) → resolve nomor via sesi `/form` aktif → equipment
    - **Jalur cepat opsional:** `/jamjalan [tag_number] [siang|malam] [jam] [kondisi] [catatan]` → langsung pakai tag, tidak butuh sesi/`/form` dulu, shift wajib disebut manual di jalur ini (beda dari jalur utama yang deteksi shift otomatis dari jam kirim)
 
-   Setelah resolve equipment (+ shift): validasi rig sesuai whitelist → **insert ke tabel `logbook`** (skema sama dengan app Logbook, lihat bagian "Konsep Pengisian" di bawah) → update `equipment.running_hours` (additive) → **reply** (quote) ke pesan command asli sebagai konfirmasi.
+   Setelah resolve equipment (+ shift): validasi rig sesuai whitelist → **insert ke tabel `logbook`** (skema sama dengan app Logbook, lihat bagian "Konsep Pengisian" di bawah) → update `equipment.running_hours` (additive) → **balas langsung** (tanpa quote, karena chat 1:1) sebagai konfirmasi.
 
-## Handling Pesan Bersamaan / Grup Rame
+## Handling Pesan Bersamaan
 
-- Tiap pesan masuk = event terpisah dari WAHA ke webhook n8n, diproses independen — tidak saling blocking dengan chat biasa di grup
-- Bot hanya membalas pesan yang match kriteria (whitelist + prefix); chat lain lewat begitu saja tanpa respon
-- Balasan bot pakai **quote reply** (field `reply_to`/`quotedMessageId`, exact nama field tergantung versi WAHA — perlu dicek pas implementasi) supaya konfirmasi jelas nyambung ke command mana, walau grup sedang ramai
-- Beberapa command dari operator berbeda hampir bersamaan aman diproses n8n selama tiap command target equipment yang unik (insert per-row, bukan overwrite bareng)
+- Tiap pesan masuk = event terpisah dari WAHA ke webhook n8n, diproses independen
+- Karena entry sekarang di chat pribadi (bukan grup), **tidak ada lagi risiko tumpang tindih antar-operator** — tiap operator punya thread 1:1 sendiri dengan bot, dan **tidak perlu quote-reply** untuk disambiguasi
+- Beberapa operator kirim command hampir bersamaan (di chat pribadi masing-masing) tetap aman diproses n8n secara independen selama tiap insert target equipment yang unik (insert per-row, bukan overwrite bareng)
 
 ## Monitoring Session WAHA — WAJIB, bukan opsional
 
