@@ -122,20 +122,42 @@ Mapping kata WA → value DB: `baik→baik`, `waspada→perlu_perhatian`, `rusak
 
 **Solusi:** pakai `wa_whitelist.id` (sudah didesain sebagai `uuid primary key`) sebagai `reporter_id`, BUKAN nomor WA mentah. Aman terpakai apa pun tipe kolom `reporter_id` sebenarnya (uuid atau text), karena `wa_whitelist.id` sudah pasti UUID valid.
 
+**Kolom asli vs JSONB `data` (koreksi 12 Jul 2026, verifikasi langsung dari `src/supabase/logbook.js`):**
+```js
+// toRow() di app Logbook — KNOWN columns dipetakan ke kolom asli tabel,
+// SISANYA (termasuk shift, date, findings) otomatis masuk ke kolom data (JSONB).
+const KNOWN = new Set(['equipmentId','equipmentName','reporterId','reporterName',
+  'reporterRole','shiftHours','condition','temuan','status']);
+```
+n8n harus tulis row `logbook` dengan struktur PERSIS ini (bukan taruh `shift`/`date`/`findings` sebagai kolom top-level — itu SALAH, kolom itu tidak ada):
 ```js
 {
+  // kolom asli tabel logbook:
   equipment_id:   <resolved dari tag_number>,
-  equipment_name: <dari equipment>,
+  equipment_name: <dari equipment.nama_equipment>,
   reporter_id:    <wa_whitelist.id>,       // UUID dari tabel whitelist, BUKAN nomor_wa mentah
   reporter_name:  <wa_whitelist.nama>,
   reporter_role:  'operator',              // atau 'admin' kalau rig IS NULL di whitelist
-  shift, condition, shiftHours,
-  findings:       <catatan opsional dari command>,
-  date:           <timestamp saat pesan diterima>,
-  source:         'whatsapp'               // penanda tambahan, tidak ada di app tapi berguna untuk audit/laporan asal data
+  shift_hours:    <jam jalan>,
+  condition:      <baik|perlu_perhatian|rusak>,
+  temuan:         null,                    // TIDAK dipakai jalur Operator di app asli, biarkan null (konsisten)
+  status:         'pending',
+  // sisanya masuk kolom data (JSONB) — TIDAK ada di top-level:
+  data: {
+    shift:    <Siang|Malam>,
+    date:     <timestamp saat pesan diterima>,
+    findings: <catatan opsional dari command, kalau ada>,
+    source:   'whatsapp'                   // penanda tambahan, tidak ada di app tapi berguna untuk audit/laporan asal data
+  }
 }
 ```
 Lalu `equipment.running_hours` di-update additive seperti di atas — **jalur ini setara "Operator" di Logbook (langsung, tanpa approval SPV)**, bukan jalur "Mekanik" yang perlu `approve_hm`. Alasan: operator lapangan lapor via WA fungsinya sama persis dengan operator yang isi form — bukan mekanik yang butuh review.
+
+### Skema Database Terverifikasi (12 Jul 2026, dicek langsung dari `index.html`)
+
+- **"Rig" BUKAN kolom di `equipment`** — itu tabel terpisah **`parent_units(id, name)`**. `equipment.assigned_unit_id` adalah FK ke `parent_units.id`
+- **Tabel `equipment`** kolom yang relevan: `id, tag_number, nama_equipment, assigned_unit_id, running_hours`
+- Jadi: `/rig` → query `parent_units` (bukan `SELECT DISTINCT rig FROM equipment` seperti draft awal). `/form [rig]` → resolve nama rig ke `parent_units.id` dulu, baru query `equipment WHERE assigned_unit_id = <id>`
 
 **Belum tervalidasi (cek saat eksekusi):** tipe kolom `reporter_id` di tabel `logbook` yang sebenarnya. Cara cek cepat di Supabase SQL Editor:
 ```sql
@@ -330,6 +352,56 @@ Response berupa array semua chat, cari objek dengan `"name"` sesuai nama grup, a
 4. Kalau WhatsApp memutus sesi dengan pesan **"do not reconnect the session"**, session tersebut sudah dianggap tidak valid oleh WhatsApp — tidak bisa di-restart, harus dihapus dan dibuat session baru dari nol (scan QR ulang).
 5. Setelah session baru berhasil connect, **biarkan idle 2-3 menit** sebelum mulai kirim pesan — mengurangi risiko WhatsApp menganggap koneksi mencurigakan dan memutusnya lagi.
 6. Trial plan Railway rawan resource terbatas untuk WAHA — pertimbangkan upgrade ke Hobby plan sebelum produksi penuh, terutama kalau nanti WAHA harus jalan 24/7 berdampingan dengan n8n.
+
+### Struktur Webhook WAHA & Temuan "LID" — KRITIS (verifikasi 11 Jul 2026, dari eksekusi n8n nyata)
+
+**Struktur payload asli** yang diterima n8n dari webhook WAHA (event `message`):
+```json
+{
+  "headers": {...}, "params": {}, "query": {},
+  "body": {
+    "event": "message",
+    "session": "eramhoist2",
+    "payload": {
+      "from": "105772461637707@lid",
+      "fromMe": false,
+      "body": "/rig",
+      "_data": {
+        "key": {
+          "remoteJid": "105772461637707@lid",
+          "remoteJidAlt": "6282110596489@s.whatsapp.net",
+          "fromMe": false
+        },
+        "pushName": "Maman"
+      }
+    }
+  },
+  "webhookUrl": "...", "executionMode": "production"
+}
+```
+Path yang benar untuk n8n Code node: `item.body.payload` (BUKAN `item.payload` langsung — n8n bungkus body POST webhook di key `body`).
+
+**Temuan kritis — WhatsApp "LID" (Linked ID):** nomor WA modern (fitur privasi WhatsApp terbaru) memakai `payload.from` berformat **`<angka acak>@lid`**, BUKAN format klasik `<nomor_hp>@c.us`. Konsekuensi:
+- **Deteksi chat pribadi** tidak boleh cuma cek `.endsWith('@c.us')` — harus terima juga `@lid`. Pola aman: `!chatId.endsWith('@g.us') && chatId` (bukan grup DAN tidak kosong = chat pribadi, apa pun suffix persisnya)
+- **Nomor HP asli** untuk dicocokkan ke `wa_whitelist.nomor_wa` TIDAK ADA di `payload.from` kalau pakai LID — harus diambil dari `payload._data.key.remoteJidAlt` (format `628xxx@s.whatsapp.net`), fallback ke `payload.from` kalau `remoteJidAlt` tidak ada (kemungkinan nomor lama/belum migrasi LID)
+- **Balas pesan** tetap pakai `chatId` asli (`payload.from`, boleh `@lid` ataupun `@c.us`) — BUKAN `remoteJidAlt` — karena itu identifier yang WAHA pakai untuk kirim balik ke chat yang sama
+
+Kode ekstraksi final (dipakai di semua workflow WAHA berikutnya, `Ekstrak Pesan & Cek Chat Pribadi`):
+```js
+const item = $input.first().json;
+const waBody = item.body || {};
+const msg = waBody.payload || {};
+
+const chatId = msg.from || '';
+const isGroup = chatId.endsWith('@g.us');
+const isPrivate = !isGroup && !!chatId;
+
+const remoteJidAlt = msg._data?.key?.remoteJidAlt || '';
+const senderRaw = remoteJidAlt || chatId;
+const sender = senderRaw.split('@')[0].replace(/[^0-9]/g, '');
+
+const text = String(msg.body || '').trim();
+```
 
 ---
 *File ini adalah catatan konsep + hasil setup teknis. Siap dilanjutkan ke tahap eksekusi n8n (workflow kirim/terima pesan grup) di sesi berikutnya — tinggal disusun jadi prompt file lengkap pola N8N_WAHA_ERAMHOIST_PROMPT.md, karena semua kredensial dan ID yang dibutuhkan sudah tersedia di atas.*

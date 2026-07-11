@@ -1,0 +1,179 @@
+{
+  "name": "WAHA eRAMHoist - Tahap 2a Router + /rig",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "waha-eramhoist-entry",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "b2000000-0000-4000-8000-000000000001",
+      "name": "Terima Pesan WAHA",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Struktur asli webhook WAHA (TERVERIFIKASI 11 Jul 2026 dari execution log):\n// item.body.payload = objek pesan. item.body.payload.from bisa berupa\n// '@lid' (WhatsApp Linked ID, format privasi baru) untuk chat pribadi,\n// BUKAN selalu '@c.us'. Nomor HP asli ada di payload._data.key.remoteJidAlt.\nconst item = $input.first().json;\nconst waBody = item.body || {};\nconst msg = waBody.payload || {};\n\nconst chatId = msg.from || '';\nconst isGroup = chatId.endsWith('@g.us');\nconst isPrivate = !isGroup && !!chatId; // '@c.us' ATAU '@lid', keduanya chat pribadi\n\n// Nomor HP asli: utamakan remoteJidAlt (format '628xxx@s.whatsapp.net'),\n// fallback ke 'from' kalau remoteJidAlt tidak ada\nconst remoteJidAlt = msg._data?.key?.remoteJidAlt || '';\nconst senderRaw = remoteJidAlt || chatId;\nconst sender = senderRaw.split('@')[0].replace(/[^0-9]/g, '');\n\nconst text = String(msg.body || '').trim();\n\nreturn [{\n  json: { chatId, sender, text, isGroup, isPrivate }\n}];"
+      },
+      "id": "b2000000-0000-4000-8000-000000000002",
+      "name": "Ekstrak Pesan & Cek Chat Pribadi",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            { "leftValue": "={{ $json.isPrivate }}", "rightValue": true, "operator": { "type": "boolean", "operation": "true" } }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "b2000000-0000-4000-8000-000000000003",
+      "name": "IF Chat Pribadi",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "resource": "row", "operation": "getAll", "tableId": "wa_whitelist",
+        "returnAll": false, "limit": 1,
+        "filters": { "conditions": [
+          { "keyName": "nomor_wa", "condition": "eq", "keyValue": "={{ $json.sender }}" },
+          { "keyName": "aktif", "condition": "eq", "keyValue": "true" }
+        ]}
+      },
+      "id": "b2000000-0000-4000-8000-000000000004",
+      "name": "Cek Whitelist",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [720, 220],
+      "credentials": { "supabaseApi": { "id": "CRED_ERAMHOIST", "name": "Supabase eRAMHoist" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Gabungkan hasil query whitelist dengan data pesan yang sudah diekstrak sebelumnya\nconst rows = $input.all().map(i => i.json);\nconst found = rows.length > 0 ? rows[0] : null;\nconst msg = $('Ekstrak Pesan & Cek Chat Pribadi').first().json;\n\nreturn [{\n  json: {\n    ...msg,\n    whitelisted: !!found,\n    waId: found ? found.id : null,\n    waNama: found ? found.nama : null,\n    waRig: found ? found.rig : null // null = admin, terisi = operator dibatasi rig itu\n  }\n}];"
+      },
+      "id": "b2000000-0000-4000-8000-000000000005",
+      "name": "Gabung Data Whitelist",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 220]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            { "leftValue": "={{ $json.whitelisted }}", "rightValue": true, "operator": { "type": "boolean", "operation": "true" } }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "b2000000-0000-4000-8000-000000000006",
+      "name": "IF Whitelisted",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1200, 220]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Klasifikasi pesan jadi salah satu cabang command.\n// Tahap 2a baru dukung /rig -- cabang lain (form/numeric/jamjalan) ditambah\n// di sub-tahap berikutnya, tinggal tambah kondisi di sini + node baru di Switch.\nconst j = $json;\nconst t = (j.text || '').trim();\nconst lower = t.toLowerCase();\n\nlet branch = 'unknown';\nif (lower === '/rig' || lower.startsWith('/rig ')) branch = 'rig';\n// else if (lower.startsWith('/form ')) branch = 'form';\n// else if (/^\\d/.test(t)) branch = 'numeric';\n// else if (lower.startsWith('/jamjalan ')) branch = 'jamjalan';\n\nreturn [{ json: { ...j, branch } }];"
+      },
+      "id": "b2000000-0000-4000-8000-000000000007",
+      "name": "Klasifikasi Pesan",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1440, 220]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            { "leftValue": "={{ $json.branch }}", "rightValue": "rig", "operator": { "type": "string", "operation": "equals" } }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "b2000000-0000-4000-8000-000000000008",
+      "name": "IF Command Rig",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1680, 220]
+    },
+    {
+      "parameters": {
+        "resource": "row", "operation": "getAll", "tableId": "parent_units",
+        "returnAll": true,
+        "options": { "order": "name.asc" }
+      },
+      "id": "b2000000-0000-4000-8000-000000000009",
+      "name": "Ambil Semua Rig",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1920, 140],
+      "credentials": { "supabaseApi": { "id": "CRED_ERAMHOIST", "name": "Supabase eRAMHoist" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.all().map(i => i.json);\nlet text = 'Daftar Rig:\\n';\nrows.forEach((r, i) => { text += `${i + 1}. ${r.name}\\n`; });\ntext += '\\nBalas /form [nama rig] untuk lihat equipment-nya';\n\nconst msg = $('Klasifikasi Pesan').first().json;\nreturn [{ json: { chatId: msg.chatId, replyText: text } }];"
+      },
+      "id": "b2000000-0000-4000-8000-00000000000a",
+      "name": "Format Daftar Rig",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2160, 140]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://waha-production-f995.up.railway.app/api/sendText",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chatId: $json.chatId, text: $json.replyText, session: \"eramhoist2\" }) }}",
+        "options": {}
+      },
+      "id": "b2000000-0000-4000-8000-00000000000b",
+      "name": "Kirim Balasan ke WA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2400, 140],
+      "credentials": {
+        "httpHeaderAuth": { "id": "CRED_WAHA_API_KEY", "name": "WAHA API Key" }
+      }
+    }
+  ],
+  "connections": {
+    "Terima Pesan WAHA": { "main": [[{ "node": "Ekstrak Pesan & Cek Chat Pribadi", "type": "main", "index": 0 }]] },
+    "Ekstrak Pesan & Cek Chat Pribadi": { "main": [[{ "node": "IF Chat Pribadi", "type": "main", "index": 0 }]] },
+    "IF Chat Pribadi": { "main": [
+      [{ "node": "Cek Whitelist", "type": "main", "index": 0 }],
+      []
+    ]},
+    "Cek Whitelist": { "main": [[{ "node": "Gabung Data Whitelist", "type": "main", "index": 0 }]] },
+    "Gabung Data Whitelist": { "main": [[{ "node": "IF Whitelisted", "type": "main", "index": 0 }]] },
+    "IF Whitelisted": { "main": [
+      [{ "node": "Klasifikasi Pesan", "type": "main", "index": 0 }],
+      []
+    ]},
+    "Klasifikasi Pesan": { "main": [[{ "node": "IF Command Rig", "type": "main", "index": 0 }]] },
+    "IF Command Rig": { "main": [
+      [{ "node": "Ambil Semua Rig", "type": "main", "index": 0 }],
+      []
+    ]},
+    "Ambil Semua Rig": { "main": [[{ "node": "Format Daftar Rig", "type": "main", "index": 0 }]] },
+    "Format Daftar Rig": { "main": [[{ "node": "Kirim Balasan ke WA", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1", "timezone": "Asia/Jakarta" },
+  "pinData": {}
+}

@@ -139,15 +139,17 @@ pesan. Urutan pengecekan (pesan yang tidak match semuanya → stop tanpa balas):
 4. Node Switch/IF, route berdasar isi pesan:
 
 **Cabang A — `/rig`**
-- Node Supabase: query semua rig unik dari tabel `equipment` (`SELECT
-  DISTINCT rig ...` atau kolom setara — sesuaikan nama kolom rig di skema
-  eRAMHoist, cek dulu strukturnya)
+- Node Supabase: query tabel **`parent_units`** (`id, name`) — INI tabel
+  rig yang benar, BUKAN kolom di `equipment` (verifikasi 12 Jul 2026 dari
+  `index.html`: `equipment.assigned_unit_id` adalah FK ke `parent_units.id`)
 - Node Function: format jadi daftar bernomor
 - Node HTTP Request: kirim balasan ke `chatId` pengirim (chat pribadi, BUKAN grup)
 
 **Cabang B — `/form [rig]`**
-- Node Supabase: query `equipment` filter by rig itu → ambil `id,
-  tag_number` semua equipment-nya
+- Node Supabase: cari `parent_units` by `name` (match nama rig dari
+  command) → dapat `id`. Kalau tidak ketemu → balas "Rig tidak dikenali"
+- Node Supabase: query `equipment` filter `assigned_unit_id = <parent_units.id>`
+  → ambil `id, tag_number, nama_equipment`
 - Node Function: bikin numbering (urutan konsisten, misal alfabetis by
   `tag_number`) → bangun `mapping` JSON `{ "1": "TT-100A", "2": "DC-100A", ... }`
 - Node Supabase: UPSERT ke `wa_form_session` (`nomor_wa`, `rig`, `mapping`,
@@ -182,11 +184,15 @@ pesan. Urutan pengecekan (pesan yang tidak match semuanya → stop tanpa balas):
 **Insert bersama (dipakai Cabang C & D, per equipment yang di-entry):**
 1. Node IF: kalau `wa_whitelist.rig` **terisi** (bukan admin) → equipment
    yang di-entry harus milik rig itu, tolak kalau beda rig
-2. Node Supabase: INSERT ke tabel `logbook` — `reporter_id =
-   wa_whitelist.id` (BUKAN nomor WA mentah — lihat catatan penting di
-   konsep doc), `reporter_name`, `reporter_role` ('operator' atau 'admin'
-   tergantung `rig IS NULL`), `shift`, `condition`, `shift_hours`,
-   `temuan` (dari catatan opsional), `status: 'pending'`
+2. Node Supabase: INSERT ke tabel `logbook` — **kolom asli**: `equipment_id,
+   equipment_name, reporter_id (= wa_whitelist.id, BUKAN nomor WA mentah),
+   reporter_name, reporter_role ('operator'/'admin' tergantung rig IS NULL),
+   shift_hours, condition, temuan (null, tidak dipakai jalur Operator),
+   status ('pending')`. **Kolom `data` (JSONB)**: `{ shift, date, findings
+   (catatan opsional dari command), source: 'whatsapp' }`. JANGAN taruh
+   `shift`/`date`/`findings` sebagai kolom top-level — kolom itu tidak ada
+   di tabel, lihat detail lengkap di konsep doc bagian "Kolom asli vs
+   JSONB data"
 3. Node Supabase: UPDATE `equipment.running_hours` = `running_hours +
    shift_hours` (additive, tidak perlu cek turun karena selalu nambah)
 4. Balasan konfirmasi — kirim langsung ke `chatId` pengirim (chat pribadi,
