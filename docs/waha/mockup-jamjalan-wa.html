@@ -15,16 +15,11 @@
     --wa-bubble-ink: #111B21;
     --wa-time-ink: #667781;
     --wa-tick-read: #53BDEB;
-    --wa-quote-bar: #06CF9C;
-    --wa-quote-bg-in: rgba(11,20,26,0.06);
-    --wa-quote-bg-out: rgba(6,89,66,0.08);
 
     --name-rudi: #E17E22;
-    --name-yoga: #7C5CBF;
-    --name-admin: #C0392B;
     --name-bot: #008069;
-
     --accent: #008069;
+    --lock: #8A8F87;
   }
 
   @media (prefers-color-scheme: dark) {
@@ -34,7 +29,6 @@
       --ink: #E9EDEF;
       --ink-muted: #8696A0;
       --hairline: #24322C;
-
       --wa-header: #202C33;
       --wa-header-ink: #E9EDEF;
       --wa-wallpaper: #0B141A;
@@ -43,65 +37,26 @@
       --wa-bubble-ink: #E9EDEF;
       --wa-time-ink: #8696A0;
       --wa-tick-read: #53BDEB;
-      --wa-quote-bar: #06CF9C;
-      --wa-quote-bg-in: rgba(233,237,239,0.08);
-      --wa-quote-bg-out: rgba(255,255,255,0.10);
-
       --name-rudi: #F0A24C;
-      --name-yoga: #A78BE0;
-      --name-admin: #E27A6E;
       --name-bot: #34D399;
-
       --accent: #06CF9C;
+      --lock: #7A8078;
     }
   }
 
   :root[data-theme="dark"] {
-    --backdrop: #0A0F12;
-    --panel: #111A1F;
-    --ink: #E9EDEF;
-    --ink-muted: #8696A0;
-    --hairline: #24322C;
-    --wa-header: #202C33;
-    --wa-header-ink: #E9EDEF;
-    --wa-wallpaper: #0B141A;
-    --wa-bubble-in: #202C33;
-    --wa-bubble-out: #005C4B;
-    --wa-bubble-ink: #E9EDEF;
-    --wa-time-ink: #8696A0;
-    --wa-tick-read: #53BDEB;
-    --wa-quote-bar: #06CF9C;
-    --wa-quote-bg-in: rgba(233,237,239,0.08);
-    --wa-quote-bg-out: rgba(255,255,255,0.10);
-    --name-rudi: #F0A24C;
-    --name-yoga: #A78BE0;
-    --name-admin: #E27A6E;
-    --name-bot: #34D399;
-    --accent: #06CF9C;
+    --backdrop: #0A0F12; --panel: #111A1F; --ink: #E9EDEF; --ink-muted: #8696A0; --hairline: #24322C;
+    --wa-header: #202C33; --wa-header-ink: #E9EDEF; --wa-wallpaper: #0B141A;
+    --wa-bubble-in: #202C33; --wa-bubble-out: #005C4B; --wa-bubble-ink: #E9EDEF;
+    --wa-time-ink: #8696A0; --wa-tick-read: #53BDEB;
+    --name-rudi: #F0A24C; --name-bot: #34D399; --accent: #06CF9C; --lock: #7A8078;
   }
-
   :root[data-theme="light"] {
-    --backdrop: #F1F2ED;
-    --panel: #FFFFFF;
-    --ink: #111B21;
-    --ink-muted: #667781;
-    --hairline: #D8DCD6;
-    --wa-header: #008069;
-    --wa-header-ink: #FFFFFF;
-    --wa-wallpaper: #E9EDEF;
-    --wa-bubble-in: #FFFFFF;
-    --wa-bubble-out: #D9FDD3;
-    --wa-bubble-ink: #111B21;
-    --wa-time-ink: #667781;
-    --wa-tick-read: #53BDEB;
-    --wa-quote-bar: #06CF9C;
-    --wa-quote-bg-in: rgba(11,20,26,0.06);
-    --wa-quote-bg-out: rgba(6,89,66,0.08);
-    --name-rudi: #E17E22;
-    --name-yoga: #7C5CBF;
-    --name-admin: #C0392B;
-    --name-bot: #008069;
-    --accent: #008069;
+    --backdrop: #F1F2ED; --panel: #FFFFFF; --ink: #111B21; --ink-muted: #667781; --hairline: #D8DCD6;
+    --wa-header: #008069; --wa-header-ink: #FFFFFF; --wa-wallpaper: #E9EDEF;
+    --wa-bubble-in: #FFFFFF; --wa-bubble-out: #D9FDD3; --wa-bubble-ink: #111B21;
+    --wa-time-ink: #667781; --wa-tick-read: #53BDEB;
+    --name-rudi: #E17E22; --name-bot: #008069; --accent: #008069; --lock: #8A8F87;
   }
 
   * { box-sizing: border-box; }
@@ -114,433 +69,348 @@
     -webkit-font-smoothing: antialiased;
   }
 
-  .page {
-    max-width: 1080px;
-    margin: 0 auto;
-    padding: 48px 24px 72px;
-  }
+  .page { max-width: 1180px; margin: 0 auto; padding: 48px 24px 72px; }
 
-  .masthead {
-    max-width: 640px;
-    margin: 0 0 40px;
-  }
-
+  .masthead { max-width: 680px; margin: 0 0 8px; }
   .eyebrow {
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--accent);
-    margin: 0 0 10px;
+    font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--accent); margin: 0 0 10px;
   }
-
   h1 {
-    font-size: clamp(24px, 3vw, 30px);
-    line-height: 1.25;
-    font-weight: 700;
-    margin: 0 0 10px;
-    text-wrap: balance;
-    letter-spacing: -0.01em;
+    font-size: clamp(24px, 3vw, 30px); line-height: 1.25; font-weight: 700;
+    margin: 0 0 10px; text-wrap: balance; letter-spacing: -0.01em;
   }
+  .masthead p { font-size: 15px; line-height: 1.6; color: var(--ink-muted); margin: 0; max-width: 60ch; }
 
-  .masthead p {
-    font-size: 15px;
-    line-height: 1.6;
-    color: var(--ink-muted);
-    margin: 0;
-    max-width: 58ch;
+  .split-legend {
+    display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+    margin: 26px 0 34px;
+    font-size: 12.5px; font-weight: 600; color: var(--ink-muted);
   }
+  .split-legend .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 12px; border-radius: 20px; border: 1px solid var(--hairline); background: var(--panel);
+  }
+  .split-legend .chip .dot { width: 7px; height: 7px; border-radius: 50%; }
+  .split-legend .arrow { color: var(--hairline); font-size: 15px; }
 
-  .stage {
+  .phones {
     display: grid;
-    grid-template-columns: 340px 1fr;
-    gap: 40px;
+    grid-template-columns: 300px 1fr;
+    gap: 32px;
     align-items: start;
   }
-
-  @media (max-width: 800px) {
-    .stage { grid-template-columns: 1fr; }
+  @media (max-width: 860px) {
+    .phones { grid-template-columns: 1fr; }
   }
 
-  /* ---------- phone ---------- */
+  .phone-col { display: flex; flex-direction: column; gap: 12px; }
+  .phone-label {
+    font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+    color: var(--ink-muted); display: flex; align-items: center; gap: 7px;
+  }
+  .phone-label .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .phone-label small { font-weight: 500; text-transform: none; letter-spacing: 0; opacity: 0.85; }
 
   .phone {
     background: var(--panel);
-    border-radius: 34px;
-    padding: 10px;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.06), 0 24px 48px -20px rgba(0,0,0,0.28);
+    border-radius: 30px;
+    padding: 9px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.06), 0 20px 44px -20px rgba(0,0,0,0.30);
     border: 1px solid var(--hairline);
   }
-
   .screen {
-    border-radius: 26px;
-    overflow: hidden;
-    background: var(--wa-wallpaper);
-    display: flex;
-    flex-direction: column;
-    height: 720px;
+    border-radius: 23px; overflow: hidden; background: var(--wa-wallpaper);
+    display: flex; flex-direction: column;
   }
+  .col-group .screen { height: 430px; }
+  .col-private .screen { height: 700px; }
 
   .wa-header {
-    background: var(--wa-header);
-    color: var(--wa-header-ink);
-    padding: 14px 14px 12px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex: none;
+    background: var(--wa-header); color: var(--wa-header-ink);
+    padding: 12px 12px 11px; display: flex; align-items: center; gap: 9px; flex: none;
   }
-
-  .wa-back {
-    width: 20px; height: 20px;
-    flex: none;
-    opacity: 0.9;
-  }
-
+  .wa-back { width: 18px; height: 18px; flex: none; opacity: 0.9; }
   .wa-avatar {
-    width: 36px; height: 36px;
-    border-radius: 50%;
-    background: rgba(255,255,255,0.18);
-    display: flex; align-items: center; justify-content: center;
-    font-size: 13px; font-weight: 700;
-    flex: none;
+    width: 32px; height: 32px; border-radius: 50%; background: rgba(255,255,255,0.18);
+    display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex: none;
   }
-
   .wa-title { flex: 1; min-width: 0; }
-  .wa-title .name { font-size: 15.5px; font-weight: 600; line-height: 1.25; }
-  .wa-title .sub { font-size: 12px; opacity: 0.82; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
-  .wa-icons { display: flex; gap: 16px; flex: none; opacity: 0.92; }
-  .wa-icons svg { width: 19px; height: 19px; display: block; }
+  .wa-title .name { font-size: 14.5px; font-weight: 600; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .wa-title .sub { font-size: 11.5px; opacity: 0.82; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .wa-icons { display: flex; gap: 13px; flex: none; opacity: 0.9; }
+  .wa-icons svg { width: 17px; height: 17px; display: block; }
 
   .wa-body {
-    flex: 1;
-    overflow-y: auto;
-    padding: 14px 10px 6px;
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
+    flex: 1; overflow-y: auto; padding: 12px 9px 6px;
+    display: flex; flex-direction: column; gap: 3px;
   }
 
-  .datechip {
-    align-self: center;
-    background: var(--panel);
-    color: var(--ink-muted);
-    font-size: 11.5px;
-    font-weight: 600;
-    padding: 5px 12px;
-    border-radius: 8px;
-    margin: 4px 0 10px;
-    box-shadow: 0 1px 1px rgba(0,0,0,0.06);
+  .datechip, .syschip {
+    align-self: center; background: var(--panel); color: var(--ink-muted);
+    font-size: 11px; font-weight: 600; padding: 5px 11px; border-radius: 8px;
+    margin: 4px 0 10px; box-shadow: 0 1px 1px rgba(0,0,0,0.06); text-align: center; max-width: 88%;
   }
+  .syschip { display: flex; align-items: center; gap: 5px; font-weight: 500; color: var(--lock); }
+  .syschip svg { width: 11px; height: 11px; flex: none; }
 
-  .row {
-    display: flex;
-    margin: 5px 0;
-    opacity: 0;
-    animation: rise 0.42s ease-out forwards;
-  }
+  .row { display: flex; margin: 5px 0; opacity: 0; animation: rise .42s ease-out forwards; }
   .row.in { justify-content: flex-start; }
   .row.out { justify-content: flex-end; }
-
-  @keyframes rise {
-    from { opacity: 0; transform: translateY(8px); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .row { animation: none; opacity: 1; }
-  }
+  @keyframes rise { from { opacity: 0; transform: translateY(8px);} to { opacity: 1; transform: translateY(0);} }
+  @media (prefers-reduced-motion: reduce) { .row { animation: none; opacity: 1; } }
 
   .bubble {
-    max-width: 84%;
-    padding: 6px 8px 7px 9px;
-    border-radius: 9px;
-    font-size: 13.6px;
-    line-height: 1.42;
-    white-space: pre-wrap;
-    box-shadow: 0 1px 0.5px rgba(0,0,0,0.08);
-    position: relative;
+    max-width: 86%; padding: 6px 8px 7px 9px; border-radius: 9px;
+    font-size: 13.2px; line-height: 1.42; white-space: pre-wrap;
+    box-shadow: 0 1px 0.5px rgba(0,0,0,0.08); position: relative;
   }
   .bubble.in  { background: var(--wa-bubble-in);  color: var(--wa-bubble-ink); border-top-left-radius: 2px; }
   .bubble.out { background: var(--wa-bubble-out); color: var(--wa-bubble-ink); border-top-right-radius: 2px; }
-
-  .sender {
-    font-size: 12.8px;
-    font-weight: 700;
-    margin: 0 0 2px;
-  }
-
-  .quote {
-    display: block;
-    border-left: 3px solid var(--wa-quote-bar);
-    padding: 4px 6px;
-    margin: 0 0 5px;
-    border-radius: 5px;
-    font-size: 12.5px;
-    line-height: 1.35;
-  }
-  .bubble.in .quote  { background: var(--wa-quote-bg-in); }
-  .bubble.out .quote { background: var(--wa-quote-bg-out); }
-  .quote .qname { font-weight: 700; display: block; margin-bottom: 1px; }
-  .quote .qtext { color: var(--ink-muted); display: block; white-space: pre-wrap; }
+  .sender { font-size: 12.4px; font-weight: 700; margin: 0 0 2px; }
 
   .meta {
-    display: flex;
-    justify-content: flex-end;
-    align-items: center;
-    gap: 3px;
-    margin-top: 3px;
-    font-size: 11px;
-    color: var(--wa-time-ink);
-    font-variant-numeric: tabular-nums;
+    display: flex; justify-content: flex-end; align-items: center; gap: 3px;
+    margin-top: 3px; font-size: 10.5px; color: var(--wa-time-ink); font-variant-numeric: tabular-nums;
   }
-  .meta svg { width: 15px; height: 10px; }
+  .meta svg { width: 14px; height: 9px; }
   .tick-read { color: var(--wa-tick-read); }
 
   .wa-composer {
-    flex: none;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 10px 12px;
+    flex: none; display: flex; align-items: center; gap: 7px; padding: 7px 9px 11px;
   }
   .wa-composer .field {
-    flex: 1;
-    background: var(--panel);
-    border-radius: 22px;
-    padding: 9px 14px;
-    font-size: 13.5px;
-    color: var(--ink-muted);
-    display: flex;
-    align-items: center;
-    gap: 10px;
+    flex: 1; background: var(--panel); border-radius: 20px; padding: 8px 13px;
+    font-size: 12.8px; color: var(--ink-muted); display: flex; align-items: center; gap: 9px;
   }
-  .wa-composer .field svg { width: 18px; height: 18px; opacity: 0.65; flex: none; }
+  .wa-composer .field svg { width: 16px; height: 16px; opacity: 0.65; flex: none; }
   .wa-composer .mic {
-    width: 38px; height: 38px;
-    border-radius: 50%;
-    background: var(--wa-header);
-    display: flex; align-items: center; justify-content: center;
-    flex: none;
+    width: 34px; height: 34px; border-radius: 50%; background: var(--wa-header);
+    display: flex; align-items: center; justify-content: center; flex: none;
   }
-  .wa-composer .mic svg { width: 17px; height: 17px; color: var(--wa-header-ink); }
+  .wa-composer .mic svg { width: 15px; height: 15px; color: var(--wa-header-ink); }
+
+  .wa-locked {
+    flex: none; padding: 10px 14px 13px; text-align: center;
+    font-size: 11.5px; color: var(--ink-muted); display: flex; align-items: center; justify-content: center; gap: 6px;
+  }
+  .wa-locked svg { width: 13px; height: 13px; flex: none; opacity: 0.75; }
 
   /* ---------- annotation rail ---------- */
-
-  .rail { padding-top: 4px; }
+  .rail { margin-top: 44px; }
   .rail-head {
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--ink-muted);
-    margin: 0 0 18px;
+    font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--ink-muted); margin: 0 0 18px;
   }
+  .rail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 32px; }
+  @media (max-width: 700px) { .rail-grid { grid-template-columns: 1fr; } }
 
   .note {
-    display: grid;
-    grid-template-columns: 52px 1fr;
-    gap: 14px;
-    padding: 0 0 22px;
-    border-left: 1px solid var(--hairline);
-    margin-left: 25px;
-    padding-left: 21px;
+    display: grid; grid-template-columns: 44px 1fr; gap: 12px;
+    padding: 0 0 18px; border-left: 1px solid var(--hairline); margin-left: 22px; padding-left: 18px;
     position: relative;
   }
   .note:last-child { padding-bottom: 2px; }
   .note::before {
-    content: "";
-    position: absolute;
-    left: -4.5px;
-    top: 3px;
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    background: var(--accent);
+    content: ""; position: absolute; left: -4.5px; top: 3px; width: 8px; height: 8px;
+    border-radius: 50%; background: var(--accent);
   }
-  .note .time {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--ink-muted);
-    font-variant-numeric: tabular-nums;
-    padding-top: 1px;
-    margin-left: -46px;
-  }
-  .note .desc {
-    font-size: 13.5px;
-    line-height: 1.55;
-    color: var(--ink);
-  }
+  .note .time { font-size: 11.5px; font-weight: 600; color: var(--ink-muted); font-variant-numeric: tabular-nums; padding-top: 1px; margin-left: -40px; }
+  .note .desc { font-size: 13.5px; line-height: 1.55; color: var(--ink); }
   .note .desc b { font-weight: 600; }
-  .note .desc .who { color: var(--ink-muted); }
+  .note .desc code { background: var(--panel); border: 1px solid var(--hairline); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
 
   .foot {
-    max-width: 640px;
-    margin: 44px 0 0;
-    padding-top: 20px;
-    border-top: 1px solid var(--hairline);
-    font-size: 13px;
-    line-height: 1.6;
-    color: var(--ink-muted);
+    max-width: 680px; margin: 44px 0 0; padding-top: 20px; border-top: 1px solid var(--hairline);
+    font-size: 13px; line-height: 1.6; color: var(--ink-muted);
   }
-  .foot code {
-    background: var(--panel);
-    border: 1px solid var(--hairline);
-    padding: 1px 6px;
-    border-radius: 5px;
-    font-size: 12.5px;
-  }
+  .foot code { background: var(--panel); border: 1px solid var(--hairline); padding: 1px 6px; border-radius: 5px; font-size: 12.5px; }
 </style>
 
 <div class="page">
 
   <div class="masthead">
-    <p class="eyebrow">Konsep tampilan · eRAMHoist × WAHA</p>
-    <h1>Begini rupanya saat operator lapor jam jalan lewat grup WhatsApp</h1>
-    <p>Simulasi percakapan di grup <b>"Team Merah - Is the Best"</b>, sudut pandang Rudi (PIC rig BW-100A), sore hari jam 18:00 WIB — saat reminder otomatis terkirim sampai laporan tercatat.</p>
+    <p class="eyebrow">Konsep tampilan · eRAMHoist × WAHA — revisi 2</p>
+    <h1>Grup cuma baca laporan. Lapor jam jalan lewat chat pribadi ke bot.</h1>
+    <p>Sudut pandang Rudi (PIC rig BW-100A), dini hari — saat push laporan shift Malam masuk ke grup, lalu Rudi buka chat pribadi ke bot untuk lapor.</p>
   </div>
 
-  <div class="stage">
+  <div class="split-legend">
+    <span class="chip"><span class="dot" style="background:#8A8F87"></span>Grup WhatsApp — read-only</span>
+    <span class="arrow">→ operator baca, lalu pindah ke →</span>
+    <span class="chip"><span class="dot" style="background:var(--accent)"></span>Chat pribadi ke bot — tempat lapor</span>
+  </div>
 
-    <div class="phone">
-      <div class="screen">
+  <div class="phones">
 
-        <div class="wa-header">
-          <svg class="wa-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
-          <div class="wa-avatar">TM</div>
-          <div class="wa-title">
-            <div class="name">Team Merah - Is the Best</div>
-            <div class="sub">Rudi, Yoga, Budi (Admin), eRAMHoist Bot 🤖 +4 lainnya</div>
+    <div class="phone-col col-group">
+      <div class="phone-label"><span class="dot" style="background:#8A8F87"></span>Grup "Team Merah - Is the Best" <small>— read only</small></div>
+      <div class="phone">
+        <div class="screen">
+          <div class="wa-header">
+            <svg class="wa-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+            <div class="wa-avatar">TM</div>
+            <div class="wa-title">
+              <div class="name">Team Merah - Is the Best</div>
+              <div class="sub">Rudi, Yoga, Budi (Admin) +5 lainnya</div>
+            </div>
+            <div class="wa-icons">
+              <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
+            </div>
           </div>
-          <div class="wa-icons">
-            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M17 10.5V7a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3.5l4 4v-11l-4 4z"/></svg>
-            <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
+          <div class="wa-body">
+            <div class="datechip">Jumat, 12 Juli 2026</div>
+            <div class="row in" style="animation-delay:.05s">
+              <div class="bubble in">
+                <div class="sender" style="color:var(--name-bot)">eRAMHoist Bot 🤖</div>📋 Waktunya Lapor — Shift Malam (window 05:00-09:00)
+
+Rig BW-100A:
+1. TT-100A ✅ sudah (480 jam)
+2. DC-100A ⚠️ belum
+3. GS-KB150A-DEUTZ ⚠️ belum
+
+Chat pribadi ke bot ini untuk lapor →
+                <div class="meta">05.00</div>
+              </div>
+            </div>
+            <div class="syschip" style="animation:none;opacity:1">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+              obrolan grup lain jalan seperti biasa — bot tidak membalas apa pun di sini
+            </div>
+          </div>
+          <div class="wa-locked">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+            Command tidak diproses dari grup
           </div>
         </div>
-
-        <div class="wa-body">
-          <div class="datechip">Kamis, 11 Juli 2026</div>
-
-          <!-- 1: bot reminder -->
-          <div class="row in" style="animation-delay:.05s">
-            <div class="bubble in">
-              <div class="sender" style="color:var(--name-bot)">eRAMHoist Bot 🤖</div>📋 Laporan Jam Jalan — Rig BW-100A — 11 Jul 2026, 18:00
-✅ TT-100A: 472 jam (+8, shift siang) — baik
-⚠️ Belum entry: DC-100A, GS-KB150A-DEUTZ
-
-⏰ Reminder — belum entry shift siang:
-- DC-100A
-- GS-KB150A-DEUTZ
-Format: /jamjalan [tag] [siang|malam] [jam] [baik|waspada|rusak] [catatan opsional]
-              <div class="meta">18.00</div>
-            </div>
-          </div>
-
-          <!-- 2: rudi entry -->
-          <div class="row out" style="animation-delay:.35s">
-            <div class="bubble out">/jamjalan DC-100A siang 8 baik
-              <div class="meta">18.03 <svg class="tick-read" viewBox="0 0 16 11" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M1 5.5 4.2 9 11 1.2"/><path d="M5.3 5.5 8.5 9 15.3 1.2"/></svg></div>
-            </div>
-          </div>
-
-          <!-- 3: bot confirm -->
-          <div class="row in" style="animation-delay:.6s">
-            <div class="bubble in">
-              <div class="sender" style="color:var(--name-bot)">eRAMHoist Bot 🤖</div>
-              <span class="quote"><span class="qname" style="color:var(--name-rudi)">Rudi</span><span class="qtext">/jamjalan DC-100A siang 8 baik</span></span>✅ Tercatat: DC-100A +8 jam (total 480 jam) — baik
-              <div class="meta">18.03</div>
-            </div>
-          </div>
-
-          <!-- 4: yoga typo -->
-          <div class="row in" style="animation-delay:.85s">
-            <div class="bubble in">
-              <div class="sender" style="color:var(--name-yoga)">Yoga</div>/jamjaln GS-KB150A siang 6 baik
-              <div class="meta">18.07</div>
-            </div>
-          </div>
-
-          <!-- 5: bot error -->
-          <div class="row in" style="animation-delay:1.1s">
-            <div class="bubble in">
-              <div class="sender" style="color:var(--name-bot)">eRAMHoist Bot 🤖</div>
-              <span class="quote"><span class="qname" style="color:var(--name-yoga)">Yoga</span><span class="qtext">/jamjaln GS-KB150A siang 6 baik</span></span>❌ Format salah. Contoh: /jamjalan GS-KB150A-DEUTZ siang 6 baik
-              <div class="meta">18.07</div>
-            </div>
-          </div>
-
-          <!-- 5b: yoga casual -->
-          <div class="row in" style="animation-delay:1.35s">
-            <div class="bubble in">
-              <div class="sender" style="color:var(--name-yoga)">Yoga</div>sinyal di lokasi jelek pak 🙏 tolong dibantu admin ya
-              <div class="meta">18.08</div>
-            </div>
-          </div>
-
-          <!-- 6: admin entry -->
-          <div class="row in" style="animation-delay:1.6s">
-            <div class="bubble in">
-              <div class="sender" style="color:var(--name-admin)">Budi (Admin)</div>/jamjalan GS-KB150A-DEUTZ siang 6 baik
-              <div class="meta">18.09</div>
-            </div>
-          </div>
-
-          <!-- 7: bot confirm admin -->
-          <div class="row in" style="animation-delay:1.85s">
-            <div class="bubble in">
-              <div class="sender" style="color:var(--name-bot)">eRAMHoist Bot 🤖</div>
-              <span class="quote"><span class="qname" style="color:var(--name-admin)">Budi (Admin)</span><span class="qtext">/jamjalan GS-KB150A-DEUTZ siang 6 baik</span></span>✅ Tercatat: GS-KB150A-DEUTZ +6 jam (total 326 jam) — baik (dientry oleh Admin: Budi — pengganti sementara)
-              <div class="meta">18.09</div>
-            </div>
-          </div>
-
-        </div>
-
-        <div class="wa-composer">
-          <div class="field">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/></svg>
-            Ketik pesan
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="margin-left:auto"><path d="M21 15V6a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v9m0 0-3 3m3-3 3 3M8 20h11a2 2 0 0 0 2-2v-3"/></svg>
-          </div>
-          <div class="mic"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/></svg></div>
-        </div>
-
       </div>
     </div>
 
-    <div class="rail">
-      <p class="rail-head">Apa yang terjadi di balik layar</p>
+    <div class="phone-col col-private">
+      <div class="phone-label"><span class="dot" style="background:var(--accent)"></span>Chat pribadi — eRAMHoist Bot 🤖 <small>— tempat Rudi lapor</small></div>
+      <div class="phone">
+        <div class="screen">
+          <div class="wa-header">
+            <svg class="wa-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+            <div class="wa-avatar">🤖</div>
+            <div class="wa-title">
+              <div class="name">eRAMHoist Bot</div>
+              <div class="sub">online</div>
+            </div>
+            <div class="wa-icons">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 10.5V7a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3.5l4 4v-11l-4 4z"/></svg>
+              <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
+            </div>
+          </div>
 
-      <div class="note">
-        <span class="time">18.00</span>
-        <span class="desc">Sistem otomatis kirim <b>laporan + pengingat</b> ke grup, terjadwal tiap jam 06.00 dan 18.00 — tidak perlu ada yang memicu manual.</span>
-      </div>
-      <div class="note">
-        <span class="time">18.03</span>
-        <span class="desc"><span class="who">Rudi</span> (PIC rig BW-100A) balas lewat command <code style="background:var(--panel);border:1px solid var(--hairline);padding:1px 5px;border-radius:4px;font-size:12px">/jamjalan</code> — nomornya sudah terdaftar sebagai operator resmi rig ini.</span>
-      </div>
-      <div class="note">
-        <span class="time">18.03</span>
-        <span class="desc">Sistem langsung simpan laporannya — <b>tanpa perlu approval SPV</b>, sama seperti kalau Rudi isi lewat aplikasi Logbook langsung.</span>
-      </div>
-      <div class="note">
-        <span class="time">18.07</span>
-        <span class="desc"><span class="who">Yoga</span> salah ketik nama perintah & kode alat. Bot menolak dan menunjukkan contoh yang benar — supaya angka jam jalan tidak pernah masuk asal-asalan.</span>
-      </div>
-      <div class="note">
-        <span class="time">18.09</span>
-        <span class="desc">Karena Yoga kesulitan sinyal, <span class="who">Budi (Admin)</span> membantu input dari nomornya sendiri — admin memang diberi akses ke semua rig untuk situasi seperti ini.</span>
-      </div>
-      <div class="note">
-        <span class="time">18.09</span>
-        <span class="desc">Konfirmasi dari sistem <b>menandai jelas</b> kalau entry ini dibantu admin, lengkap dengan namanya — supaya tetap bisa ditelusuri siapa yang lapor.</span>
+          <div class="wa-body">
+            <div class="datechip">Jumat, 12 Juli 2026</div>
+
+            <div class="row out" style="animation-delay:.05s">
+              <div class="bubble out">/rig
+                <div class="meta">05.04 <svg class="tick-read" viewBox="0 0 16 11" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M1 5.5 4.2 9 11 1.2"/><path d="M5.3 5.5 8.5 9 15.3 1.2"/></svg></div>
+              </div>
+            </div>
+
+            <div class="row in" style="animation-delay:.3s">
+              <div class="bubble in">Daftar Rig:
+1. BW-100A
+2. BW-100B
+3. H35KD
+4. KB150A
+5. KB150B
+
+Balas /form [nama rig] untuk lihat equipment-nya
+                <div class="meta">05.04</div>
+              </div>
+            </div>
+
+            <div class="row out" style="animation-delay:.55s">
+              <div class="bubble out">/form BW-100A
+                <div class="meta">05.05 <svg class="tick-read" viewBox="0 0 16 11" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M1 5.5 4.2 9 11 1.2"/><path d="M5.3 5.5 8.5 9 15.3 1.2"/></svg></div>
+              </div>
+            </div>
+
+            <div class="row in" style="animation-delay:.8s">
+              <div class="bubble in">Equipment BW-100A (berlaku 4 jam):
+1. TT-100A
+2. DC-100A
+3. GS-KB150A-DEUTZ
+4. BPM-100A
+5. HJ-H35KD
+
+Balas nomornya, contoh:
+2 6 baik
+Bisa sekaligus, pisah koma:
+2 6 baik, 4 12 baik
+                <div class="meta">05.05</div>
+              </div>
+            </div>
+
+            <div class="row out" style="animation-delay:1.05s">
+              <div class="bubble out">2 6 baik, 4 12 waspada oli rembes
+                <div class="meta">05.07 <svg class="tick-read" viewBox="0 0 16 11" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M1 5.5 4.2 9 11 1.2"/><path d="M5.3 5.5 8.5 9 15.3 1.2"/></svg></div>
+              </div>
+            </div>
+
+            <div class="row in" style="animation-delay:1.3s">
+              <div class="bubble in">✅ Tercatat:
+- DC-100A +6 jam (total 486 jam) — baik
+- BPM-100A +12 jam (total 214 jam) — waspada: oli rembes
+
+Shift: Malam (dari jam 05.07)
+                <div class="meta">05.07</div>
+              </div>
+            </div>
+
+          </div>
+
+          <div class="wa-composer">
+            <div class="field">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/></svg>
+              Ketik pesan
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="margin-left:auto"><path d="M21 15V6a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v9m0 0-3 3m3-3 3 3M8 20h11a2 2 0 0 0 2-2v-3"/></svg>
+            </div>
+            <div class="mic"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/></svg></div>
+          </div>
+        </div>
       </div>
     </div>
 
+  </div>
+
+  <div class="rail">
+    <p class="rail-head">Apa yang terjadi di balik layar</p>
+    <div class="rail-grid">
+      <div class="note">
+        <span class="time">05.00</span>
+        <span class="desc">Sistem push <b>ringkasan status ke grup</b> secara otomatis (terjadwal 05:00 & 17:00) — cuma status ✅/⚠️ per rig, <b>tanpa nomor</b>, karena nomor cuma berlaku personal per sesi.</span>
+      </div>
+      <div class="note">
+        <span class="time">05.04</span>
+        <span class="desc">Rudi pindah ke <b>chat pribadi</b> dengan bot, ketik <code>/rig</code> untuk lihat semua rig — bot balas daftar bernomor, siapa saja boleh lihat ini.</span>
+      </div>
+      <div class="note">
+        <span class="time">05.05</span>
+        <span class="desc">Rudi ketik <code>/form BW-100A</code> — bot simpan "sesi" khusus nomor Rudi (berlaku 4 jam) supaya tahu nomor 1-5 itu equipment yang mana <i>buat Rudi</i>.</span>
+      </div>
+      <div class="note">
+        <span class="time">05.07</span>
+        <span class="desc">Rudi balas <b>2 equipment sekaligus</b> pakai nomor saja — tidak perlu ketik tag panjang seperti <code>GS-KB150A-DEUTZ</code>.</span>
+      </div>
+      <div class="note">
+        <span class="time">05.07</span>
+        <span class="desc">Sistem otomatis tahu ini <b>shift Malam</b> dari jam Rudi kirim pesan (18:00–06:00 = Malam) — tidak perlu disebut manual.</span>
+      </div>
+      <div class="note">
+        <span class="time">05.07</span>
+        <span class="desc">Karena chat 1:1, bot balas langsung <b>tanpa perlu quote</b> — beda dari kalau ini terjadi di grup rame yang butuh penanda "balasan ini punya siapa".</span>
+      </div>
+    </div>
   </div>
 
   <div class="foot">
-    Ini mockup tampilan, bukan aplikasi berjalan — dibuat untuk menyamakan pemahaman bentuk akhirnya sebelum masuk eksekusi <code>n8n</code>. Detail lengkap keputusan desain ada di <code>WAHA_ERAMHOIST_KONSEP.md</code>.
+    Ini mockup tampilan, bukan aplikasi berjalan — dibuat untuk menyamakan pemahaman bentuk akhirnya sebelum masuk eksekusi <code>n8n</code>. Detail lengkap ada di <code>WAHA_ERAMHOIST_KONSEP.md</code>.
   </div>
 
 </div>
