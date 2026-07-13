@@ -14525,6 +14525,34 @@
         const todayMs = now.getTime();
         const events = [];
 
+        // 1b. Riwayat — semua downtime_events (PM/TOH/GOH/breakdown/troubleshoot/dst), 12 bulan terakhir.
+        // Cuma di-fetch kalau lagi di mode Riwayat, biar mode lain (proyeksi ke depan) tidak kena query ekstra.
+        let historyEvents = [];
+        if (calFilter.viewMode === 'history') {
+          const histStartIso = new Date(now.getFullYear(), now.getMonth() - 11, 1).toISOString();
+          let rows = [], from = 0; const pageSize = 1000;
+          while (true) {
+            const { data: page, error: histErr } = await state.supabase
+              .from('downtime_events')
+              .select('id, equipment_id, equipment_tag, equipment_name, unit_id, unit_name, category, start_at, end_at, notes')
+              .gte('start_at', histStartIso)
+              .order('start_at', { ascending: false })
+              .range(from, from + pageSize - 1);
+            if (histErr) throw histErr;
+            rows = rows.concat(page || []);
+            if (!page || page.length < pageSize) break;
+            from += pageSize;
+          }
+          historyEvents = rows.map((d) => {
+            let subKind = null;
+            if (d.category === 'pm') {
+              const m = /^(PM|TOH|GOH)\b/.exec(d.notes || '');
+              subKind = m ? m[1] : 'PM';
+            }
+            return { ...d, subKind };
+          });
+        }
+
         (eqs || []).forEach((eq) => {
           const unitName = getParentUnitName(eq.assigned_unit_id);
           const catName = (getCategoryName(eq.kategori_id) || '').toLowerCase();
@@ -14711,6 +14739,7 @@
               <button onclick="setCalFilter('viewMode', 'month')" class="px-3 py-2 rounded-lg text-sm font-medium ${calFilter.viewMode === 'month' ? 'bg-navy text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}">📅 Per Bulan</button>
               <button onclick="setCalFilter('viewMode', 'rig')" class="px-3 py-2 rounded-lg text-sm font-medium ${calFilter.viewMode === 'rig' ? 'bg-navy text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}">🏭 Per Rig</button>
               <button onclick="setCalFilter('viewMode', 'urgency')" class="px-3 py-2 rounded-lg text-sm font-medium ${calFilter.viewMode === 'urgency' ? 'bg-navy text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}">⚡ Per Urgency</button>
+              <button onclick="setCalFilter('viewMode', 'history')" class="px-3 py-2 rounded-lg text-sm font-medium ${calFilter.viewMode === 'history' ? 'bg-navy text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}">🕐 Riwayat</button>
             </div>
             <div class="ml-auto flex gap-2">
               <button onclick="exportCalendarExcel()" class="px-3 py-2 bg-navy hover:bg-navy-700 text-white rounded-lg text-sm font-medium">📥 Excel</button>
@@ -14718,11 +14747,142 @@
             </div>
           </div>`;
 
+        // 8-10. KPI, month grid, detail content — beda total untuk mode Riwayat vs proyeksi
+        let kpiBar, monthsGrid, detailContent = '';
+
+        if (calFilter.viewMode === 'history') {
+          // ---- RIWAYAT: kejadian AKTUAL dari downtime_events (bukan proyeksi) ----
+          const histFiltered = historyEvents.filter((d) => {
+            if (calFilter.unit_id && String(d.unit_id) !== String(calFilter.unit_id)) return false;
+            return true;
+          });
+
+          const histByMonth = {};
+          histFiltered.forEach((d) => {
+            const ym = (d.start_at || '').slice(0, 7);
+            if (!histByMonth[ym]) histByMonth[ym] = [];
+            histByMonth[ym].push(d);
+          });
+          const histMonths = [];
+          for (let i = 11; i >= 0; i--) {
+            const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+            const ym = d.toISOString().slice(0, 7);
+            histMonths.push({ ym, date: d, events: histByMonth[ym] || [] });
+          }
+
+          const cntPM = histFiltered.filter((d) => d.category === 'pm').length;
+          const cntFail = histFiltered.filter((d) => d.category === 'breakdown' || d.category === 'troubleshoot').length;
+          const cntOther = histFiltered.length - cntPM - cntFail;
+          kpiBar = `
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div class="bg-white rounded-xl border border-slate-300 p-4 text-center">
+                <div class="text-3xl font-extrabold text-slate-700">${histFiltered.length}</div>
+                <div class="text-xs font-semibold text-slate-700 mt-1">📋 TOTAL KEJADIAN</div>
+                <div class="text-[10px] text-slate-500">12 bulan terakhir</div>
+              </div>
+              <div class="bg-white rounded-xl border border-green-300 p-4 text-center">
+                <div class="text-3xl font-extrabold text-green-700">${cntPM}</div>
+                <div class="text-xs font-semibold text-green-700 mt-1">🟢 PM/TOH/GOH</div>
+                <div class="text-[10px] text-slate-500">Selesai dikerjakan</div>
+              </div>
+              <div class="bg-white rounded-xl border border-red-300 p-4 text-center">
+                <div class="text-3xl font-extrabold text-red-700">${cntFail}</div>
+                <div class="text-xs font-semibold text-red-700 mt-1">💥 Breakdown/TS</div>
+                <div class="text-[10px] text-slate-500">Kerusakan tercatat</div>
+              </div>
+              <div class="bg-white rounded-xl border border-amber-300 p-4 text-center">
+                <div class="text-3xl font-extrabold text-amber-700">${cntOther}</div>
+                <div class="text-xs font-semibold text-amber-700 mt-1">🟡 Lainnya</div>
+                <div class="text-[10px] text-slate-500">Inspeksi/Gejala/dst</div>
+              </div>
+            </div>`;
+
+          const histMax = Math.max(1, ...histMonths.map((m) => m.events.length));
+          const histMonthCard = (m) => {
+            const lbl = m.date.toLocaleDateString('id-ID', { month: 'short', year: '2-digit' });
+            const isCurrent = m.ym === now.toISOString().slice(0, 7);
+            const isSelected = m.ym === (calFilter.startMonth || now.toISOString().slice(0, 7));
+            const barWidth = (m.events.length / histMax) * 100;
+            return `<button onclick="selectCalMonth('${m.ym}')"
+              class="rounded-xl border-2 p-3 text-left transition hover:shadow-md ${isSelected ? 'border-navy bg-navy/5' : 'border-slate-200 bg-white'}">
+              <div class="flex items-center justify-between mb-2">
+                <div class="font-bold text-sm ${isCurrent ? 'text-navy' : 'text-slate-700'}">${escapeHtml(lbl)}</div>
+                ${isCurrent ? '<span class="text-[10px] px-1.5 py-0.5 rounded bg-navy text-white">NOW</span>' : ''}
+              </div>
+              <div class="text-2xl font-extrabold ${m.events.length === 0 ? 'text-slate-300' : 'text-slate-900'}">${m.events.length}</div>
+              <div class="text-[10px] text-slate-500 mb-2">kejadian</div>
+              <div class="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                <div class="h-full bg-navy" style="width:${barWidth}%"></div>
+              </div>
+            </button>`;
+          };
+          monthsGrid = `<div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2.5">${histMonths.map(histMonthCard).join('')}</div>`;
+
+          const histSelectedYM = calFilter.startMonth || now.toISOString().slice(0, 7);
+          const histSelected = histMonths.find((m) => m.ym === histSelectedYM) || histMonths[histMonths.length - 1];
+          const histMonthLabel = histSelected ? histSelected.date.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }) : '';
+          const histSorted = (histSelected?.events || []).slice().sort((a, b) => (b.start_at || '').localeCompare(a.start_at || ''));
+
+          const catBadge = (d) => {
+            if (d.category === 'pm') {
+              const map = { PM: { icon: '🟢', label: 'PM' }, TOH: { icon: '🟡', label: 'TOH' }, GOH: { icon: '🔴', label: 'GOH' } };
+              const m2 = map[d.subKind] || map.PM;
+              return `<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700">${m2.icon} ${m2.label}</span>`;
+            }
+            if (d.category === 'breakdown') return `<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700">💥 Breakdown</span>`;
+            if (d.category === 'troubleshoot') return `<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-orange-100 text-orange-700">🔧 Troubleshoot</span>`;
+            if (d.category === 'inspeksi_terjadwal') return `<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">🔒 Inspeksi</span>`;
+            if (d.category === 'tunggu_spare') return `<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-700">⏳ Tunggu Spare</span>`;
+            if (d.category === 'gejala') return `<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700">🟡 Gejala</span>`;
+            return `<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-700">${escapeHtml(DT_CAT[d.category] || d.category)}</span>`;
+          };
+          const durText = (d) => {
+            if (!d.end_at) return '<span class="text-amber-600 font-semibold">Ongoing</span>';
+            const h = Math.round((new Date(d.end_at) - new Date(d.start_at)) / 3600000);
+            return `${h}j`;
+          };
+          const histRows = histSorted.map((d, i) => `
+            <tr class="border-b border-slate-100 hover:bg-slate-50 cursor-pointer" onclick="setEquipmentView('detail','${d.equipment_id}'); navigate('equipment')">
+              <td class="px-3 py-2 text-sm text-slate-500">${i + 1}</td>
+              <td class="px-3 py-2 text-sm"><div class="font-mono font-bold text-navy">${escapeHtml(d.equipment_tag || '-')}</div><div class="text-xs text-slate-500">${escapeHtml(d.equipment_name || '')}</div></td>
+              <td class="px-3 py-2 text-sm text-slate-600 whitespace-nowrap">${escapeHtml(d.unit_name || '-')}</td>
+              <td class="px-3 py-2 text-center whitespace-nowrap">${catBadge(d)}</td>
+              <td class="px-3 py-2 text-sm text-center whitespace-nowrap">${fmtDate((d.start_at || '').slice(0, 10))}</td>
+              <td class="px-3 py-2 text-sm text-center whitespace-nowrap">${durText(d)}</td>
+              <td class="px-3 py-2 text-sm text-slate-600 max-w-xs truncate" title="${escapeHtml(d.notes || '')}">${escapeHtml(d.notes || '-')}</td>
+            </tr>`).join('');
+
+          detailContent = `
+            <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+              <div class="px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between flex-wrap gap-2">
+                <h4 class="font-bold text-slate-800">🕐 Riwayat bulan: <span class="text-navy">${escapeHtml(histMonthLabel)}</span> (${histSorted.length} kejadian)</h4>
+                <span class="text-xs text-slate-500">Klik bulan di atas untuk ganti · Klik baris → buka Detail Equipment</span>
+              </div>
+              ${histSorted.length ? `
+                <div class="overflow-x-auto"><table class="w-full">
+                  <thead><tr class="bg-slate-50 text-left text-xs font-bold text-slate-600 border-b border-slate-200">
+                    <th class="px-3 py-2">#</th>
+                    <th class="px-3 py-2">Equipment</th>
+                    <th class="px-3 py-2">Rig</th>
+                    <th class="px-3 py-2 text-center">Kategori</th>
+                    <th class="px-3 py-2 text-center">Tanggal</th>
+                    <th class="px-3 py-2 text-center">Durasi</th>
+                    <th class="px-3 py-2">Catatan</th>
+                  </tr></thead>
+                  <tbody>${histRows}</tbody>
+                </table></div>
+              ` : `<div class="p-8 text-center text-slate-400 text-sm">Tidak ada kejadian di bulan ini.</div>`}
+            </div>`;
+
+          // Cache buat export (dipakai exportCalendarExcel/print kalau nanti disesuaikan)
+          window.__calendarHistoryEvents = histFiltered;
+
+        } else {
         // 8. Summary KPI
         const totalOverdue = filtered.filter((e) => e.overdue).length;
         const totalUrgent = filtered.filter((e) => !e.overdue && urgencyOf(e).rank === 1).length;
         const totalPlan = filtered.filter((e) => !e.overdue && urgencyOf(e).rank === 2).length;
-        const kpiBar = `
+        kpiBar = `
           <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
             <div class="bg-white rounded-xl border border-red-300 p-4 text-center">
               <div class="text-3xl font-extrabold text-red-700">${totalOverdue}</div>
@@ -14780,13 +14940,12 @@
           </button>`;
         };
 
-        const monthsGrid = `
+        monthsGrid = `
           <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2.5">
             ${months.map(monthCard).join('')}
           </div>`;
 
         // 10. Detail content tergantung viewMode
-        let detailContent = '';
         const selectedYM = calFilter.startMonth || now.toISOString().slice(0, 7);
         const selected = months.find((m) => m.ym === selectedYM) || months[0];
         const monthLabel = selected ? selected.date.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }) : '';
@@ -14907,16 +15066,20 @@
               ` : `<div class="p-8 text-center text-slate-400 text-sm">Tidak ada event di bulan ini.</div>`}
             </div>`;
         }
+        } // tutup else (mode proyeksi: month/rig/urgency)
 
-        // 11. Note tentang HM rate
-        const note = `
+        // 11. Note — beda teks untuk Riwayat vs proyeksi
+        const note = calFilter.viewMode === 'history' ? `
+          <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-600">
+            💡 <b>Riwayat</b> menampilkan kejadian AKTUAL yang sudah tercatat (PM/TOH/GOH selesai, breakdown, troubleshoot, inspeksi, dst) — bukan proyeksi. Data 12 bulan terakhir.
+          </div>` : `
           <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800">
             💡 <b>Catatan proyeksi:</b> Tgl estimasi dihitung dgn asumsi <b>8 jam/hari operasi</b>. Equipment dgn HM rate berbeda → tgl bisa shift. Aktual rate akan ditampilkan kalau Logbook HM trend sudah cukup banyak (~30 hari data).
           </div>`;
 
         // Susun output sesuai viewMode
         let mainContent = '';
-        if (calFilter.viewMode === 'month') {
+        if (calFilter.viewMode === 'month' || calFilter.viewMode === 'history') {
           mainContent = monthsGrid + '<div class="mt-4"></div>' + detailContent;
         } else {
           mainContent = detailContent;
