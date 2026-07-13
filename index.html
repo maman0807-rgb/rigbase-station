@@ -14553,7 +14553,9 @@
           historyEvents = rows.map((d) => {
             let subKind = null;
             if (d.category === 'pm') {
-              const m = /^(PM|TOH|GOH)\b/.exec(d.notes || '');
+              // Label PM bervariasi: PM3/PM4/PM5/PM6/GOH/PM?/PM-500HM (lihat getPMType & _pmType).
+              // Ambil kata pertama apa adanya dari notes, bukan cocokkan daftar tetap.
+              const m = /^(\S+)/.exec((d.notes || '').trim());
               subKind = m ? m[1] : 'PM';
             }
             return { ...d, subKind };
@@ -14832,9 +14834,12 @@
 
           const catBadge = (d) => {
             if (d.category === 'pm') {
-              const map = { PM: { icon: '🟢', label: 'PM' }, TOH: { icon: '🟡', label: 'TOH' }, GOH: { icon: '🔴', label: 'GOH' } };
-              const m2 = map[d.subKind] || map.PM;
-              return `<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700">${m2.icon} ${m2.label}</span>`;
+              // Label asli dari notes (PM3/PM4/PM5/PM6/GOH/PM?/PM-500HM dst) — GOH ditandai merah (overhaul besar), sisanya hijau.
+              const label = d.subKind || 'PM';
+              const isGOH = /^GOH/i.test(label);
+              const icon = isGOH ? '🔴' : '🟢';
+              const cls = isGOH ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700';
+              return `<span class="px-2 py-0.5 rounded-full text-xs font-semibold ${cls}">${icon} ${escapeHtml(label)}</span>`;
             }
             if (d.category === 'breakdown') return `<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700">💥 Breakdown</span>`;
             if (d.category === 'troubleshoot') return `<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-orange-100 text-orange-700">🔧 Troubleshoot</span>`;
