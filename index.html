@@ -660,6 +660,13 @@
       try { return new Date(d).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }); }
       catch { return d; }
     }
+    // Ekstrak "YYYY-MM" dari Date object berdasar komponen LOKAL (bukan toISOString/UTC).
+    // WAJIB dipakai untuk label bulan yang dibangun via `new Date(y, m, 1)` — toISOString()
+    // di timezone WIB (UTC+7) menggeser tanggal 1 pukul 00:00 lokal jadi tanggal terakhir
+    // bulan sebelumnya jam 17:00 UTC, sehingga label bulan mundur 1 (bug: klik Juli tampil Juni).
+    function ymLocal(d) {
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    }
     function fmtCurrency(n) {
       if (n == null || n === '') return '—';
       return 'Rp ' + Number(n).toLocaleString('id-ID');
@@ -14670,7 +14677,7 @@
         const months = [];
         for (let i = 0; i < 12; i++) {
           const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
-          const ym = d.toISOString().slice(0, 7);
+          const ym = ymLocal(d);
           months.push({ ym, date: d, events: byMonth[ym] || [] });
         }
 
@@ -14766,7 +14773,7 @@
           const histMonths = [];
           for (let i = 11; i >= 0; i--) {
             const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-            const ym = d.toISOString().slice(0, 7);
+            const ym = ymLocal(d);
             histMonths.push({ ym, date: d, events: histByMonth[ym] || [] });
           }
 
@@ -14800,8 +14807,8 @@
           const histMax = Math.max(1, ...histMonths.map((m) => m.events.length));
           const histMonthCard = (m) => {
             const lbl = m.date.toLocaleDateString('id-ID', { month: 'short', year: '2-digit' });
-            const isCurrent = m.ym === now.toISOString().slice(0, 7);
-            const isSelected = m.ym === (calFilter.startMonth || now.toISOString().slice(0, 7));
+            const isCurrent = m.ym === ymLocal(now);
+            const isSelected = m.ym === (calFilter.startMonth || ymLocal(now));
             const barWidth = (m.events.length / histMax) * 100;
             return `<button onclick="selectCalMonth('${m.ym}')"
               class="rounded-xl border-2 p-3 text-left transition hover:shadow-md ${isSelected ? 'border-navy bg-navy/5' : 'border-slate-200 bg-white'}">
@@ -14818,7 +14825,7 @@
           };
           monthsGrid = `<div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2.5">${histMonths.map(histMonthCard).join('')}</div>`;
 
-          const histSelectedYM = calFilter.startMonth || now.toISOString().slice(0, 7);
+          const histSelectedYM = calFilter.startMonth || ymLocal(now);
           const histSelected = histMonths.find((m) => m.ym === histSelectedYM) || histMonths[histMonths.length - 1];
           const histMonthLabel = histSelected ? histSelected.date.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }) : '';
           const histSorted = (histSelected?.events || []).slice().sort((a, b) => (b.start_at || '').localeCompare(a.start_at || ''));
@@ -14910,8 +14917,8 @@
         const maxEventsInMonth = Math.max(1, ...months.map((m) => m.events.length));
         const monthCard = (m) => {
           const lbl = m.date.toLocaleDateString('id-ID', { month: 'short', year: '2-digit' });
-          const isCurrent = m.ym === now.toISOString().slice(0, 7);
-          const isSelected = m.ym === (calFilter.startMonth || now.toISOString().slice(0, 7));
+          const isCurrent = m.ym === ymLocal(now);
+          const isSelected = m.ym === (calFilter.startMonth || ymLocal(now));
           const overdueCount = m.events.filter((e) => e.overdue).length;
           const planCount = m.events.filter((e) => !e.overdue && (e.kind === 'PM' || e.kind === 'TOH' || e.kind === 'GOH')).length;
           const certCount = m.events.filter((e) => e.kind === 'SKPI' || e.kind === 'COC').length;
@@ -14946,7 +14953,7 @@
           </div>`;
 
         // 10. Detail content tergantung viewMode
-        const selectedYM = calFilter.startMonth || now.toISOString().slice(0, 7);
+        const selectedYM = calFilter.startMonth || ymLocal(now);
         const selected = months.find((m) => m.ym === selectedYM) || months[0];
         const monthLabel = selected ? selected.date.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }) : '';
 
@@ -15148,14 +15155,14 @@
       const events = window.__calendarEvents || [];
       if (!events.length) { toast('Tidak ada event untuk dicetak.', 'warn'); return; }
       const now = new Date();
-      const currentYM = (calFilter.startMonth || now.toISOString().slice(0, 7));
+      const currentYM = (calFilter.startMonth || ymLocal(now));
       // Build list bulan unik dari events (sorted)
       const ymSet = new Set();
       events.forEach((e) => { if (e.date) ymSet.add(e.date.slice(0, 7)); });
       // Plus 12 bulan dari sekarang
       for (let i = 0; i < 12; i++) {
         const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
-        ymSet.add(d.toISOString().slice(0, 7));
+        ymSet.add(ymLocal(d));
       }
       const ymList = [...ymSet].sort();
       // Build list tahun unik
@@ -15291,12 +15298,12 @@
       } else if (scope === 'year' && scopeData) {
         for (let m = 0; m < 12; m++) {
           const d = new Date(Number(scopeData), m, 1);
-          months.push({ ym: d.toISOString().slice(0, 7), date: d, events: [] });
+          months.push({ ym: ymLocal(d), date: d, events: [] });
         }
       } else {
         for (let i = 0; i < 12; i++) {
           const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
-          months.push({ ym: d.toISOString().slice(0, 7), date: d, events: [] });
+          months.push({ ym: ymLocal(d), date: d, events: [] });
         }
       }
       events.forEach((e) => {
