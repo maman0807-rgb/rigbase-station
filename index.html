@@ -15120,6 +15120,7 @@
     window.selectCalMonth = selectCalMonth;
 
     function exportCalendarExcel() {
+      if (calFilter.viewMode === 'history') { exportCalendarHistoryExcel(); return; }
       const events = window.__calendarEvents || [];
       if (!events.length) { toast('Tidak ada event untuk di-export.', 'warn'); return; }
       // Group by month
@@ -15155,8 +15156,40 @@
     }
     window.exportCalendarExcel = exportCalendarExcel;
 
+    function exportCalendarHistoryExcel() {
+      const events = window.__calendarHistoryEvents || [];
+      if (!events.length) { toast('Tidak ada riwayat untuk di-export.', 'warn'); return; }
+      const byMonth = {};
+      events.forEach((d) => {
+        const ym = (d.start_at || '').slice(0, 7);
+        if (!byMonth[ym]) byMonth[ym] = [];
+        byMonth[ym].push(d);
+      });
+      const headers = ['Bulan', 'Tag', 'Nama Equipment', 'Rig', 'Kategori', 'Tanggal', 'Durasi', 'Catatan'];
+      const rows = [headers];
+      Object.keys(byMonth).sort().forEach((ym) => {
+        byMonth[ym].sort((a, b) => (a.start_at || '').localeCompare(b.start_at || '')).forEach((d) => {
+          const monthLbl = new Date(ym + '-01').toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
+          const catLbl = d.category === 'pm' ? (d.subKind || 'PM') : (DT_CAT[d.category] || d.category);
+          const durTxt = d.end_at ? `${Math.round((new Date(d.end_at) - new Date(d.start_at)) / 3600000)} jam` : 'Ongoing';
+          rows.push([monthLbl, d.equipment_tag || '', d.equipment_name || '', d.unit_name || '', catLbl, (d.start_at || '').slice(0, 10), durTxt, d.notes || '']);
+        });
+      });
+      const csv = rows.map((r) => r.map((c) => `"${String(c || '').replace(/"/g, '""')}"`).join(',')).join('\n');
+      const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `riwayat-maintenance-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast('Excel/CSV ter-download.', 'success');
+    }
+    window.exportCalendarHistoryExcel = exportCalendarHistoryExcel;
+
     // Modal scope picker untuk print Calendar — pilih bulan/tahun/semua
     function openPrintCalendarModal() {
+      if (calFilter.viewMode === 'history') { openPrintCalendarHistoryModal(); return; }
       const events = window.__calendarEvents || [];
       if (!events.length) { toast('Tidak ada event untuk dicetak.', 'warn'); return; }
       const now = new Date();
@@ -15475,6 +15508,236 @@
       });
     }
     window.cetakCalendarReport = cetakCalendarReport;
+
+    // Modal scope picker untuk print Riwayat (bukan proyeksi) — sumber data window.__calendarHistoryEvents
+    function openPrintCalendarHistoryModal() {
+      const events = window.__calendarHistoryEvents || [];
+      if (!events.length) { toast('Tidak ada riwayat untuk dicetak.', 'warn'); return; }
+      const now = new Date();
+      const currentYM = (calFilter.startMonth || ymLocal(now));
+      const ymSet = new Set();
+      events.forEach((d) => { if (d.start_at) ymSet.add((d.start_at || '').slice(0, 7)); });
+      const ymList = [...ymSet].sort();
+      const yearSet = new Set();
+      ymList.forEach((ym) => yearSet.add(ym.slice(0, 4)));
+      const yearList = [...yearSet].sort();
+
+      const monthOptions = ymList.map((ym) => {
+        const d = new Date(ym + '-01');
+        const lbl = d.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
+        const cnt = events.filter((d2) => (d2.start_at || '').startsWith(ym)).length;
+        return `<option value="${ym}" ${ym === currentYM ? 'selected' : ''}>${lbl} (${cnt} kejadian)</option>`;
+      }).join('');
+
+      const yearOptions = yearList.map((y) => {
+        const cnt = events.filter((d2) => (d2.start_at || '').startsWith(y)).length;
+        return `<option value="${y}" ${y === String(now.getFullYear()) ? 'selected' : ''}>Tahun ${y} (${cnt} kejadian)</option>`;
+      }).join('');
+
+      const body = `
+        <div class="space-y-3">
+          <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-800">
+            🖨 Pilih cakupan riwayat yg akan dicetak — kejadian AKTUAL (PM/TOH/GOH selesai, breakdown, troubleshoot, dst), bukan proyeksi.
+          </div>
+          <div class="space-y-2">
+            <label class="flex items-start gap-3 p-3 border-2 border-slate-200 rounded-lg hover:bg-slate-50 cursor-pointer has-[:checked]:border-navy has-[:checked]:bg-navy/5">
+              <input type="radio" name="print-hist-scope" value="month" checked class="mt-1">
+              <div class="flex-1">
+                <div class="font-semibold text-slate-800">📅 Bulan tertentu saja</div>
+                <div class="text-xs text-slate-500 mt-0.5">Cetak 1 bulan — cocok untuk laporan bulanan ke management</div>
+                <select id="ps-hist-month" class="mt-2 w-full px-3 py-1.5 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-navy">
+                  ${monthOptions}
+                </select>
+              </div>
+            </label>
+            <label class="flex items-start gap-3 p-3 border-2 border-slate-200 rounded-lg hover:bg-slate-50 cursor-pointer has-[:checked]:border-navy has-[:checked]:bg-navy/5">
+              <input type="radio" name="print-hist-scope" value="year" class="mt-1">
+              <div class="flex-1">
+                <div class="font-semibold text-slate-800">📆 Sepanjang tahun</div>
+                <div class="text-xs text-slate-500 mt-0.5">Cetak 12 bulan dlm tahun terpilih</div>
+                <select id="ps-hist-year" class="mt-2 w-full px-3 py-1.5 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-navy">
+                  ${yearOptions}
+                </select>
+              </div>
+            </label>
+            <label class="flex items-start gap-3 p-3 border-2 border-slate-200 rounded-lg hover:bg-slate-50 cursor-pointer has-[:checked]:border-navy has-[:checked]:bg-navy/5">
+              <input type="radio" name="print-hist-scope" value="all" class="mt-1">
+              <div class="flex-1">
+                <div class="font-semibold text-slate-800">🌐 Semua 12 bulan terakhir</div>
+                <div class="text-xs text-slate-500 mt-0.5">Cetak semua riwayat yang termuat (rolling 12 bulan terakhir)</div>
+              </div>
+            </label>
+          </div>
+        </div>`;
+      const footer = `
+        <button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
+        <button onclick="submitPrintCalendarHistory()" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy-700 text-white text-sm font-semibold">🖨 Generate PDF</button>`;
+      openModal({ title: '🖨 Cetak Riwayat Maintenance — Pilih Scope', body, footer, maxWidth: 'max-w-md' });
+    }
+    window.openPrintCalendarHistoryModal = openPrintCalendarHistoryModal;
+
+    function submitPrintCalendarHistory() {
+      const scope = document.querySelector('input[name="print-hist-scope"]:checked')?.value || 'all';
+      let scopeData = null;
+      if (scope === 'month') scopeData = document.getElementById('ps-hist-month')?.value;
+      else if (scope === 'year') scopeData = document.getElementById('ps-hist-year')?.value;
+      closeModal();
+      cetakCalendarHistoryReport(scope, scopeData);
+    }
+    window.submitPrintCalendarHistory = submitPrintCalendarHistory;
+
+    // Cetak Riwayat Maintenance — kejadian AKTUAL dari downtime_events (bukan proyeksi)
+    function cetakCalendarHistoryReport(scope = 'all', scopeData = null) {
+      const allEvents = window.__calendarHistoryEvents || [];
+      if (!allEvents.length) { toast('Tidak ada riwayat untuk dicetak.', 'warn'); return; }
+
+      let events = allEvents;
+      let scopeLabel = '12 Bulan Terakhir';
+      if (scope === 'month' && scopeData) {
+        events = allEvents.filter((d) => (d.start_at || '').startsWith(scopeData));
+        const d = new Date(scopeData + '-01');
+        scopeLabel = 'Bulan ' + d.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
+      } else if (scope === 'year' && scopeData) {
+        events = allEvents.filter((d) => (d.start_at || '').startsWith(scopeData));
+        scopeLabel = 'Tahun ' + scopeData;
+      }
+      if (!events.length) { toast('Tidak ada riwayat untuk periode terpilih.', 'warn'); return; }
+
+      const now = new Date();
+      const filterRig = calFilter.unit_id ? (state.parentUnits.find(u => u.id == calFilter.unit_id)?.name || '-') : 'Semua Rig';
+
+      const cntPM = events.filter((d) => d.category === 'pm').length;
+      const cntFail = events.filter((d) => d.category === 'breakdown' || d.category === 'troubleshoot').length;
+      const cntOther = events.length - cntPM - cntFail;
+
+      const summary = `<div class="cards">
+        <div class="card navy"><div class="num">${events.length}</div><div class="lbl">📋 TOTAL KEJADIAN</div></div>
+        <div class="card green"><div class="num">${cntPM}</div><div class="lbl">🟢 PM/TOH/GOH</div></div>
+        <div class="card red"><div class="num">${cntFail}</div><div class="lbl">💥 Breakdown/TS</div></div>
+        <div class="card amber"><div class="num">${cntOther}</div><div class="lbl">🟡 Lainnya</div></div>
+      </div>`;
+
+      const intro = `<p>Laporan riwayat maintenance AKTUAL dari eRAMHoist — semua kejadian yang sudah tercatat (PM/TOH/GOH selesai, breakdown, troubleshoot, inspeksi terjadwal, dst), bukan proyeksi.</p>
+        <p><b>Periode laporan:</b> ${escapeHtml(scopeLabel)}<br>
+        <b>Filter aktif:</b> ${escapeHtml(filterRig)}<br>
+        <b>Dicetak:</b> ${now.toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })} oleh ${escapeHtml(state.profile?.full_name || state.profile?.email || '-')}</p>`;
+
+      // Group by month
+      const byMonth = {};
+      events.forEach((d) => {
+        const ym = (d.start_at || '').slice(0, 7);
+        if (!byMonth[ym]) byMonth[ym] = [];
+        byMonth[ym].push(d);
+      });
+      const sortedYMs = Object.keys(byMonth).sort();
+
+      const catLabel = (d) => {
+        if (d.category === 'pm') return d.subKind || 'PM';
+        if (d.category === 'breakdown') return 'Breakdown';
+        if (d.category === 'troubleshoot') return 'Troubleshoot';
+        if (d.category === 'inspeksi_terjadwal') return 'Inspeksi Terjadwal';
+        if (d.category === 'tunggu_spare') return 'Tunggu Spare';
+        if (d.category === 'gejala') return 'Gejala';
+        return d.category || '-';
+      };
+      const durText = (d) => {
+        if (!d.end_at) return 'Ongoing';
+        const h = Math.round((new Date(d.end_at) - new Date(d.start_at)) / 3600000);
+        return `${h} jam`;
+      };
+
+      const monthSummaryRows = sortedYMs.map((ym, i) => {
+        const items = byMonth[ym];
+        const lbl = new Date(ym + '-01').toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
+        const pm = items.filter((d) => d.category === 'pm').length;
+        const fail = items.filter((d) => d.category === 'breakdown' || d.category === 'troubleshoot').length;
+        return `<tr>
+          <td style="text-align:center">${i + 1}</td>
+          <td><b>${escapeHtml(lbl)}</b></td>
+          <td style="text-align:center;font-weight:bold">${items.length}</td>
+          <td style="text-align:center;color:${pm > 0 ? '#16a34a' : '#94a3b8'}">${pm || '—'}</td>
+          <td style="text-align:center;color:${fail > 0 ? '#dc2626' : '#94a3b8'}">${fail || '—'}</td>
+        </tr>`;
+      }).join('');
+      const monthSummaryTable = `
+        <h3>📅 Ringkasan Distribusi Kejadian per Bulan</h3>
+        <table>
+          <thead><tr><th>No</th><th>Bulan</th><th>Total</th><th>🟢 PM/TOH/GOH</th><th>💥 Breakdown/TS</th></tr></thead>
+          <tbody>${monthSummaryRows || '<tr><td colspan="5" style="text-align:center">Tidak ada kejadian</td></tr>'}</tbody>
+        </table>`;
+
+      const perBulanDetail = sortedYMs.map((ym) => {
+        const items = byMonth[ym].slice().sort((a, b) => (b.start_at || '').localeCompare(a.start_at || ''));
+        const lbl = new Date(ym + '-01').toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
+        const rows = items.map((d, i) => `<tr>
+          <td style="text-align:center">${i + 1}</td>
+          <td><b>${escapeHtml(d.equipment_tag || '-')}</b><br><span style="color:#64748b;font-size:10px">${escapeHtml(d.equipment_name || '')}</span></td>
+          <td style="text-align:center;font-size:11px">${escapeHtml(d.unit_name || '-')}</td>
+          <td style="text-align:center;font-weight:bold">${escapeHtml(catLabel(d))}</td>
+          <td style="text-align:center;font-size:11px;white-space:nowrap">${fmtDate((d.start_at || '').slice(0, 10))}</td>
+          <td style="text-align:center;font-size:11px;white-space:nowrap">${durText(d)}</td>
+          <td style="font-size:11px;line-height:1.4">${escapeHtml(d.notes || '-')}</td>
+        </tr>`).join('');
+        return `
+          <h3 style="color:#11335d;margin-top:18px;margin-bottom:8px;page-break-after:avoid">📅 ${escapeHtml(lbl)} — ${items.length} kejadian</h3>
+          <table style="page-break-inside:avoid">
+            <thead><tr>
+              <th style="width:3%">No</th>
+              <th style="width:16%">Equipment</th>
+              <th style="width:12%">Rig</th>
+              <th style="width:10%">Kategori</th>
+              <th style="width:11%">Tanggal</th>
+              <th style="width:9%">Durasi</th>
+              <th>Catatan</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>`;
+      }).join('');
+      const perBulanSection = `<h2 style="margin-top:24px;color:#11335d;border-top:2px solid #11335d;padding-top:10px">📋 DETAIL RIWAYAT PER BULAN</h2>${perBulanDetail}`;
+
+      // Per-rig breakdown
+      const byRig = {};
+      events.forEach((d) => {
+        const key = d.unit_name || '(tanpa rig)';
+        if (!byRig[key]) byRig[key] = { name: key, items: [] };
+        byRig[key].items.push(d);
+      });
+      const rigSortedKeys = Object.keys(byRig).sort((a, b) => byRig[b].items.length - byRig[a].items.length);
+      const rigRows = rigSortedKeys.map((k, i) => {
+        const g = byRig[k];
+        const pm = g.items.filter((d) => d.category === 'pm').length;
+        const fail = g.items.filter((d) => d.category === 'breakdown' || d.category === 'troubleshoot').length;
+        return `<tr>
+          <td style="text-align:center">${i + 1}</td>
+          <td><b>${escapeHtml(g.name)}</b></td>
+          <td style="text-align:center;font-weight:bold">${g.items.length}</td>
+          <td style="text-align:center;color:${pm > 0 ? '#16a34a' : '#94a3b8'}">${pm || '—'}</td>
+          <td style="text-align:center;color:${fail > 0 ? '#dc2626' : '#94a3b8'}">${fail || '—'}</td>
+        </tr>`;
+      }).join('');
+      const rigTable = `
+        <h3 style="margin-top:20px">🏭 Distribusi Kejadian per Rig</h3>
+        <table>
+          <thead><tr><th>No</th><th>Rig / Unit</th><th>Total</th><th>🟢 PM/TOH/GOH</th><th>💥 Breakdown/TS</th></tr></thead>
+          <tbody>${rigRows}</tbody>
+        </table>`;
+
+      const table = monthSummaryTable + rigTable + perBulanSection;
+      const kesimpulan = `<p><i>Catatan: laporan ini menampilkan kejadian aktual yang sudah tercatat di sistem, bukan proyeksi kebutuhan maintenance ke depan.</i></p>`;
+      const chart = (typeof chartBars === 'function') ? chartBars('Distribusi per Kategori', [
+        { label: 'PM/TOH/GOH', value: cntPM, color: '#16a34a' },
+        { label: 'Breakdown/TS', value: cntFail, color: '#dc2626' },
+        { label: 'Lainnya', value: cntOther, color: '#d97706' },
+      ]) : '';
+
+      const titleScope = scope === 'month' ? scopeLabel : scope === 'year' ? `Tahun ${scopeData}` : '12 Bulan Terakhir';
+      openSignDialog({
+        title: `Riwayat Maintenance ${titleScope} — ${filterRig}`,
+        type: 'CALENDAR',
+        summary, chart, intro, table, kesimpulan,
+      });
+    }
+    window.cetakCalendarHistoryReport = cetakCalendarHistoryReport;
 
     // ============================================================
     // REVISI HM COUNTER — proper audit trail + Telegram alert
