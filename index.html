@@ -7561,7 +7561,7 @@
                       </span>
                     </td>
                     <td class="px-3 py-2.5 text-center">
-                      <button onclick="showLepasAnakModal('${r.pemasangan_id}','${escapeHtml(r.anak_tag)}',${r.punya_meter_sendiri},${eq.running_hours||0},${r.anak_hm_sekarang||0})"
+                      <button onclick="showLepasAnakModal('${r.pemasangan_id}','${escapeHtml(r.anak_tag)}',${r.punya_meter_sendiri},${eq.running_hours||0},${r.anak_hm_sekarang||0},'${eq.id}')"
                         class="text-xs text-red-500 hover:text-red-700 font-medium">Lepas</button>
                     </td>
                   </tr>`).join('')}
@@ -7603,7 +7603,7 @@
             const indukHmNow = indukMap[aktifRaw.induk_id]?.running_hours || 0;
             html += `
             <div class="flex justify-end mb-4">
-              <button onclick="showLepasAnakModal('${aktifRaw.id}','${escapeHtml(eq.tag_number)}',${aktifRaw.punya_meter_sendiri},${indukHmNow},${eq.running_hours||0})"
+              <button onclick="showLepasAnakModal('${aktifRaw.id}','${escapeHtml(eq.tag_number)}',${aktifRaw.punya_meter_sendiri},${indukHmNow},${eq.running_hours||0},'${aktifRaw.induk_id}')"
                 class="bg-red-50 border border-red-200 text-red-600 text-xs font-semibold px-4 py-2 rounded-lg hover:bg-red-100">
                 Lepas dari Induk
               </button>
@@ -7732,7 +7732,7 @@
           // Ambil HM anak sekarang kalau numpang (untuk kalkulasi hm_induk_pasang relatif)
           // ilike (bukan eq) — tag_number equipment tidak dipaksa uppercase saat disimpan (lihat submitEquipmentForm),
           // jadi pencarian harus case-insensitive supaya "Trans-Standby-02" tetap ketemu meski dicari "TRANS-STANDBY-02"
-          const { data: anakEqRows, error: anakEqErr } = await state.supabase.from('equipment').select('tag_number, running_hours').ilike('tag_number', anakTag);
+          const { data: anakEqRows, error: anakEqErr } = await state.supabase.from('equipment').select('id, tag_number, running_hours').ilike('tag_number', anakTag);
           if (anakEqErr) throw anakEqErr;
           if (!anakEqRows || anakEqRows.length === 0) throw new Error(`Tag "${anakTag}" tidak ditemukan di database`);
           const anakEq = anakEqRows[0];
@@ -7750,6 +7750,11 @@
           };
           const { error } = await state.supabase.from('pemasangan').insert(payload);
           if (error) throw error;
+          // Sinkron ke sistem "Komponen" (parent_equipment_id) juga — supaya anak yang baru
+          // dipasang otomatis ikut muncul di kartu Komponen induk, bukan cuma di tab Pemasangan.
+          const { error: syncErr } = await state.supabase.from('equipment')
+            .update({ parent_equipment_id: indukId }).eq('id', anakEq.id);
+          if (syncErr) console.warn('Sync parent_equipment_id gagal (non-fatal):', syncErr.message);
           overlay.remove();
           // Refresh tab
           const c = document.getElementById('detail-tab-content');
@@ -7765,7 +7770,7 @@
     window.showPasangAnakModal = showPasangAnakModal;
 
     // Modal: Lepas Anak
-    function showLepasAnakModal(pemasanganId, anakTag, punyaMeterSendiri, indukHmSekarang, anakHmSekarang) {
+    function showLepasAnakModal(pemasanganId, anakTag, punyaMeterSendiri, indukHmSekarang, anakHmSekarang, indukId) {
       const overlay = document.createElement('div');
       overlay.className = 'fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4';
       overlay.innerHTML = `
@@ -7812,6 +7817,13 @@
           else                   update.hm_induk_lepas = Number(indukHmSekarang || 0);
           const { error } = await state.supabase.from('pemasangan').update(update).eq('id', pemasanganId);
           if (error) throw error;
+          // Sinkron balik: hapus parent_equipment_id supaya anak juga hilang dari kartu Komponen induk —
+          // scoped ke induk yang sama, jaga-jaga kalau anak sudah pindah ke induk lain di antara waktu.
+          if (indukId) {
+            const { error: syncErr } = await state.supabase.from('equipment')
+              .update({ parent_equipment_id: null }).eq('tag_number', anakTag).eq('parent_equipment_id', indukId);
+            if (syncErr) console.warn('Sync lepas parent_equipment_id gagal (non-fatal):', syncErr.message);
+          }
           overlay.remove();
           const c = document.getElementById('detail-tab-content');
           if (c) { c.innerHTML = '<div class="text-slate-400">Memuat…</div>'; renderPemasanganTab(window.__currentEq, c); }
