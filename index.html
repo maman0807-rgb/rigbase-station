@@ -15871,6 +15871,20 @@
     async function toggleFollowParentHM(equipmentId, currentValue) {
       if (!isSrMekanikOrAbove()) { toast('Khusus Sr Mekanik ke atas.', 'warn'); return; }
       const newValue = !currentValue;
+      // Guard: Auto-sync (copy mentah HM parent) BENTROK dengan Pemasangan (hitung selisih sejak dipasang).
+      // Kalau equipment ini anak aktif di pemasangan, Auto-sync bakal nimpa hm_induk_pasang/hm_meter_pasang
+      // yang sudah dihitung dengan benar — jangan izinkan aktif bareng.
+      if (newValue) {
+        const { data: eqRow } = await state.supabase.from('equipment').select('tag_number').eq('id', equipmentId).maybeSingle();
+        if (eqRow?.tag_number) {
+          const { data: activePemasangan } = await state.supabase.from('pemasangan')
+            .select('id, induk_id').eq('anak_tag', eqRow.tag_number).is('tanggal_lepas', null).maybeSingle();
+          if (activePemasangan) {
+            toast('Tidak bisa aktifkan Auto-sync — equipment ini sudah jadi anak aktif di tab Pemasangan. Kedua sistem tidak boleh jalan bareng (Auto-sync akan menimpa hitungan HM selisih Pemasangan). Lepas dulu dari Pemasangan kalau memang mau pakai Auto-sync.', 'error');
+            return;
+          }
+        }
+      }
       const confirmMsg = newValue
         ? 'Setiap kali parent equipment HM di-update (Logbook / Revisi HM), equipment ini AKAN otomatis ikut. Cocok untuk TRANS/DW yang jalan bareng engine.'
         : 'Equipment ini tidak akan otomatis follow HM parent lagi. HM harus di-update terpisah via Logbook atau Revisi HM manual.';
