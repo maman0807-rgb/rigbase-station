@@ -7730,12 +7730,18 @@
         errEl.classList.add('hidden');
         try {
           // Ambil HM anak sekarang kalau numpang (untuk kalkulasi hm_induk_pasang relatif)
-          const { data: anakEq } = await state.supabase.from('equipment').select('running_hours').eq('tag_number', anakTag).maybeSingle();
-          if (!anakEq) throw new Error(`Tag "${anakTag}" tidak ditemukan di database`);
+          // ilike (bukan eq) — tag_number equipment tidak dipaksa uppercase saat disimpan (lihat submitEquipmentForm),
+          // jadi pencarian harus case-insensitive supaya "Trans-Standby-02" tetap ketemu meski dicari "TRANS-STANDBY-02"
+          const { data: anakEqRows, error: anakEqErr } = await state.supabase.from('equipment').select('tag_number, running_hours').ilike('tag_number', anakTag);
+          if (anakEqErr) throw anakEqErr;
+          if (!anakEqRows || anakEqRows.length === 0) throw new Error(`Tag "${anakTag}" tidak ditemukan di database`);
+          const anakEq = anakEqRows[0];
           const anakHm = Number(anakEq.running_hours || 0);
           const payload = {
             induk_id: indukId,
-            anak_tag: anakTag,
+            // Simpan tag_number PERSIS seperti tersimpan di equipment (bukan versi uppercase input user) —
+            // supaya nanti saat anak dibuka dari detailnya sendiri, .eq('anak_tag', eq.tag_number) tetap match.
+            anak_tag: anakEq.tag_number,
             posisi: posisi || null,
             tanggal_pasang: tgl,
             punya_meter_sendiri: mode === 'sendiri',
