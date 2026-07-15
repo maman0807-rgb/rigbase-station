@@ -2916,9 +2916,13 @@
         const { error: dtErr } = await state.supabase.from('downtime_events').insert(payload);
         if (dtErr) throw dtErr;
 
-        // 2. Update last_pm_hours + last_pm_date → reset counter PM
+        // 2. Update running_hours (samakan dgn bacaan fisik saat PM) + last_pm_hours + last_pm_date → reset counter PM
+        // running_hours WAJIB ikut di-set di sini juga — kalau cuma last_pm_hours, dan running_hours sistem
+        // kebetulan lagi salah/nggak sinkron, hitungan "sisa ke PM" tetap kacau meski PM baru dicatat.
+        const { data: eqBefore } = await state.supabase.from('equipment').select('running_hours').eq('id', equipmentId).maybeSingle();
+        const hmBeforeUpdate = Number(eqBefore?.running_hours || 0);
         const pmDate = startV ? new Date(startV).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
-        const eqUpdate = { last_pm_hours: rhVal, last_pm_date: pmDate };
+        const eqUpdate = { running_hours: rhVal, last_pm_hours: rhVal, last_pm_date: pmDate };
         // Bila GOH → reset last_goh_hours + last_toh_hours (GOH mencakup TOH)
         if (pmType === 'GOH') { eqUpdate.last_goh_hours = rhVal; eqUpdate.last_goh_date = pmDate; eqUpdate.last_toh_hours = rhVal; }
         // Bila TOH → reset last_toh_hours saja
@@ -2927,13 +2931,40 @@
           .from('equipment').update(eqUpdate).eq('id', equipmentId);
         if (eqErr) throw eqErr;
 
-        toast(`${pmType || 'PM'} ${tagNumber} selesai dicatat. Counter HM direset ✅`, 'success');
+        // 3. Catat juga ke tabel logbook (dipakai bareng app Logbook) — supaya operator/mekanik yang buka
+        // app Logbook juga lihat kenapa HM equipment ini berubah, bukan cuma tercatat di eRAMHoist doang.
+        try {
+          await state.supabase.from('logbook').insert({
+            equipment_id:   equipmentId,
+            equipment_name: equipmentName,
+            reporter_id:    state.user?.id || null,
+            reporter_name:  state.profile?.full_name || state.profile?.email || '',
+            reporter_role:  'mekanik',
+            shift_hours:    0,
+            condition:      'baik',
+            temuan:         null,
+            status:         'approved',
+            data: {
+              kind: 'pm',
+              date: new Date(startV).toISOString(),
+              hmBefore: hmBeforeUpdate,
+              hmSaatIni: rhVal,
+              findings: notes || null,
+              source: 'eramhoist_catat_pm',
+            },
+          });
+        } catch (lbErr) {
+          // Non-fatal — PM & running_hours di eRAMHoist tetap sukses walau catatan Logbook gagal
+          console.warn('Insert logbook gagal (non-fatal):', lbErr.message);
+        }
+
+        toast(`${pmType || 'PM'} ${tagNumber} selesai dicatat. Counter HM & running hours direset ✅`, 'success');
         closeModal();
 
         // Refresh state equipment list & dashboard
         if (state.equipmentList) {
           const eq2 = state.equipmentList.find(x => x.id === equipmentId);
-          if (eq2) { eq2.last_pm_hours = rhVal; eq2.last_pm_date = pmDate;
+          if (eq2) { eq2.running_hours = rhVal; eq2.last_pm_hours = rhVal; eq2.last_pm_date = pmDate;
             if (pmType === 'GOH') { eq2.last_goh_hours = rhVal; eq2.last_goh_date = pmDate; eq2.last_toh_hours = rhVal; }
             if (pmType === 'TOH') { eq2.last_toh_hours = rhVal; }
           }
@@ -7094,6 +7125,7 @@
             <h4 class="font-bold text-slate-800">🛠️ Riwayat Maintenance (${logs.length})</h4>
             <div class="flex gap-2 flex-wrap">
               ${isSrMekanikOrAbove() ? `<button onclick="openHMReviseModal('${eq.id}','${escapeHtml(eq.tag_number).replace(/'/g,"&#39;")}',${Number(eq.running_hours) || 0},'${u}')" class="bg-orange-100 hover:bg-orange-200 text-orange-700 px-3 py-1.5 rounded-lg text-sm font-medium" title="Revisi HM kalau counter di unit beda dgn sistem">✏ Revisi HM</button>` : ''}
+              ${isSrMekanikOrAbove() && eq.pm_type !== 'plo' && eq.pm_type !== 'time' ? `<button onclick="showCatatPMModal('${eq.id}','${escapeHtml(eq.tag_number).replace(/'/g,"&#39;")}','${escapeHtml(eq.nama_equipment || '').replace(/'/g,"&#39;")}',${_currentHM},${_eqInterval},'${_nextPmType || ''}')" class="bg-green-100 hover:bg-green-200 text-green-700 px-3 py-1.5 rounded-lg text-sm font-medium" title="Catat PM selesai — bisa diakses kapan saja, tidak perlu nunggu status due di Dashboard">✅ Catat PM Selesai</button>` : ''}
               <button onclick="generateWorkOrderPDF('${eq.id}')" class="bg-purple-100 hover:bg-purple-200 text-purple-700 px-3 py-1.5 rounded-lg text-sm font-medium" title="Generate Work Order PDF utk dibawa ke lapangan">📋 Work Order PDF</button>
               ${isSrMekanikOrAbove() ? `<button onclick="openSnoozeModal('${eq.id}','${escapeHtml(eq.tag_number).replace(/'/g,"&#39;")}')" class="bg-blue-100 hover:bg-blue-200 text-blue-700 px-3 py-1.5 rounded-lg text-sm font-medium" title="Snooze alert sampai action selesai">🔕 Snooze Alert</button>` : ''}
               <button onclick="openMaintenanceModal('${eq.id}')" class="bg-safety hover:bg-safety-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium">+ Tambah</button>
