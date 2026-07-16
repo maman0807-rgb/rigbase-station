@@ -12720,6 +12720,7 @@
       const div = document.createElement('div');
       div.className = 'page space-y-4';
       const pillars = [['reliability', '🛡️ Reliability'], ['availability', '🟢 Availability'], ['trend', '📈 Trend RAM'], ['maintenance', '🛠️ Maintenance'], ['kelayakan', '📋 Kelayakan']];
+      if (state.profile?.role === 'admin') pillars.push(['laporan', '📝 Laporan Harian']);
       div.innerHTML = `
         <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           <div class="flex border-b border-slate-200 overflow-x-auto" id="ram-tabs">
@@ -12739,6 +12740,7 @@
       if (t === 'trend')        { host.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat data trend…</div>'; renderRamTrendPage(host); return; }
       if (t === 'maintenance') { host.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat…</div>'; renderRamMaintenance(host); return; }
       if (t === 'kelayakan') { host.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat…</div>'; renderKelayakanPage(host); return; }
+      if (t === 'laporan') { host.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat…</div>'; renderLaporanHarianPage(host); return; }
       // Pilar Reliability → sub-tab Overview / Stress / FMEA / CSPP
       const sub = [['overview', '📊 Overview'], ['stress', '🚛 Stress'], ['fmea', '⚠️ FMEA'], ['cspp', '📦 CSPP']];
       host.innerHTML = `
@@ -13248,6 +13250,319 @@
         </div>`;
     }
     window.renderKelayakanPage = renderKelayakanPage;
+
+    // ============================================================
+    // LAPORAN HARIAN RAM — daily status report (manual entry + review draft dari bot Telegram)
+    // ============================================================
+    let lhState = { mode: 'list', laporanId: null, entries: [], header: null };
+
+    function lhIsReadonly() {
+      if (lhState.mode === 'create') return false;
+      return !!(lhState.header && lhState.header.status === 'final');
+    }
+
+    async function renderLaporanHarianPage(host) {
+      host = host || document.getElementById('ram-content');
+      if (!host) return;
+      if (lhState.mode === 'detail' && lhState.laporanId) { await lhRenderDetail(host); return; }
+      if (lhState.mode === 'create') { lhRenderEditor(host); return; }
+      await lhRenderList(host);
+    }
+    window.renderLaporanHarianPage = renderLaporanHarianPage;
+
+    async function lhRenderList(host) {
+      const { data: laporanRows, error } = await state.supabase
+        .from('laporan_harian')
+        .select('id, tanggal, tim, status, sumber, created_at')
+        .order('tanggal', { ascending: false })
+        .limit(60);
+      if (error) { host.innerHTML = `<div class="text-red-500 text-sm p-4">Gagal memuat: ${escapeHtml(error.message)}</div>`; return; }
+      const ids = (laporanRows || []).map(r => r.id);
+      const entriesByLaporan = {};
+      if (ids.length) {
+        const { data: allEntries } = await state.supabase
+          .from('laporan_harian_entries')
+          .select('laporan_id, status_kerja, progress_pct, follow_up_items')
+          .in('laporan_id', ids);
+        (allEntries || []).forEach(e => { (entriesByLaporan[e.laporan_id] = entriesByLaporan[e.laporan_id] || []).push(e); });
+      }
+      const draftCount = (laporanRows || []).filter(r => r.status === 'draft').length;
+      host.innerHTML = `
+        <div class="space-y-4">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 class="text-base font-bold text-navy">📝 Laporan Harian RAM</h3>
+              ${draftCount ? `<p class="text-xs text-amber-600 font-semibold mt-0.5">⚠️ ${draftCount} laporan draft menunggu review</p>` : ''}
+            </div>
+            <button onclick="lhStartCreate()" class="px-4 py-2 rounded-lg bg-navy text-white text-sm font-semibold hover:bg-navy/90">+ Buat Laporan Manual</button>
+          </div>
+          <div id="lh-list-body" class="space-y-2"></div>
+        </div>`;
+      const body = host.querySelector('#lh-list-body');
+      if (!laporanRows || !laporanRows.length) {
+        body.innerHTML = '<div class="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-400 text-sm">Belum ada laporan harian.</div>';
+        return;
+      }
+      body.innerHTML = laporanRows.map(r => {
+        const entries = entriesByLaporan[r.id] || [];
+        const cmCount = entries.filter(e => e.status_kerja === 'CM' || e.status_kerja === 'TS').length;
+        const progs = entries.map(e => Number(e.progress_pct)).filter(n => !isNaN(n));
+        const avgProg = progs.length ? Math.round(progs.reduce((a, b) => a + b, 0) / progs.length) : null;
+        const followCount = entries.reduce((a, e) => a + ((e.follow_up_items || []).length), 0);
+        return `<div onclick="lhOpenDetail('${r.id}')" class="bg-white rounded-xl border border-slate-200 p-4 cursor-pointer hover:border-navy/40 hover:shadow-sm transition flex items-center justify-between gap-3">
+          <div>
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="font-semibold text-slate-800">${fmtDate(r.tanggal)}</span>
+              ${r.status === 'draft' ? '<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">DRAFT</span>' : '<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">FINAL</span>'}
+              <span class="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">${r.sumber === 'bot_telegram' ? '🤖 Telegram' : r.sumber === 'bot_whatsapp' ? '🤖 WhatsApp' : '✍️ Manual'}</span>
+            </div>
+            <div class="text-xs text-slate-400 mt-1">${entries.length} unit${cmCount ? ` · ${cmCount} CM/TS aktif` : ''}${avgProg !== null ? ` · rata-rata progress ${avgProg}%` : ''}${followCount ? ` · <span class="text-red-500 font-semibold">${followCount} follow-up</span>` : ''}</div>
+          </div>
+          <span class="text-slate-300">›</span>
+        </div>`;
+      }).join('');
+    }
+
+    function lhBlankEntry() {
+      return { equipment_id: null, equipment_manual_nama: '', site: '', status_kerja: 'Standby', job_desc: '', brand: '', model: '', sn: '', rh: '', waktu_mulai: '', waktu_selesai: '', checklist: [], progress_pct: '', notes: '', follow_up_items: [] };
+    }
+
+    function lhStartCreate() {
+      lhState = { mode: 'create', laporanId: null, entries: [lhBlankEntry()], header: { tanggal: new Date().toISOString().slice(0, 10) } };
+      renderLaporanHarianPage();
+    }
+    window.lhStartCreate = lhStartCreate;
+
+    async function lhOpenDetail(id) {
+      lhState = { mode: 'detail', laporanId: id, entries: [], header: null };
+      renderLaporanHarianPage();
+    }
+    window.lhOpenDetail = lhOpenDetail;
+
+    async function lhRenderDetail(host) {
+      host.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat…</div>';
+      const { data: header, error: e1 } = await state.supabase.from('laporan_harian').select('*').eq('id', lhState.laporanId).single();
+      const { data: entries, error: e2 } = await state.supabase.from('laporan_harian_entries').select('*').eq('laporan_id', lhState.laporanId).order('created_at');
+      if (e1 || e2) { host.innerHTML = `<div class="text-red-500 text-sm p-4">Gagal memuat: ${escapeHtml((e1 || e2).message)}</div>`; return; }
+      lhState.header = header;
+      lhState.entries = (entries || []).map(e => ({ ...e, rh: e.rh ?? '', progress_pct: e.progress_pct ?? '', checklist: e.checklist || [], follow_up_items: e.follow_up_items || [] }));
+      lhRenderEditor(host);
+    }
+
+    function lhRenderEditor(host) {
+      const readonly = lhIsReadonly();
+      const header = lhState.header;
+      const isCreate = lhState.mode === 'create';
+      host.innerHTML = `
+        <div class="space-y-4">
+          <button onclick="lhBackToList()" class="text-sm text-slate-500 hover:text-navy">← Kembali</button>
+          <div class="bg-white rounded-xl border border-slate-200 p-4 flex flex-wrap items-center gap-4">
+            <div>
+              <label class="block text-xs font-semibold text-slate-500 uppercase mb-1">Tanggal</label>
+              <input type="date" id="lh-tanggal" value="${header?.tanggal || new Date().toISOString().slice(0, 10)}" ${isCreate ? '' : 'disabled'} class="border border-slate-300 rounded-lg px-3 py-1.5 text-sm">
+            </div>
+            ${header?.status ? `<div class="text-xs text-slate-400">Sumber: ${header.sumber === 'bot_telegram' ? '🤖 Telegram' : header.sumber === 'bot_whatsapp' ? '🤖 WhatsApp' : '✍️ Manual'} · ${header.status === 'draft' ? 'Draft' : 'Final'}</div>` : ''}
+          </div>
+          ${header?.raw_text ? `<details class="bg-slate-50 rounded-xl border border-slate-200 p-3 text-xs text-slate-500">
+            <summary class="cursor-pointer font-semibold">📄 Teks asli laporan</summary>
+            <pre class="whitespace-pre-wrap mt-2 text-slate-600">${escapeHtml(header.raw_text)}</pre>
+          </details>` : ''}
+          <div id="lh-entries" class="space-y-3"></div>
+          ${!readonly ? `<button onclick="lhAddEntry()" class="text-sm text-navy font-semibold hover:underline">+ Tambah Unit</button>` : ''}
+          <div class="flex items-center gap-2 pt-2 border-t border-slate-200">
+            ${!readonly ? `<button onclick="lhSaveFinal()" class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold">✅ Konfirmasi & Simpan Final</button>` : ''}
+            ${!readonly && !isCreate ? `<button onclick="lhDeleteDraft()" class="px-4 py-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-sm font-semibold">🗑 Hapus Draft</button>` : ''}
+            ${readonly ? `<span class="text-xs text-slate-400">Laporan final tidak bisa diedit lagi.</span>` : ''}
+          </div>
+        </div>`;
+      lhRenderEntriesList(host);
+    }
+
+    function lhBackToList() {
+      lhState = { mode: 'list', laporanId: null, entries: [], header: null };
+      renderLaporanHarianPage();
+    }
+    window.lhBackToList = lhBackToList;
+
+    function lhRenderEntriesList(host) {
+      host = host || document.getElementById('ram-content');
+      const wrap = host && host.querySelector('#lh-entries');
+      if (!wrap) return;
+      const readonly = lhIsReadonly();
+      wrap.innerHTML = lhState.entries.map((e, i) => lhEntryCardHtml(e, i, readonly)).join('') || '<div class="text-slate-400 text-sm text-center py-6">Belum ada unit.</div>';
+    }
+
+    function lhEntryCardHtml(e, i, readonly) {
+      const eqOpts = (state.equipmentList || []).map(eq => `<option value="${eq.id}" ${e.equipment_id === eq.id ? 'selected' : ''}>${escapeHtml(eq.tag_number)} — ${escapeHtml(eq.nama_equipment || '')}</option>`).join('');
+      const statusColors = { Standby: 'bg-slate-100 text-slate-600', Operasi: 'bg-emerald-100 text-emerald-700', CM: 'bg-red-100 text-red-700', PM: 'bg-blue-100 text-blue-700', TS: 'bg-amber-100 text-amber-700', Lainnya: 'bg-slate-100 text-slate-600' };
+      const dis = readonly ? 'disabled' : '';
+      return `<div class="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
+        <div class="flex items-start justify-between gap-2">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 flex-1">
+            <div>
+              <label class="block text-[11px] font-semibold text-slate-500 uppercase mb-1">Equipment</label>
+              <select ${dis} onchange="lhUpdateEntry(${i},'equipment_id',this.value||null)" class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm">
+                <option value="">— Belum ke-match, isi manual di bawah —</option>
+                ${eqOpts}
+              </select>
+              ${!e.equipment_id ? `<input ${dis} value="${escapeHtml(e.equipment_manual_nama || '')}" placeholder="Nama unit manual (mis. Firepump SP 7)" oninput="lhUpdateEntry(${i},'equipment_manual_nama',this.value)" class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm mt-1">` : ''}
+            </div>
+            <div>
+              <label class="block text-[11px] font-semibold text-slate-500 uppercase mb-1">Site</label>
+              <input ${dis} value="${escapeHtml(e.site || '')}" oninput="lhUpdateEntry(${i},'site',this.value)" class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm">
+            </div>
+          </div>
+          ${!readonly ? `<button onclick="lhRemoveEntry(${i})" class="text-red-400 hover:text-red-600 text-sm px-1" title="Hapus unit ini">✕</button>` : ''}
+        </div>
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div>
+            <label class="block text-[11px] font-semibold text-slate-500 uppercase mb-1">Status Kerja</label>
+            <select ${dis} onchange="lhUpdateEntry(${i},'status_kerja',this.value)" class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm ${statusColors[e.status_kerja] || ''}">
+              ${['Standby', 'Operasi', 'CM', 'PM', 'TS', 'Lainnya'].map(s => `<option value="${s}" ${e.status_kerja === s ? 'selected' : ''}>${s}</option>`).join('')}
+            </select>
+          </div>
+          <div>
+            <label class="block text-[11px] font-semibold text-slate-500 uppercase mb-1">RH</label>
+            <input ${dis} type="number" step="0.1" value="${e.rh ?? ''}" oninput="lhUpdateEntry(${i},'rh',this.value)" class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm">
+          </div>
+          <div>
+            <label class="block text-[11px] font-semibold text-slate-500 uppercase mb-1">Progress %</label>
+            <input ${dis} type="number" min="0" max="100" value="${e.progress_pct ?? ''}" oninput="lhUpdateEntry(${i},'progress_pct',this.value)" class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm">
+          </div>
+          <div>
+            <label class="block text-[11px] font-semibold text-slate-500 uppercase mb-1">Brand</label>
+            <input ${dis} value="${escapeHtml(e.brand || '')}" oninput="lhUpdateEntry(${i},'brand',this.value)" class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm">
+          </div>
+        </div>
+        <div>
+          <label class="block text-[11px] font-semibold text-slate-500 uppercase mb-1">Job Desc</label>
+          <input ${dis} value="${escapeHtml(e.job_desc || '')}" oninput="lhUpdateEntry(${i},'job_desc',this.value)" class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm">
+        </div>
+        <div>
+          <label class="block text-[11px] font-semibold text-slate-500 uppercase mb-1">Checklist</label>
+          <div class="space-y-1">
+            ${(e.checklist || []).map((c, ci) => `<div class="flex items-center gap-2">
+              <input type="checkbox" ${c.checked ? 'checked' : ''} ${dis} onchange="lhChecklistToggle(${i},${ci},this.checked)">
+              <input ${dis} value="${escapeHtml(c.item || '')}" oninput="lhChecklistText(${i},${ci},this.value)" class="flex-1 border border-slate-300 rounded-lg px-2 py-1 text-xs">
+              ${!readonly ? `<button onclick="lhChecklistRemove(${i},${ci})" class="text-red-400 hover:text-red-600 text-xs">✕</button>` : ''}
+            </div>`).join('')}
+          </div>
+          ${!readonly ? `<button onclick="lhChecklistAdd(${i})" class="text-xs text-navy hover:underline mt-1">+ item checklist</button>` : ''}
+        </div>
+        <div>
+          <label class="block text-[11px] font-semibold text-slate-500 uppercase mb-1">Catatan</label>
+          <textarea ${dis} rows="2" oninput="lhUpdateEntry(${i},'notes',this.value)" class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm">${escapeHtml(e.notes || '')}</textarea>
+        </div>
+        <div>
+          <label class="block text-[11px] font-semibold text-red-500 uppercase mb-1">⚠️ Follow-up (1 baris = 1 item)</label>
+          <textarea ${dis} rows="2" oninput="lhFollowUpFromText(${i},this.value)" placeholder="mis. ganti bearing pompa pully" class="w-full border border-red-200 rounded-lg px-2 py-1.5 text-sm bg-red-50/40">${(e.follow_up_items || []).join('\n')}</textarea>
+        </div>
+      </div>`;
+    }
+
+    function lhUpdateEntry(i, field, value) {
+      if (!lhState.entries[i]) return;
+      lhState.entries[i][field] = value;
+      if (field === 'equipment_id' && value) {
+        const eq = (state.equipmentList || []).find(x => x.id === value);
+        if (eq) {
+          if (!lhState.entries[i].brand) lhState.entries[i].brand = eq.brand || '';
+          if (!lhState.entries[i].model) lhState.entries[i].model = eq.model || '';
+          if (!lhState.entries[i].sn) lhState.entries[i].sn = eq.serial_number || '';
+        }
+      }
+      if (field === 'equipment_id' || field === 'status_kerja') lhRenderEntriesList();
+    }
+    window.lhUpdateEntry = lhUpdateEntry;
+
+    function lhChecklistToggle(i, ci, checked) { lhState.entries[i].checklist[ci].checked = checked; }
+    window.lhChecklistToggle = lhChecklistToggle;
+    function lhChecklistText(i, ci, val) { lhState.entries[i].checklist[ci].item = val; }
+    window.lhChecklistText = lhChecklistText;
+    function lhChecklistAdd(i) { lhState.entries[i].checklist.push({ item: '', checked: false }); lhRenderEntriesList(); }
+    window.lhChecklistAdd = lhChecklistAdd;
+    function lhChecklistRemove(i, ci) { lhState.entries[i].checklist.splice(ci, 1); lhRenderEntriesList(); }
+    window.lhChecklistRemove = lhChecklistRemove;
+    function lhFollowUpFromText(i, text) { lhState.entries[i].follow_up_items = text.split('\n').map(s => s.trim()).filter(Boolean); }
+    window.lhFollowUpFromText = lhFollowUpFromText;
+
+    function lhAddEntry() { lhState.entries.push(lhBlankEntry()); lhRenderEntriesList(); }
+    window.lhAddEntry = lhAddEntry;
+    function lhRemoveEntry(i) { lhState.entries.splice(i, 1); lhRenderEntriesList(); }
+    window.lhRemoveEntry = lhRemoveEntry;
+
+    async function lhDeleteDraft() {
+      const ok = await confirmDialog({ title: 'Hapus Draft', message: 'Hapus laporan draft ini beserta semua unit di dalamnya?', confirmText: 'Hapus', danger: true });
+      if (!ok) return;
+      const { error } = await state.supabase.from('laporan_harian').delete().eq('id', lhState.laporanId);
+      if (error) { toast('Gagal hapus: ' + error.message, 'error'); return; }
+      toast('Draft dihapus', 'success');
+      lhBackToList();
+    }
+    window.lhDeleteDraft = lhDeleteDraft;
+
+    async function lhSaveFinal() {
+      const tanggalInput = document.getElementById('lh-tanggal');
+      const tanggal = tanggalInput ? tanggalInput.value : (lhState.header?.tanggal || new Date().toISOString().slice(0, 10));
+      if (!tanggal) { toast('Tanggal wajib diisi.', 'warn'); return; }
+      if (!lhState.entries.length) { toast('Tambahkan minimal 1 unit.', 'warn'); return; }
+      const ok = await confirmDialog({ title: 'Konfirmasi & Simpan Final', message: `Simpan laporan ${fmtDate(tanggal)} sebagai FINAL? Unit dengan RH terisi akan otomatis update running_hours equipment terkait.`, confirmText: 'Ya, Simpan Final' });
+      if (!ok) return;
+      try {
+        let laporanId = lhState.laporanId;
+        if (lhState.mode === 'create') {
+          const { data: newHeader, error: eh } = await state.supabase.from('laporan_harian')
+            .insert({ tanggal, tim: 'RAM Hoist & Heavy Equipment', status: 'final', sumber: 'manual_app', created_by: state.user.id })
+            .select().single();
+          if (eh) throw eh;
+          laporanId = newHeader.id;
+        } else {
+          const { error: eh } = await state.supabase.from('laporan_harian').update({ status: 'final' }).eq('id', laporanId);
+          if (eh) throw eh;
+          const { error: ed } = await state.supabase.from('laporan_harian_entries').delete().eq('laporan_id', laporanId);
+          if (ed) throw ed;
+        }
+        const rows = lhState.entries.map(e => ({
+          laporan_id: laporanId,
+          equipment_id: e.equipment_id || null,
+          equipment_manual_nama: e.equipment_id ? null : (e.equipment_manual_nama || null),
+          site: e.site || null,
+          status_kerja: e.status_kerja || null,
+          job_desc: e.job_desc || null,
+          brand: e.brand || null,
+          model: e.model || null,
+          sn: e.sn || null,
+          rh: e.rh === '' || e.rh === null ? null : Number(e.rh),
+          waktu_mulai: e.waktu_mulai || null,
+          waktu_selesai: e.waktu_selesai || null,
+          checklist: e.checklist || [],
+          progress_pct: e.progress_pct === '' || e.progress_pct === null ? null : Number(e.progress_pct),
+          notes: e.notes || null,
+          follow_up_items: e.follow_up_items || [],
+        }));
+        const { error: ee } = await state.supabase.from('laporan_harian_entries').insert(rows);
+        if (ee) throw ee;
+
+        // Sinkronisasi RH ke equipment.running_hours — reuse trigger cascade_hm_to_children yang sudah ada
+        // (auto-shift last_pm/toh/goh_hours kalau lompatannya besar), bukan logic baru.
+        let syncCount = 0;
+        for (const e of lhState.entries) {
+          if (!e.equipment_id || e.rh === '' || e.rh === null) continue;
+          const eq = (state.equipmentList || []).find(x => x.id === e.equipment_id);
+          const newRh = Number(e.rh);
+          if (eq && Number(eq.running_hours || 0) === newRh) continue;
+          const { error: eu } = await state.supabase.from('equipment').update({ running_hours: newRh, updated_by: state.user.id, updated_at: new Date().toISOString() }).eq('id', e.equipment_id);
+          if (!eu) { syncCount++; if (eq) eq.running_hours = newRh; }
+        }
+
+        await logActivity('laporan_harian_final', 'laporan_harian', laporanId, fmtDate(tanggal), { unit_count: lhState.entries.length, rh_synced: syncCount });
+        toast(`✓ Laporan ${fmtDate(tanggal)} tersimpan final${syncCount ? ` — ${syncCount} RH ter-sinkron` : ''}.`, 'success');
+        lhBackToList();
+      } catch (err) {
+        toast('Gagal simpan: ' + err.message, 'error');
+      }
+    }
+    window.lhSaveFinal = lhSaveFinal;
 
     // ============================================================
     // RAM TREND — SVG line chart Ao & Ai per bulan (12 bulan)
