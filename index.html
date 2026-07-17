@@ -13255,15 +13255,28 @@
     // LAPORAN HARIAN RAM — daily status report (manual entry + review draft dari bot Telegram)
     // ============================================================
     let lhState = { mode: 'list', laporanId: null, entries: [], header: null };
+    let lhEquipmentList = null; // cache terpisah dari state.equipmentList — itu ikut filter halaman Equipment, bisa kosong/parsial
 
     function lhIsReadonly() {
       if (lhState.mode === 'create') return false;
       return !!(lhState.header && lhState.header.status === 'final');
     }
 
+    async function lhEnsureEquipmentList() {
+      if (lhEquipmentList) return lhEquipmentList;
+      const { data, error } = await state.supabase
+        .from('equipment')
+        .select('id, tag_number, nama_equipment, brand, model, serial_number, running_hours')
+        .order('tag_number');
+      if (error) { toast('Gagal ambil daftar equipment: ' + error.message, 'error'); lhEquipmentList = []; return lhEquipmentList; }
+      lhEquipmentList = data || [];
+      return lhEquipmentList;
+    }
+
     async function renderLaporanHarianPage(host) {
       host = host || document.getElementById('ram-content');
       if (!host) return;
+      await lhEnsureEquipmentList();
       if (lhState.mode === 'detail' && lhState.laporanId) { await lhRenderDetail(host); return; }
       if (lhState.mode === 'create') { lhRenderEditor(host); return; }
       await lhRenderList(host);
@@ -13393,7 +13406,7 @@
     }
 
     function lhEntryCardHtml(e, i, readonly) {
-      const eqOpts = (state.equipmentList || []).map(eq => `<option value="${eq.id}" ${e.equipment_id === eq.id ? 'selected' : ''}>${escapeHtml(eq.tag_number)} — ${escapeHtml(eq.nama_equipment || '')}</option>`).join('');
+      const eqOpts = (lhEquipmentList || []).map(eq => `<option value="${eq.id}" ${e.equipment_id === eq.id ? 'selected' : ''}>${escapeHtml(eq.tag_number)} — ${escapeHtml(eq.nama_equipment || '')}</option>`).join('');
       const statusColors = { Standby: 'bg-slate-100 text-slate-600', Operasi: 'bg-emerald-100 text-emerald-700', CM: 'bg-red-100 text-red-700', PM: 'bg-blue-100 text-blue-700', TS: 'bg-amber-100 text-amber-700', Lainnya: 'bg-slate-100 text-slate-600' };
       const dis = readonly ? 'disabled' : '';
       return `<div class="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
@@ -13464,7 +13477,7 @@
       if (!lhState.entries[i]) return;
       lhState.entries[i][field] = value;
       if (field === 'equipment_id' && value) {
-        const eq = (state.equipmentList || []).find(x => x.id === value);
+        const eq = (lhEquipmentList || []).find(x => x.id === value);
         if (eq) {
           if (!lhState.entries[i].brand) lhState.entries[i].brand = eq.brand || '';
           if (!lhState.entries[i].model) lhState.entries[i].model = eq.model || '';
@@ -13548,7 +13561,7 @@
         let syncCount = 0;
         for (const e of lhState.entries) {
           if (!e.equipment_id || e.rh === '' || e.rh === null) continue;
-          const eq = (state.equipmentList || []).find(x => x.id === e.equipment_id);
+          const eq = (lhEquipmentList || []).find(x => x.id === e.equipment_id);
           const newRh = Number(e.rh);
           if (eq && Number(eq.running_hours || 0) === newRh) continue;
           const { error: eu } = await state.supabase.from('equipment').update({ running_hours: newRh, updated_by: state.user.id, updated_at: new Date().toISOString() }).eq('id', e.equipment_id);
