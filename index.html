@@ -4099,6 +4099,7 @@
                     <span class="font-bold text-navy text-base">${escapeHtml(i.inspection_code)}</span>
                     ${katBadge}
                     ${inspectionStatusBadge(i.status)}
+                    ${i.review_status === 'draft' ? '<span class="px-2 py-0.5 bg-orange-100 text-orange-800 text-xs font-bold rounded animate-pulse">🤖 Draft — belum dikonfirmasi</span>' : ''}
                   </div>
                   <div class="text-sm font-semibold text-slate-800">🏭 ${escapeHtml(i.parent_unit?.name || '—')}</div>
                   <div class="text-xs text-slate-500 mt-0.5">
@@ -4159,10 +4160,16 @@
                   <h2 class="text-2xl font-bold text-slate-900">${escapeHtml(insp.inspection_code)}</h2>
                   ${katBadge}
                   ${inspectionStatusBadge(insp.status)}
+                  ${insp.review_status === 'draft' ? '<span class="px-2 py-0.5 bg-orange-100 text-orange-800 text-xs font-bold rounded">🤖 Draft — belum dikonfirmasi</span>' : ''}
                 </div>
+                ${insp.review_status === 'draft' ? `<div class="bg-orange-50 border border-orange-200 rounded-lg p-3 text-xs text-orange-800 mb-2">
+                  ⚠️ Siklus & semua temuan ini masuk otomatis dari bot Telegram, BELUM direview manusia. Cek dulu tiap temuan (equipment, category, deskripsi) sebelum konfirmasi.
+                  <button onclick="confirmInspectionDraft('${insp.id}')" class="ml-2 px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold">✅ Sudah Dicek, Konfirmasi Siklus</button>
+                </div>` : ''}
                 <div class="flex gap-2 flex-wrap mt-2 mb-1">
                   <button onclick='openInspectionFormModal(${JSON.stringify(insp).replace(/'/g, "&apos;")})' class="px-3 py-1.5 rounded-lg bg-navy hover:bg-navy-700 text-white text-xs font-semibold">✏ Edit Siklus</button>
                   <button onclick="cetakInspeksiReport('${insp.id}')" class="btn-cetak btn-cetak-sm">🖨 Cetak Laporan</button>
+                  ${insp.raw_pdf_path ? `<a href="#" onclick="openInspectionRawPdf('${escapeHtml(insp.raw_pdf_path)}');return false;" class="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold">📄 Lihat PDF Asli</a>` : ''}
                   ${state.profile.role === 'admin' ? `<button onclick="confirmDeleteInspection('${insp.id}', '${escapeHtml(insp.inspection_code)}')" class="px-3 py-1.5 rounded-lg bg-red-100 hover:bg-red-200 text-red-700 text-xs font-semibold">🗑 Hapus Siklus</button>` : ''}
                 </div>
                 <p class="text-base text-slate-700 mt-1">🏭 ${escapeHtml(insp.parent_unit?.name || '—')} (${escapeHtml(insp.parent_unit?.type || '—')})</p>
@@ -5180,6 +5187,31 @@
       }
     }
     window.confirmDeleteInspection = confirmDeleteInspection;
+
+    async function confirmInspectionDraft(id) {
+      const ok = await confirmDialog({
+        title: 'Konfirmasi Siklus',
+        message: 'Tandai siklus ini sebagai sudah direview & benar? Setelah konfirmasi, badge "Draft" akan hilang.',
+        confirmText: 'Ya, Konfirmasi',
+      });
+      if (!ok) return;
+      const { error } = await state.supabase.from('inspections').update({ review_status: 'confirmed' }).eq('id', id);
+      if (error) { toast('Gagal konfirmasi: ' + error.message, 'error'); return; }
+      toast('Siklus dikonfirmasi.', 'success');
+      setInspectionView('detail', id);
+    }
+    window.confirmInspectionDraft = confirmInspectionDraft;
+
+    async function openInspectionRawPdf(path) {
+      try {
+        const { data, error } = await state.supabase.storage.from(PDF_BUCKET).createSignedUrl(path, 3600);
+        if (error) throw error;
+        window.open(data.signedUrl, '_blank');
+      } catch (err) {
+        toast('Gagal buka PDF: ' + err.message, 'error');
+      }
+    }
+    window.openInspectionRawPdf = openInspectionRawPdf;
 
     // ============================================================
     // 9c.7. INSPEKSI — FORM MODAL: TEMUAN (with conditional Mast bagian)
