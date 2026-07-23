@@ -12752,7 +12752,7 @@
       const div = document.createElement('div');
       div.className = 'page space-y-4';
       const pillars = [['reliability', '🛡️ Reliability'], ['availability', '🟢 Availability'], ['trend', '📈 Trend RAM'], ['maintenance', '🛠️ Maintenance'], ['kelayakan', '📋 Kelayakan']];
-      if (state.profile?.role === 'admin') pillars.push(['laporan', '📝 Laporan Harian']);
+      if (state.profile?.role === 'admin') pillars.push(['laporan', '📝 Laporan Harian'], ['analisa', '📊 Analisa Laporan']);
       div.innerHTML = `
         <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           <div class="flex border-b border-slate-200 overflow-x-auto" id="ram-tabs">
@@ -12773,6 +12773,7 @@
       if (t === 'maintenance') { host.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat…</div>'; renderRamMaintenance(host); return; }
       if (t === 'kelayakan') { host.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat…</div>'; renderKelayakanPage(host); return; }
       if (t === 'laporan') { host.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat…</div>'; renderLaporanHarianPage(host); return; }
+      if (t === 'analisa') { host.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat…</div>'; renderAnalisaLaporanPage(host); return; }
       // Pilar Reliability → sub-tab Overview / Stress / FMEA / CSPP
       const sub = [['overview', '📊 Overview'], ['stress', '🚛 Stress'], ['fmea', '⚠️ FMEA'], ['cspp', '📦 CSPP']];
       host.innerHTML = `
@@ -13608,6 +13609,139 @@
       }
     }
     window.lhSaveFinal = lhSaveFinal;
+
+    // ============================================================
+    // ANALISA LAPORAN HARIAN — ranking CM/TS + deteksi progress mandek
+    // ============================================================
+    async function renderAnalisaLaporanPage(host) {
+      host = host || document.getElementById('ram-content');
+      if (!host) return;
+      await lhEnsureEquipmentList();
+      const eqById = {};
+      (lhEquipmentList || []).forEach(e => { eqById[e.id] = e; });
+
+      const sejak = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
+      const { data: laporanRows, error: e1 } = await state.supabase
+        .from('laporan_harian')
+        .select('id, tanggal')
+        .eq('status', 'final')
+        .gte('tanggal', sejak);
+      if (e1) { host.innerHTML = `<div class="text-red-500 text-sm p-4">Gagal memuat: ${escapeHtml(e1.message)}</div>`; return; }
+      const tglById = {};
+      (laporanRows || []).forEach(r => { tglById[r.id] = r.tanggal; });
+      const ids = Object.keys(tglById);
+      if (!ids.length) {
+        host.innerHTML = '<div class="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-400 text-sm">Belum ada laporan final buat dianalisa.</div>';
+        return;
+      }
+
+      const { data: entries, error: e2 } = await state.supabase
+        .from('laporan_harian_entries')
+        .select('laporan_id, equipment_id, job_desc, status_kerja, progress_pct')
+        .in('laporan_id', ids);
+      if (e2) { host.innerHTML = `<div class="text-red-500 text-sm p-4">Gagal memuat: ${escapeHtml(e2.message)}</div>`; return; }
+
+      // Ranking CM/TS per equipment
+      const rank = {};
+      (entries || []).forEach(e => {
+        if (!e.equipment_id) return;
+        const r = (rank[e.equipment_id] = rank[e.equipment_id] || { total: 0, cmTs: 0 });
+        r.total++;
+        if (e.status_kerja === 'CM' || e.status_kerja === 'TS') r.cmTs++;
+      });
+      const rankRows = Object.entries(rank)
+        .map(([eqId, r]) => ({ eqId, ...r, pct: Math.round((r.cmTs / r.total) * 1000) / 10 }))
+        .filter(r => r.cmTs > 0)
+        .sort((a, b) => b.cmTs - a.cmTs || b.total - a.total)
+        .slice(0, 10);
+
+      // Deteksi progress mandek: group per equipment_id + job_desc, cek progress nggak pernah berubah
+      const jobGroups = {};
+      (entries || []).forEach(e => {
+        if (!e.equipment_id || !e.job_desc || !String(e.job_desc).trim()) return;
+        if (e.progress_pct === null || e.progress_pct === '' || isNaN(Number(e.progress_pct))) return;
+        const key = e.equipment_id + '|' + String(e.job_desc).trim().toLowerCase();
+        const g = (jobGroups[key] = jobGroups[key] || { eqId: e.equipment_id, jobDesc: e.job_desc, points: [] });
+        const tgl = tglById[e.laporan_id];
+        if (tgl) g.points.push({ tgl, progress: Number(e.progress_pct) });
+      });
+      const stalled = Object.values(jobGroups)
+        .map(g => {
+          const byDate = {};
+          g.points.forEach(p => { byDate[p.tgl] = p.progress; }); // 1 titik per tanggal (kalau ada >1 laporan/hari, pakai yang terakhir kebaca)
+          const dates = Object.keys(byDate).sort();
+          const vals = dates.map(d => byDate[d]);
+          return { ...g, dates, vals };
+        })
+        .filter(g => g.dates.length >= 3 && new Set(g.vals).size === 1 && g.vals[0] < 100)
+        .map(g => ({
+          ...g,
+          mulai: g.dates[0], terakhir: g.dates[g.dates.length - 1],
+          durasiHari: Math.round((new Date(g.dates[g.dates.length - 1]) - new Date(g.dates[0])) / 86400000),
+          progress: g.vals[0], jumlahLaporan: g.dates.length,
+        }))
+        .sort((a, b) => b.durasiHari - a.durasiHari);
+
+      const eqLabel = id => { const eq = eqById[id]; return eq ? `${eq.tag_number} — ${eq.nama_equipment}` : id; };
+
+      host.innerHTML = `
+        <div class="space-y-6">
+          <div>
+            <h3 class="text-base font-bold text-navy mb-1">📊 Analisa Laporan Harian</h3>
+            <p class="text-xs text-slate-400">Dari laporan final, 365 hari terakhir · ${ids.length} laporan · ${(entries || []).length} entry</p>
+          </div>
+
+          <div>
+            <h4 class="text-sm font-bold text-amber-700 mb-2">⚠️ Progress Mandek (nggak berubah ≥3 laporan)</h4>
+            ${!stalled.length ? '<div class="bg-white rounded-xl border border-slate-200 p-6 text-center text-slate-400 text-sm">Nggak ada job yang mandek. 👍</div>' : `
+            <div class="space-y-2">
+              ${stalled.map(g => `
+                <div class="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                  <div class="flex items-center justify-between gap-3 flex-wrap">
+                    <div>
+                      <div class="font-semibold text-slate-800 text-sm">${escapeHtml(eqLabel(g.eqId))}</div>
+                      <div class="text-xs text-slate-500 mt-0.5">${escapeHtml(g.jobDesc)}</div>
+                    </div>
+                    <div class="text-right">
+                      <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">${g.progress}% · stuck</span>
+                      <div class="text-[11px] text-slate-400 mt-1">${fmtDate(g.mulai)} → ${fmtDate(g.terakhir)} (${g.durasiHari} hari, ${g.jumlahLaporan}x lapor)</div>
+                    </div>
+                  </div>
+                </div>`).join('')}
+            </div>`}
+          </div>
+
+          <div>
+            <h4 class="text-sm font-bold text-navy mb-2">🔧 Ranking Equipment Sering CM/TS</h4>
+            ${!rankRows.length ? '<div class="bg-white rounded-xl border border-slate-200 p-6 text-center text-slate-400 text-sm">Belum ada data CM/TS.</div>' : `
+            <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+              <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                  <thead class="bg-slate-50 border-b border-slate-100">
+                    <tr>
+                      <th class="px-3 py-2 text-left text-xs font-semibold text-slate-600">Equipment</th>
+                      <th class="px-3 py-2 text-right text-xs font-semibold text-slate-600">CM/TS</th>
+                      <th class="px-3 py-2 text-right text-xs font-semibold text-slate-600">Total Laporan</th>
+                      <th class="px-3 py-2 text-right text-xs font-semibold text-slate-600">%</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-50">
+                    ${rankRows.map(r => `
+                      <tr>
+                        <td class="px-3 py-2 text-slate-700">${escapeHtml(eqLabel(r.eqId))}</td>
+                        <td class="px-3 py-2 text-right font-semibold text-slate-800">${r.cmTs}</td>
+                        <td class="px-3 py-2 text-right text-slate-500">${r.total}</td>
+                        <td class="px-3 py-2 text-right ${r.pct >= 70 ? 'text-red-600 font-semibold' : 'text-slate-500'}">${r.pct}%</td>
+                      </tr>`).join('')}
+                  </tbody>
+                </table>
+              </div>
+              <div class="px-4 py-2 border-t border-slate-100 text-[11px] text-slate-400">Persentase paling akurat kalau "Total Laporan"-nya cukup besar (≥5) — sample kecil bisa nyesatin.</div>
+            </div>`}
+          </div>
+        </div>`;
+    }
+    window.renderAnalisaLaporanPage = renderAnalisaLaporanPage;
 
     // ============================================================
     // RAM TREND — SVG line chart Ao & Ai per bulan (12 bulan)
