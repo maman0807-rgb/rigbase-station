@@ -13641,19 +13641,25 @@
         .in('laporan_id', ids);
       if (e2) { host.innerHTML = `<div class="text-red-500 text-sm p-4">Gagal memuat: ${escapeHtml(e2.message)}</div>`; return; }
 
-      // Ranking CM/TS per equipment
+      // Ranking CM/TS per equipment + detail tanggal kejadiannya (buat drill-down)
       const rank = {};
+      const rankDetail = {};
       (entries || []).forEach(e => {
         if (!e.equipment_id) return;
         const r = (rank[e.equipment_id] = rank[e.equipment_id] || { total: 0, cmTs: 0 });
         r.total++;
-        if (e.status_kerja === 'CM' || e.status_kerja === 'TS') r.cmTs++;
+        if (e.status_kerja === 'CM' || e.status_kerja === 'TS') {
+          r.cmTs++;
+          const list = (rankDetail[e.equipment_id] = rankDetail[e.equipment_id] || []);
+          list.push({ tanggal: tglById[e.laporan_id], jobDesc: e.job_desc || '-', statusKerja: e.status_kerja, laporanId: e.laporan_id });
+        }
       });
       const rankRows = Object.entries(rank)
         .map(([eqId, r]) => ({ eqId, ...r, pct: Math.round((r.cmTs / r.total) * 1000) / 10 }))
         .filter(r => r.cmTs > 0)
         .sort((a, b) => b.cmTs - a.cmTs || b.total - a.total)
-        .slice(0, 10);
+        .slice(0, 10)
+        .map(r => ({ ...r, detail: (rankDetail[r.eqId] || []).sort((a, b) => b.tanggal.localeCompare(a.tanggal)) }));
 
       // Deteksi progress mandek: group per equipment_id + job_desc, cek progress nggak pernah berubah
       const jobGroups = {};
@@ -13663,15 +13669,15 @@
         const key = e.equipment_id + '|' + String(e.job_desc).trim().toLowerCase();
         const g = (jobGroups[key] = jobGroups[key] || { eqId: e.equipment_id, jobDesc: e.job_desc, points: [] });
         const tgl = tglById[e.laporan_id];
-        if (tgl) g.points.push({ tgl, progress: Number(e.progress_pct) });
+        if (tgl) g.points.push({ tgl, progress: Number(e.progress_pct), laporanId: e.laporan_id });
       });
       const stalled = Object.values(jobGroups)
         .map(g => {
           const byDate = {};
-          g.points.forEach(p => { byDate[p.tgl] = p.progress; }); // 1 titik per tanggal (kalau ada >1 laporan/hari, pakai yang terakhir kebaca)
+          g.points.forEach(p => { byDate[p.tgl] = p; }); // 1 titik per tanggal (kalau ada >1 laporan/hari, pakai yang terakhir kebaca)
           const dates = Object.keys(byDate).sort();
-          const vals = dates.map(d => byDate[d]);
-          return { ...g, dates, vals };
+          const vals = dates.map(d => byDate[d].progress);
+          return { ...g, dates, vals, byDate };
         })
         .filter(g => g.dates.length >= 3 && new Set(g.vals).size === 1 && g.vals[0] < 100)
         .map(g => ({
@@ -13679,6 +13685,7 @@
           mulai: g.dates[0], terakhir: g.dates[g.dates.length - 1],
           durasiHari: Math.round((new Date(g.dates[g.dates.length - 1]) - new Date(g.dates[0])) / 86400000),
           progress: g.vals[0], jumlahLaporan: g.dates.length,
+          laporanTerakhirId: g.byDate[g.dates[g.dates.length - 1]].laporanId,
         }))
         .sort((a, b) => b.durasiHari - a.durasiHari);
 
@@ -13695,7 +13702,7 @@
             <h4 class="text-sm font-bold text-amber-700 mb-2">⚠️ Progress Mandek (nggak berubah ≥3 laporan)</h4>
             ${!stalled.length ? '<div class="bg-white rounded-xl border border-slate-200 p-6 text-center text-slate-400 text-sm">Nggak ada job yang mandek. 👍</div>' : `
             <div class="space-y-2">
-              ${stalled.map(g => `
+              ${stalled.map((g, i) => `
                 <div class="bg-amber-50 border border-amber-200 rounded-xl p-4">
                   <div class="flex items-center justify-between gap-3 flex-wrap">
                     <div>
@@ -13706,6 +13713,17 @@
                       <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">${g.progress}% · stuck</span>
                       <div class="text-[11px] text-slate-400 mt-1">${fmtDate(g.mulai)} → ${fmtDate(g.terakhir)} (${g.durasiHari} hari, ${g.jumlahLaporan}x lapor)</div>
                     </div>
+                  </div>
+                  <div class="flex items-center gap-3 mt-3 pt-3 border-t border-amber-200/60">
+                    <button onclick="analisaOpenDetail('${g.laporanTerakhirId}')" class="text-xs font-semibold text-amber-700 hover:text-amber-900 underline">Buka laporan terakhir →</button>
+                    <button onclick="analisaToggleStalled(${i})" class="text-xs text-slate-500 hover:text-slate-700 underline">Lihat semua tanggal (${g.jumlahLaporan})</button>
+                  </div>
+                  <div id="an-stalled-detail-${i}" class="hidden mt-2 space-y-1 text-xs">
+                    ${g.dates.map(d => `
+                      <div class="flex items-center justify-between bg-white/70 rounded-lg px-2 py-1">
+                        <span class="text-slate-600">${fmtDate(d)} — progress ${g.byDate[d].progress}%</span>
+                        <button onclick="analisaOpenDetail('${g.byDate[d].laporanId}')" class="text-amber-700 hover:text-amber-900 font-semibold">Buka →</button>
+                      </div>`).join('')}
                   </div>
                 </div>`).join('')}
             </div>`}
@@ -13723,25 +13741,57 @@
                       <th class="px-3 py-2 text-right text-xs font-semibold text-slate-600">CM/TS</th>
                       <th class="px-3 py-2 text-right text-xs font-semibold text-slate-600">Total Laporan</th>
                       <th class="px-3 py-2 text-right text-xs font-semibold text-slate-600">%</th>
+                      <th class="px-3 py-2"></th>
                     </tr>
                   </thead>
                   <tbody class="divide-y divide-slate-50">
-                    ${rankRows.map(r => `
-                      <tr>
+                    ${rankRows.map((r, i) => `
+                      <tr onclick="analisaToggleRank(${i})" class="cursor-pointer hover:bg-slate-50">
                         <td class="px-3 py-2 text-slate-700">${escapeHtml(eqLabel(r.eqId))}</td>
                         <td class="px-3 py-2 text-right font-semibold text-slate-800">${r.cmTs}</td>
                         <td class="px-3 py-2 text-right text-slate-500">${r.total}</td>
                         <td class="px-3 py-2 text-right ${r.pct >= 70 ? 'text-red-600 font-semibold' : 'text-slate-500'}">${r.pct}%</td>
+                        <td class="px-3 py-2 text-right text-slate-300 text-xs">rincian ▾</td>
+                      </tr>
+                      <tr id="an-rank-detail-${i}" class="hidden">
+                        <td colspan="5" class="px-3 pb-3 bg-slate-50">
+                          <div class="space-y-1 text-xs pt-2">
+                            ${r.detail.map(d => `
+                              <div class="flex items-center justify-between bg-white rounded-lg px-2 py-1 border border-slate-100">
+                                <span class="text-slate-600">${fmtDate(d.tanggal)} — <span class="font-semibold">${d.statusKerja}</span> · ${escapeHtml(d.jobDesc)}</span>
+                                <button onclick="event.stopPropagation();analisaOpenDetail('${d.laporanId}')" class="text-navy hover:text-safety font-semibold shrink-0 ml-2">Buka →</button>
+                              </div>`).join('')}
+                          </div>
+                        </td>
                       </tr>`).join('')}
                   </tbody>
                 </table>
               </div>
-              <div class="px-4 py-2 border-t border-slate-100 text-[11px] text-slate-400">Persentase paling akurat kalau "Total Laporan"-nya cukup besar (≥5) — sample kecil bisa nyesatin.</div>
+              <div class="px-4 py-2 border-t border-slate-100 text-[11px] text-slate-400">Klik baris buat lihat tanggal kejadian CM/TS-nya. Persentase paling akurat kalau "Total Laporan"-nya cukup besar (≥5) — sample kecil bisa nyesatin.</div>
             </div>`}
           </div>
         </div>`;
     }
     window.renderAnalisaLaporanPage = renderAnalisaLaporanPage;
+
+    function analisaToggleRank(i) {
+      const el = document.getElementById('an-rank-detail-' + i);
+      if (el) el.classList.toggle('hidden');
+    }
+    window.analisaToggleRank = analisaToggleRank;
+
+    function analisaToggleStalled(i) {
+      const el = document.getElementById('an-stalled-detail-' + i);
+      if (el) el.classList.toggle('hidden');
+    }
+    window.analisaToggleStalled = analisaToggleStalled;
+
+    function analisaOpenDetail(laporanId) {
+      state.ramTab = 'laporan';
+      document.querySelectorAll('#ram-tabs button').forEach(b => { b.className = `px-5 py-3 text-sm font-semibold whitespace-nowrap ${b.dataset.tab === 'laporan' ? 'border-b-2 border-safety text-safety bg-safety/5' : 'text-slate-600 hover:text-navy'}`; });
+      lhOpenDetail(laporanId);
+    }
+    window.analisaOpenDetail = analisaOpenDetail;
 
     // ============================================================
     // RAM TREND — SVG line chart Ao & Ai per bulan (12 bulan)
