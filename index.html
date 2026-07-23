@@ -13641,17 +13641,22 @@
         .in('laporan_id', ids);
       if (e2) { host.innerHTML = `<div class="text-red-500 text-sm p-4">Gagal memuat: ${escapeHtml(e2.message)}</div>`; return; }
 
-      // Ranking CM/TS per equipment + detail tanggal kejadiannya (buat drill-down)
+      // Ranking CM/TS per equipment + breakdown status_kerja + detail tanggal (buat drill-down)
+      const STATUS_ORDER = ['Standby', 'Operasi', 'PM', 'TS', 'CM', 'Lainnya'];
+      // Palet tervalidasi (validate_palette.js: chroma floor, CVD, contrast) — abu-abu polos gagal cek chroma, diganti indigo/violet
+      const STATUS_BAR_COLOR = { Standby: 'bg-indigo-500', Operasi: 'bg-emerald-500', PM: 'bg-blue-500', TS: 'bg-amber-500', CM: 'bg-red-500', Lainnya: 'bg-violet-600' };
       const rank = {};
       const rankDetail = {};
       (entries || []).forEach(e => {
         if (!e.equipment_id) return;
-        const r = (rank[e.equipment_id] = rank[e.equipment_id] || { total: 0, cmTs: 0 });
+        const r = (rank[e.equipment_id] = rank[e.equipment_id] || { total: 0, cmTs: 0, byStatus: {} });
         r.total++;
-        if (e.status_kerja === 'CM' || e.status_kerja === 'TS') {
+        const sk = e.status_kerja || 'Lainnya';
+        r.byStatus[sk] = (r.byStatus[sk] || 0) + 1;
+        if (sk === 'CM' || sk === 'TS') {
           r.cmTs++;
           const list = (rankDetail[e.equipment_id] = rankDetail[e.equipment_id] || []);
-          list.push({ tanggal: tglById[e.laporan_id], jobDesc: e.job_desc || '-', statusKerja: e.status_kerja, laporanId: e.laporan_id });
+          list.push({ tanggal: tglById[e.laporan_id], jobDesc: e.job_desc || '-', statusKerja: sk, laporanId: e.laporan_id });
         }
       });
       const rankRows = Object.entries(rank)
@@ -13660,6 +13665,21 @@
         .sort((a, b) => b.cmTs - a.cmTs || b.total - a.total)
         .slice(0, 10)
         .map(r => ({ ...r, detail: (rankDetail[r.eqId] || []).sort((a, b) => b.tanggal.localeCompare(a.tanggal)) }));
+
+      const statusBarChart = byStatus => {
+        const rows = STATUS_ORDER.filter(s => byStatus[s] > 0).map(s => ({ s, n: byStatus[s] }));
+        const max = Math.max(...rows.map(r => r.n), 1);
+        return `<div class="space-y-1.5">
+          ${rows.map(r => `
+            <div class="flex items-center gap-2">
+              <span class="w-14 shrink-0 text-[11px] text-slate-500">${r.s}</span>
+              <div class="flex-1 h-4 bg-slate-100 rounded overflow-hidden">
+                <div class="h-full ${STATUS_BAR_COLOR[r.s] || 'bg-slate-400'} rounded" style="width:${Math.max(6, Math.round((r.n / max) * 100))}%"></div>
+              </div>
+              <span class="w-5 shrink-0 text-[11px] text-slate-600 font-semibold text-right">${r.n}</span>
+            </div>`).join('')}
+        </div>`;
+      };
 
       // Deteksi progress mandek: group per equipment_id + job_desc, cek progress nggak pernah berubah
       const jobGroups = {};
@@ -13755,7 +13775,11 @@
                       </tr>
                       <tr id="an-rank-detail-${i}" class="hidden">
                         <td colspan="5" class="px-3 pb-3 bg-slate-50">
-                          <div class="space-y-1 text-xs pt-2">
+                          <div class="pt-2 pb-3 mb-2 border-b border-slate-200">
+                            <div class="text-[11px] font-semibold text-slate-500 mb-1.5">Breakdown status kerja (${r.total} laporan)</div>
+                            ${statusBarChart(r.byStatus)}
+                          </div>
+                          <div class="space-y-1 text-xs">
                             ${r.detail.map(d => `
                               <div class="flex items-center justify-between bg-white rounded-lg px-2 py-1 border border-slate-100">
                                 <span class="text-slate-600">${fmtDate(d.tanggal)} — <span class="font-semibold">${d.statusKerja}</span> · ${escapeHtml(d.jobDesc)}</span>
