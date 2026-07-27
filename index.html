@@ -13292,6 +13292,7 @@
 
     function lhIsReadonly() {
       if (lhState.mode === 'create') return false;
+      if (lhState.forceEdit) return false;
       return !!(lhState.header && lhState.header.status === 'final');
     }
 
@@ -13399,6 +13400,7 @@
       const readonly = lhIsReadonly();
       const header = lhState.header;
       const isCreate = lhState.mode === 'create';
+      const isFinal = header?.status === 'final';
       host.innerHTML = `
         <div class="space-y-4">
           <button onclick="lhBackToList()" class="text-sm text-slate-500 hover:text-navy">← Kembali</button>
@@ -13408,6 +13410,7 @@
               <input type="date" id="lh-tanggal" value="${header?.tanggal || new Date().toISOString().slice(0, 10)}" ${isCreate ? '' : 'disabled'} class="border border-slate-300 rounded-lg px-3 py-1.5 text-sm">
             </div>
             ${header?.status ? `<div class="text-xs text-slate-400">Sumber: ${header.sumber === 'bot_telegram' ? '🤖 Telegram' : header.sumber === 'bot_whatsapp' ? '🤖 WhatsApp' : '✍️ Manual'} · ${header.status === 'draft' ? 'Draft' : 'Final'}</div>` : ''}
+            ${lhState.forceEdit ? `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">MODE EDIT</span>` : ''}
           </div>
           ${header?.raw_text ? `<details class="bg-slate-50 rounded-xl border border-slate-200 p-3 text-xs text-slate-500">
             <summary class="cursor-pointer font-semibold">📄 Teks asli laporan</summary>
@@ -13415,14 +13418,26 @@
           </details>` : ''}
           <div id="lh-entries" class="space-y-3"></div>
           ${!readonly ? `<button onclick="lhAddEntry()" class="text-sm text-navy font-semibold hover:underline">+ Tambah Unit</button>` : ''}
-          <div class="flex items-center gap-2 pt-2 border-t border-slate-200">
-            ${!readonly ? `<button onclick="lhSaveFinal()" class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold">✅ Konfirmasi & Simpan Final</button>` : ''}
-            ${!readonly && !isCreate ? `<button onclick="lhDeleteDraft()" class="px-4 py-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-sm font-semibold">🗑 Hapus Draft</button>` : ''}
-            ${readonly ? `<span class="text-xs text-slate-400">Laporan final tidak bisa diedit lagi.</span>` : ''}
+          <div class="flex items-center gap-2 pt-2 border-t border-slate-200 flex-wrap">
+            ${!readonly ? `<button onclick="lhSaveFinal()" class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold">✅ ${isFinal ? 'Simpan Perubahan' : 'Konfirmasi & Simpan Final'}</button>` : ''}
+            ${readonly && isFinal ? `<button onclick="lhEnableEdit()" class="px-4 py-2 rounded-lg bg-navy/10 hover:bg-navy/20 text-navy text-sm font-semibold">✏️ Edit Laporan</button>` : ''}
+            ${lhState.forceEdit ? `<button onclick="lhCancelEdit()" class="px-4 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 text-sm font-semibold">Batal Edit</button>` : ''}
+            ${!isCreate ? `<button onclick="lhDeleteReport()" class="px-4 py-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-sm font-semibold">🗑 Hapus Laporan</button>` : ''}
           </div>
         </div>`;
       lhRenderEntriesList(host);
     }
+
+    function lhEnableEdit() {
+      lhState.forceEdit = true;
+      renderLaporanHarianPage();
+    }
+    window.lhEnableEdit = lhEnableEdit;
+
+    function lhCancelEdit() {
+      lhOpenDetail(lhState.laporanId);
+    }
+    window.lhCancelEdit = lhCancelEdit;
 
     function lhBackToList() {
       lhState = { mode: 'list', laporanId: null, entries: [], header: null };
@@ -13537,22 +13552,34 @@
     function lhRemoveEntry(i) { lhState.entries.splice(i, 1); lhRenderEntriesList(); }
     window.lhRemoveEntry = lhRemoveEntry;
 
-    async function lhDeleteDraft() {
-      const ok = await confirmDialog({ title: 'Hapus Draft', message: 'Hapus laporan draft ini beserta semua unit di dalamnya?', confirmText: 'Hapus', danger: true });
+    async function lhDeleteReport() {
+      const isFinal = lhState.header?.status === 'final';
+      const message = isFinal
+        ? 'Hapus laporan FINAL ini beserta semua unit di dalamnya? Running_hours equipment yang sudah ter-sinkron dari laporan ini TIDAK otomatis dibatalkan/dikembalikan.'
+        : 'Hapus laporan draft ini beserta semua unit di dalamnya?';
+      const ok = await confirmDialog({ title: 'Hapus Laporan', message, confirmText: 'Hapus', danger: true });
       if (!ok) return;
       const { error } = await state.supabase.from('laporan_harian').delete().eq('id', lhState.laporanId);
       if (error) { toast('Gagal hapus: ' + error.message, 'error'); return; }
-      toast('Draft dihapus', 'success');
+      await logActivity('laporan_harian_delete', 'laporan_harian', lhState.laporanId, lhState.header?.tanggal ? fmtDate(lhState.header.tanggal) : '', { status: lhState.header?.status });
+      toast('Laporan dihapus', 'success');
       lhBackToList();
     }
-    window.lhDeleteDraft = lhDeleteDraft;
+    window.lhDeleteReport = lhDeleteReport;
 
     async function lhSaveFinal() {
       const tanggalInput = document.getElementById('lh-tanggal');
       const tanggal = tanggalInput ? tanggalInput.value : (lhState.header?.tanggal || new Date().toISOString().slice(0, 10));
       if (!tanggal) { toast('Tanggal wajib diisi.', 'warn'); return; }
       if (!lhState.entries.length) { toast('Tambahkan minimal 1 unit.', 'warn'); return; }
-      const ok = await confirmDialog({ title: 'Konfirmasi & Simpan Final', message: `Simpan laporan ${fmtDate(tanggal)} sebagai FINAL? Unit dengan RH terisi akan otomatis update running_hours equipment terkait.`, confirmText: 'Ya, Simpan Final' });
+      const isEditingFinal = lhState.header?.status === 'final';
+      const ok = await confirmDialog({
+        title: isEditingFinal ? 'Simpan Perubahan' : 'Konfirmasi & Simpan Final',
+        message: isEditingFinal
+          ? `Simpan perubahan ke laporan ${fmtDate(tanggal)} yang sudah final? Unit dengan RH terisi akan otomatis update running_hours equipment terkait.`
+          : `Simpan laporan ${fmtDate(tanggal)} sebagai FINAL? Unit dengan RH terisi akan otomatis update running_hours equipment terkait.`,
+        confirmText: isEditingFinal ? 'Ya, Simpan Perubahan' : 'Ya, Simpan Final'
+      });
       if (!ok) return;
       try {
         let laporanId = lhState.laporanId;
