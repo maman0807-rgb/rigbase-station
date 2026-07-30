@@ -15145,34 +15145,55 @@
     // State filter calendar
     let calFilter = { unit_id: '', kind: '', startMonth: null, viewMode: 'month' };
 
-    // Estimate HM rate per hari (jam/hari) per equipment.
-    // Strategy: ambil HM trend dari 30 hari terakhir kalau ada, fallback ke default.
-    async function estimateHmRatePerDay(eqId, currentRH) {
-      // Default rate per equipment type (kalau tidak ada data trend)
-      // 8 jam/hari standar untuk genset/engine continuous, 4 untuk intermittent
-      const DEFAULT_RATE = 8;
+    // Ambil rata-rata pemakaian HM/KM REAL per hari per equipment, dari histori
+    // entry "Isi HM" Logbook (tabel `logbook`, status='approved', kind='hm') N hari terakhir.
+    // 1 query batch untuk semua equipment (bukan N+1) — dipakai buat proyeksi Tgl Est
+    // yang lebih akurat drpd asumsi flat per kategori. Equipment dgn sample <3 entry
+    // tidak dipakai (kurang bisa dipercaya) — biar caller fallback ke asumsi kategori.
+    async function fetchHmRateTrends(days = 30) {
+      const rates = {};
       try {
-        // Cari HM entries dari daily_logs atau equipment_hm_history
-        // Simple version: lihat HM 30 hari lalu dari downtime / activity log
-        // (sementara pakai default rate, nanti bisa improve)
-        return DEFAULT_RATE;
-      } catch (e) {
-        return DEFAULT_RATE;
-      }
+        const sejak = new Date(Date.now() - days * 86400000).toISOString();
+        const { data, error } = await state.supabase
+          .from('logbook')
+          .select('equipment_id, shift_hours, created_at')
+          .eq('status', 'approved')
+          .eq('data->>kind', 'hm')
+          .gte('created_at', sejak)
+          .order('created_at', { ascending: true });
+        if (error || !data) return rates;
+        const byEq = {};
+        data.forEach((r) => {
+          if (!r.equipment_id) return;
+          if (!byEq[r.equipment_id]) byEq[r.equipment_id] = { total: 0, count: 0, first: r.created_at };
+          byEq[r.equipment_id].total += Number(r.shift_hours) || 0;
+          byEq[r.equipment_id].count += 1;
+        });
+        const nowMs = Date.now();
+        Object.entries(byEq).forEach(([eqId, v]) => {
+          if (v.count < 3) return; // sample kurang — jangan dipercaya, biar fallback ke kategori
+          const spanDays = Math.max(1, (nowMs - new Date(v.first).getTime()) / 86400000);
+          rates[eqId] = { rate: v.total / spanDays, samples: v.count, spanDays: Math.round(spanDays) };
+        });
+      } catch (e) { /* diam-diam gagal → caller fallback ke asumsi kategori */ }
+      return rates;
     }
 
     async function renderMaintenanceCalendar() {
       const host = document.getElementById('calendar-host');
       if (!host) return;
       try {
-        // 1. Fetch semua equipment dgn HM/intervals + sertifikat
-        const { data: eqs, error } = await state.supabase.from('equipment').select(
-          'id, tag_number, nama_equipment, assigned_unit_id, kategori_id, ' +
-          'running_hours, pm_type, pm_interval_hours, last_pm_hours, ' +
-          'toh_interval_hours, last_toh_hours, goh_interval_hours, last_goh_hours, ' +
-          'economic_life_hours, ' +
-          'skpi_end_date, tgl_expired_sertifikat, next_maintenance_date'
-        );
+        // 1. Fetch semua equipment dgn HM/intervals + sertifikat, PARALEL sama tren pemakaian real
+        const [{ data: eqs, error }, hmTrends] = await Promise.all([
+          state.supabase.from('equipment').select(
+            'id, tag_number, nama_equipment, assigned_unit_id, kategori_id, ' +
+            'running_hours, pm_type, pm_interval_hours, last_pm_hours, ' +
+            'toh_interval_hours, last_toh_hours, goh_interval_hours, last_goh_hours, ' +
+            'economic_life_hours, ' +
+            'skpi_end_date, tgl_expired_sertifikat, next_maintenance_date'
+          ),
+          fetchHmRateTrends(30),
+        ]);
         if (error) throw error;
 
         // 2. Compute forward projection events
@@ -15213,8 +15234,13 @@
         (eqs || []).forEach((eq) => {
           const unitName = getParentUnitName(eq.assigned_unit_id);
           const catName = (getCategoryName(eq.kategori_id) || '').toLowerCase();
-          // Estimasi jam operasi per hari berdasar kategori — dipakai proyeksi kalender PM
-          const rate = eq.pm_type === 'km' ? 200  // ~200 km/hari untuk kendaraan
+          // Prioritas 1: rata-rata pemakaian REAL dari histori Logbook (kalau sample cukup).
+          // Prioritas 2 (fallback): asumsi jam operasi per hari berdasar kategori.
+          const trend = hmTrends[eq.id];
+          const rateReal = !!trend;
+          const rateInfo = trend ? `${fmtNumber(Math.round(trend.rate * 10) / 10, ' ' + (eq.pm_type === 'km' ? 'km' : 'jam') + '/hari')} — rata² ${trend.samples}x entry, ${trend.spanDays} hari terakhir` : null;
+          const rate = trend ? trend.rate
+                     : eq.pm_type === 'km' ? 200  // ~200 km/hari untuk kendaraan
                      : /genset|generator|power|listrik/i.test(catName) ? 20  // genset ~20 jam/hari
                      : /hoist|winch|crane|lifting/i.test(catName)      ? 10  // angkat ~10 jam/hari
                      : /kendaraan|truck|vehicle/i.test(catName)        ? 10  // kendaraan 10j/hari
@@ -15238,7 +15264,7 @@
                 date: projectDate(sisa) || now.toISOString().slice(0, 10),
                 sisa, overdue: sisa < 0,
                 color: sisa < 0 ? 'bg-red-500' : sisa < 200 ? 'bg-amber-500' : 'bg-green-500',
-                icon: '🟢',
+                icon: '🟢', rateReal, rateInfo,
               });
             }
           }
@@ -15254,7 +15280,7 @@
                 date: projectDate(sisa) || now.toISOString().slice(0, 10),
                 sisa, overdue: sisa < 0,
                 color: sisa < 0 ? 'bg-red-600' : sisa < 1000 ? 'bg-amber-600' : 'bg-blue-500',
-                icon: '🟡',
+                icon: '🟡', rateReal, rateInfo,
               });
             }
           }
@@ -15270,7 +15296,7 @@
                 date: projectDate(sisa) || now.toISOString().slice(0, 10),
                 sisa, overdue: sisa < 0,
                 color: sisa < 0 ? 'bg-red-700' : sisa < 2000 ? 'bg-amber-700' : 'bg-purple-500',
-                icon: '🔴',
+                icon: '🔴', rateReal, rateInfo,
               });
             }
           }
@@ -15369,11 +15395,16 @@
         const hariSampai = (e) => {
           if (!e.date) return '—';
           const days = Math.round((new Date(e.date).getTime() - todayMs) / 86400000);
-          if (days < 0) return `<span class="text-red-600 font-bold">${-days}h lalu</span>`;
-          if (days === 0) return `<span class="text-red-600 font-bold">Hari ini</span>`;
-          if (days <= 7) return `<span class="text-amber-700 font-bold">${days}h lagi</span>`;
-          if (days <= 30) return `<span class="text-amber-600">${days}h lagi</span>`;
-          return `<span class="text-slate-500">${days}h lagi</span>`;
+          // SKPI/COC = tanggal pasti (calendar-based), bukan proyeksi HM/KM — jangan kasih marker rate.
+          const isRateProjected = e.kind === 'PM' || e.kind === 'TOH' || e.kind === 'GOH';
+          const marker = !isRateProjected ? '' : e.rateReal
+            ? ` <span class="text-emerald-600 cursor-help" title="Proyeksi dari pemakaian REAL: ${escapeAttr(e.rateInfo || '')}">📊</span>`
+            : ` <span class="text-slate-300 cursor-help" title="Proyeksi dari asumsi kategori equipment (belum cukup data Logbook)">≈</span>`;
+          if (days < 0) return `<span class="text-red-600 font-bold">${-days}h lalu</span>${marker}`;
+          if (days === 0) return `<span class="text-red-600 font-bold">Hari ini</span>${marker}`;
+          if (days <= 7) return `<span class="text-amber-700 font-bold">${days}h lagi</span>${marker}`;
+          if (days <= 30) return `<span class="text-amber-600">${days}h lagi</span>${marker}`;
+          return `<span class="text-slate-500">${days}h lagi</span>${marker}`;
         };
 
         // 7. Filter bar
@@ -15734,7 +15765,7 @@
             💡 <b>Riwayat</b> menampilkan kejadian AKTUAL yang sudah tercatat (PM/TOH/GOH selesai, breakdown, troubleshoot, inspeksi, dst) — bukan proyeksi. Data 12 bulan terakhir.
           </div>` : `
           <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800">
-            💡 <b>Catatan proyeksi:</b> Tgl estimasi dihitung dgn asumsi <b>8 jam/hari operasi</b>. Equipment dgn HM rate berbeda → tgl bisa shift. Aktual rate akan ditampilkan kalau Logbook HM trend sudah cukup banyak (~30 hari data).
+            💡 <b>Catatan proyeksi:</b> tanda <b class="text-emerald-700">📊</b> = Tgl Est dihitung dari rata-rata pemakaian REAL 30 hari terakhir (histori Logbook, min. 3 entry). Tanda <b class="text-slate-400">≈</b> = belum ada cukup data Logbook, dihitung pakai asumsi kategori equipment (jam/km per hari) — bisa meleset kalau pemakaian aktual jauh beda dari asumsi.
           </div>`;
 
         // Susun output sesuai viewMode
@@ -15971,7 +16002,7 @@
         <div class="card navy"><div class="num">${events.length}</div><div class="lbl">📅 TOTAL</div></div>
       </div>`;
 
-      const intro = `<p>Laporan proyeksi maintenance dari eRAMHoist — gabungan PM/TOH/GOH (berbasis HM trend asumsi 8 jam/hari) + sertifikat SKPI/COC (calendar-based).</p>
+      const intro = `<p>Laporan proyeksi maintenance dari eRAMHoist — gabungan PM/TOH/GOH (berbasis rata-rata pemakaian real dari Logbook, atau asumsi kategori kalau data belum cukup) + sertifikat SKPI/COC (calendar-based).</p>
         <p><b>Periode laporan:</b> ${escapeHtml(scopeLabel)}<br>
         <b>Filter aktif:</b> ${escapeHtml(filterRig)} · ${escapeHtml(filterKind)}<br>
         <b>Dicetak:</b> ${now.toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })} oleh ${escapeHtml(state.profile?.full_name || state.profile?.email || '-')}</p>`;
@@ -16140,7 +16171,7 @@
           ${totalUrgent > 0 ? `<li><b style="color:#d97706">${totalUrgent} unit URGENT</b> — siapkan parts & jadwal dalam 1-30 hari ke depan</li>` : ''}
           ${totalPlan > 0 ? `<li><b style="color:#16a34a">${totalPlan} unit PLAN</b> — masuk planning rutin</li>` : ''}
         </ul>
-        <p style="margin-top:10px"><i>Catatan: Tgl estimasi menggunakan asumsi 8 jam/hari operasi. Sesuaikan dgn HM rate aktual rig.</i></p>`;
+        <p style="margin-top:10px"><i>Catatan: Tgl estimasi memakai rata-rata pemakaian REAL 30 hari terakhir (histori Logbook) kalau datanya cukup (min. 3 entry); kalau belum, dihitung pakai asumsi jam/km per hari berdasar kategori equipment. Sesuaikan dgn kondisi aktual rig.</i></p>`;
 
       const chart = (typeof chartBars === 'function') ? chartBars('Distribusi per Status', [
         { label: 'Overdue', value: totalOverdue, color: '#dc2626' },
