@@ -3127,6 +3127,12 @@
             .signblock{display:flex;justify-content:space-between;margin-top:32px}
             .signbox{width:46%;font-size:11px}
             .signline{margin-top:44px;border-top:1px solid #333;padding-top:4px;color:#666}
+            .openblock{margin-top:18px}
+            .openblock .label{font-weight:600;font-size:11.5px;margin-bottom:6px}
+            .openblock .sublabel{font-size:10px;color:#888;font-weight:400}
+            .openblock .rule{border:1px solid #cbd5e1;border-top:none;padding:0 10px}
+            .openblock .rule div{border-bottom:1px solid #d9dee5;height:22px}
+            .openblock .rule div:last-child{border-bottom:none}
             .footer{margin-top:24px;font-size:9px;color:#aaa;border-top:1px solid #eee;padding-top:8px}
           </style>
         </head><body>
@@ -3145,6 +3151,10 @@
             <thead><tr><th style="width:26px"></th><th>Item Pekerjaan</th><th>Catatan</th></tr></thead>
             <tbody>${rows}</tbody>
           </table>
+          <div class="openblock">
+            <div class="label">Temuan / Pekerjaan Tambahan <span class="sublabel">(di luar checklist di atas — isi kalau ada)</span></div>
+            <div class="rule"><div></div><div></div><div></div><div></div></div>
+          </div>
           <div class="signblock">
             <div class="signbox">Nama Mekanik: ________________________<div class="signline">Tanda tangan &amp; tanggal</div></div>
             <div class="signbox">Diperiksa oleh: ________________________<div class="signline">Tanda tangan &amp; tanggal</div></div>
