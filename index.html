@@ -879,14 +879,21 @@
     }
 
     // PM Cycle Logic — Diesel (250 HM base interval)
-    // Priority: GOH > PM6 > PM5 > PM4 > PM3
-    function getPMType(hm) {
-      if (hm % 10000 === 0) return 'GOH';
-      if (hm % 2000  === 0) return 'PM6';
-      if (hm % 1000  === 0) return 'PM5';
-      if (hm % 500   === 0) return 'PM4';
-      if (hm % 250   === 0) return 'PM3';
-      return null;
+    // Ditentukan dari HITUNGAN SIKLUS PM (pm_cycle_count + 1), BUKAN dari nilai HM absolut —
+    // supaya tetap benar walau last_pm_hours bukan kelipatan bulat (PM di lapangan jarang persis di grid).
+    // Priority tetap sama: tiap PM ke-40 = GOH, ke-8 = PM6, ke-4 = PM5, ke-2 = PM4, sisanya PM3.
+    function getPMTypeByCycle(cycleCount) {
+      const n = Math.max(1, Number(cycleCount) || 1);
+      if (n % 40 === 0) return 'GOH';
+      if (n % 8  === 0) return 'PM6';
+      if (n % 4  === 0) return 'PM5';
+      if (n % 2  === 0) return 'PM4';
+      return 'PM3';
+    }
+    // Konversi label tier balik ke interval_hm (buat matching pm_parts_template) — kebalikan dari cycle logic di atas
+    function pmTierIntervalHm(pmType, baseInterval) {
+      const mult = { PM3: 1, PM4: 2, PM5: 4, PM6: 8, GOH: 40 }[pmType];
+      return mult ? baseInterval * mult : baseInterval;
     }
     // PM berbasis JAM (HM): pakai running_hours (diisi mekanik via Logbook) vs last_pm_hours + pm_interval_hours.
     // Hanya unit ber-HM (running_hours > 0) yang dihitung. Tampilkan yang mendekati / sudah lewat jam PM.
@@ -894,7 +901,7 @@
     async function fetchPMDueByHours(ratio = 0.2) {
       const { data, error } = await state.supabase
         .from('equipment')
-        .select('id, tag_number, nama_equipment, assigned_unit_id, status_operasi, running_hours, last_pm_hours, pm_interval_hours, pm_type')
+        .select('id, tag_number, nama_equipment, assigned_unit_id, status_operasi, running_hours, last_pm_hours, pm_interval_hours, pm_type, pm_cycle_count, goh_interval_hours')
         .gt('running_hours', 0)
         .neq('pm_type', 'km')
         .neq('pm_type', 'plo');  // exclude PLO dari analisa PM-jam
@@ -911,10 +918,11 @@
                             ? lastPmHm + Math.floor(usedHM / interval) * interval  // milestone terlewat terakhir
                             : lastPmHm + interval;                                  // milestone berikutnya
           const remaining = nextPmAt - currentHM;  // negatif jika overdue
-          // Guard: interval kelipatan 250 → bisa dapat PM type label
-          const _pmType   = (interval % 250 === 0)
-                            ? (() => { const t = getPMType(nextPmAt); return (t === 'GOH' && e.goh_interval_hours) ? 'PM3' : (t || 'PM?'); })()
-                            : `PM-${interval}HM`;
+          // Tier label dari HITUNGAN SIKLUS PM (pm_cycle_count + 1) — bukan dari nilai HM absolut
+          const nextCycle = (Number(e.pm_cycle_count) || 0) + 1;
+          const _pmType   = (interval % 250 !== 0)
+                            ? `PM-${interval}HM`
+                            : (() => { const t = getPMTypeByCycle(nextCycle); return (t === 'GOH' && e.goh_interval_hours) ? 'PM3' : t; })();
           // Threshold proporsional: 20% interval untuk warning, 10% untuk critical, min 50 HM
           const _threshold = Math.max(50, Math.round(interval * ratio));
           return { ...e, _interval: interval, _actualInterval: interval, _pmType, _nextPmAt: nextPmAt, _used: usedHM, _remaining: remaining, _threshold };
@@ -2085,7 +2093,7 @@
                       <div class="flex flex-wrap items-center gap-1.5 mt-1.5">
                         ${pmBadge}
                         ${urgBadge}
-                        <button onclick="showPMPartsModal('${e.id}', ${e._actualInterval}, ${Math.round(e._remaining)}, '${escapeAttr(e.tag_number)}', '${escapeAttr(e.nama_equipment)}')" class="inline-flex items-center gap-1 text-xs bg-navy text-white px-2.5 py-0.5 rounded-full font-bold shadow-sm hover:opacity-80 transition">📦 Siapkan Part — ${e._pmType} (${e._actualInterval} HM)</button>
+                        <button onclick="showPMPartsModal('${e.id}', ${pmTierIntervalHm(e._pmType, e._actualInterval)}, ${Math.round(e._remaining)}, '${escapeAttr(e.tag_number)}', '${escapeAttr(e.nama_equipment)}')" class="inline-flex items-center gap-1 text-xs bg-navy text-white px-2.5 py-0.5 rounded-full font-bold shadow-sm hover:opacity-80 transition">📦 Siapkan Part — ${e._pmType} (${pmTierIntervalHm(e._pmType, e._actualInterval)} HM)</button>
                         <button onclick="showCatatPMModal('${e.id}', '${escapeAttr(e.tag_number)}', '${escapeAttr(e.nama_equipment)}', ${Number(e.running_hours)||0}, ${e._actualInterval}, '${e._pmType}')" class="inline-flex items-center gap-1 text-xs bg-green-600 text-white px-2.5 py-0.5 rounded-full font-bold shadow-sm hover:opacity-80 transition">✅ Catat ${e._pmType} Selesai</button>
                       </div>
                     </div>
@@ -2919,10 +2927,12 @@
         // 2. Update running_hours (samakan dgn bacaan fisik saat PM) + last_pm_hours + last_pm_date → reset counter PM
         // running_hours WAJIB ikut di-set di sini juga — kalau cuma last_pm_hours, dan running_hours sistem
         // kebetulan lagi salah/nggak sinkron, hitungan "sisa ke PM" tetap kacau meski PM baru dicatat.
-        const { data: eqBefore } = await state.supabase.from('equipment').select('running_hours').eq('id', equipmentId).maybeSingle();
+        const { data: eqBefore } = await state.supabase.from('equipment').select('running_hours, pm_cycle_count').eq('id', equipmentId).maybeSingle();
         const hmBeforeUpdate = Number(eqBefore?.running_hours || 0);
         const pmDate = startV ? new Date(startV).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
         const eqUpdate = { running_hours: rhVal, last_pm_hours: rhVal, last_pm_date: pmDate };
+        // Siklus PM: GOH = overhaul total, counter reset ke 0 (mesin "baru" lagi). Selain itu +1.
+        eqUpdate.pm_cycle_count = pmType === 'GOH' ? 0 : (Number(eqBefore?.pm_cycle_count) || 0) + 1;
         // Bila GOH → reset last_goh_hours + last_toh_hours (GOH mencakup TOH)
         if (pmType === 'GOH') { eqUpdate.last_goh_hours = rhVal; eqUpdate.last_goh_date = pmDate; eqUpdate.last_toh_hours = rhVal; }
         // Bila TOH → reset last_toh_hours saja
@@ -2965,6 +2975,7 @@
         if (state.equipmentList) {
           const eq2 = state.equipmentList.find(x => x.id === equipmentId);
           if (eq2) { eq2.running_hours = rhVal; eq2.last_pm_hours = rhVal; eq2.last_pm_date = pmDate;
+            eq2.pm_cycle_count = eqUpdate.pm_cycle_count;
             if (pmType === 'GOH') { eq2.last_goh_hours = rhVal; eq2.last_goh_date = pmDate; eq2.last_toh_hours = rhVal; }
             if (pmType === 'TOH') { eq2.last_toh_hours = rhVal; }
           }
@@ -7044,14 +7055,16 @@
         const _nextPmHm   = _isOverdue
                             ? _lastPmHm + Math.floor(_usedHM / _eqInterval) * _eqInterval
                             : _lastPmHm + _eqInterval;
-        // Sisa ke PM — grid-anchored (sinkron dengan dashboard), negatif jika overdue
+        // Sisa ke PM — cumulative dari last_pm_hours, negatif jika overdue
         const sisaPM = (eq.pm_type !== 'plo' && eq.pm_type !== 'time' && eq.running_hours != null && eq.pm_interval_hours)
           ? (() => { const rem = _nextPmHm - _currentHM;
                      return rem <= 0 ? `<span class="text-red-700 font-bold">⚠️ lewat ${fmtNumber(-rem, ' ' + u)}</span>` : fmtNumber(rem, ' ' + u); })()
           : null;
+        // Tier label dari HITUNGAN SIKLUS PM (pm_cycle_count + 1) — bukan dari nilai HM absolut
+        const _nextCycle  = (Number(eq.pm_cycle_count) || 0) + 1;
         const _nextPmType = (eq.pm_type !== 'plo' && eq.pm_type !== 'time' && eq.pm_interval_hours)
           ? (_eqInterval === 250
-              ? (() => { const t = getPMType(_nextPmHm); return (t === 'GOH' && eq.goh_interval_hours) ? 'PM3' : (t || 'PM?'); })()
+              ? (() => { const t = getPMTypeByCycle(_nextCycle); return (t === 'GOH' && eq.goh_interval_hours) ? 'PM3' : t; })()
               : `PM-${_eqInterval}HM`)
           : null;
         const mtSections = [
