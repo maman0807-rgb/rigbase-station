@@ -3110,34 +3110,53 @@
           : `<tr><td colspan="3" style="text-align:center;color:#9ca3af;padding:12px">Belum ada checklist generik untuk tier "${escapeHtml(pmType || '-')}" — isi manual sesuai instruksi mekanik senior.</td></tr>`;
 
         const now = new Date();
+        const tgl = now.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+        const who = escapeHtml(state.profile?.full_name || state.profile?.email || '');
         const html = `<!DOCTYPE html><html><head>
           <meta charset="UTF-8">
           <title>Form Kerja PM ${pmType} — ${tagNumber}</title>
           <style>
-            body{font-family:Arial,sans-serif;font-size:12px;padding:24px;color:#222}
-            h2{color:#1E3A8A;margin-bottom:4px}
-            .sub{color:#666;font-size:11px;margin-bottom:16px}
+            *{box-sizing:border-box} body{font-family:Arial,Helvetica,sans-serif;color:#1f2937;padding:24px;font-size:12px;line-height:1.5;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+            @page{size:A4;margin:14mm}
+            .kop{display:flex;align-items:center;gap:14px;border-bottom:3px solid #11335d;padding-bottom:12px;margin-bottom:3px;position:relative}
+            .kop::after{content:"";position:absolute;left:0;right:0;bottom:-3px;height:2px;background:#f97316}
+            .kop .logo{flex:0 0 auto;width:46px;height:46px;color:#11335d}
+            .kop .brand{font-size:21px;font-weight:800;color:#11335d;letter-spacing:.3px;line-height:1.05}
+            .kop .brand .ram{color:#f97316}
+            .kop .t{font-size:12px;font-weight:bold;color:#11335d;margin-top:2px} .kop .s{font-size:10px;color:#6b7280;margin-top:1px}
+            h1{font-size:15px;text-align:center;margin:14px 0 2px;text-transform:uppercase;color:#1f2937}
+            .meta{text-align:center;font-size:11px;color:#374151;margin-bottom:14px}
             table.ident{width:100%;border-collapse:collapse;margin-bottom:16px}
             table.ident td{padding:6px 10px;border-bottom:1px solid #e5e7eb;font-size:11px}
-            table.ident td.label{background:#f1f5f9;font-weight:600;width:30%}
+            table.ident td.label{background:#eff6ff;font-weight:600;width:30%;color:#11335d}
             table.checklist{width:100%;border-collapse:collapse;margin-top:8px}
-            table.checklist th{background:#1E3A8A;color:#fff;padding:8px 10px;text-align:left;font-size:11px}
+            table.checklist th{background:#11335d;color:#fff;padding:8px 10px;text-align:left;font-size:11px}
             table.checklist td{padding:8px 10px;border-bottom:1px solid #e5e7eb;font-size:11.5px;vertical-align:top}
             table.checklist tr:nth-child(even) td{background:#f9fafb}
-            .signblock{display:flex;justify-content:space-between;margin-top:32px}
+            .signblock{display:flex;justify-content:space-between;margin-top:32px;text-align:center}
             .signbox{width:31%;font-size:11px}
-            .signline{margin-top:44px;border-top:1px solid #333;padding-top:4px;color:#666}
+            .signline{margin-top:44px;border-top:1px solid #1f2937;padding-top:4px;color:#6b7280}
             .openblock{margin-top:18px}
-            .openblock .label{font-weight:600;font-size:11.5px;margin-bottom:6px}
+            .openblock .label{font-weight:600;font-size:11.5px;margin-bottom:6px;color:#11335d}
             .openblock .sublabel{font-size:10px;color:#888;font-weight:400}
             .openblock .rule{border:1px solid #cbd5e1;border-top:none;padding:0 10px}
             .openblock .rule div{border-bottom:1px solid #d9dee5;height:22px}
             .openblock .rule div:last-child{border-bottom:none}
-            .footer{margin-top:24px;font-size:9px;color:#aaa;border-top:1px solid #eee;padding-top:8px}
+            .foot{margin-top:22px;border-top:1px solid #e2e8f0;padding-top:6px;font-size:9px;color:#94a3b8;display:flex;justify-content:space-between;align-items:center;gap:10px}
+            .foot b{color:#11335d} .foot .ram{color:#f97316}
+            @media print{body{padding:0} button{display:none}}
           </style>
         </head><body>
-          <h2>🔧 Form Kerja PM — ${escapeHtml(pmType || '-')}</h2>
-          <div class="sub">Interval ${tierIntervalHm} HM &nbsp;|&nbsp; Tanggal cetak: ${now.toLocaleDateString('id-ID')}</div>
+          <div class="kop">
+            <svg class="logo" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="26" y="6" width="12" height="4" fill="currentColor" stroke="none"/><line x1="32" y1="10" x2="32" y2="20"/><circle cx="32" cy="22" r="2" fill="currentColor" stroke="none"/><line x1="28" y1="10" x2="14" y2="50"/><line x1="36" y1="10" x2="50" y2="50"/><line x1="26" y1="18" x2="38" y2="18"/><line x1="23" y1="28" x2="41" y2="28"/><line x1="20" y1="38" x2="44" y2="38"/><line x1="17" y1="48" x2="47" y2="48"/><line x1="26" y1="18" x2="41" y2="28"/><line x1="38" y1="18" x2="23" y2="28"/><line x1="23" y1="28" x2="44" y2="38"/><line x1="41" y1="28" x2="20" y2="38"/><line x1="20" y1="38" x2="47" y2="48"/><line x1="44" y1="38" x2="17" y2="48"/><rect x="10" y="50" width="44" height="4" fill="currentColor" stroke="none"/><line x1="4" y1="58" x2="60" y2="58" stroke-width="3"/></svg>
+            <div>
+              <div class="brand">e<span class="ram">RAM</span>Hoist</div>
+              <div class="t">PT PERTAMINA HULU ROKAN — Hoist &amp; Heavy Equipment</div>
+              <div class="s">Asset Reliability Management · Reliability · Availability · Maintainability</div>
+            </div>
+          </div>
+          <h1>Form Kerja Preventive Maintenance — ${escapeHtml(pmType || '-')}</h1>
+          <div class="meta">Interval ${tierIntervalHm} HM &nbsp;·&nbsp; Tanggal cetak: ${tgl}</div>
           <table class="ident">
             <tr><td class="label">Tag Number</td><td><b>${escapeHtml(eq.tag_number || '-')}</b></td></tr>
             <tr><td class="label">Nama Equipment</td><td>${escapeHtml(eq.nama_equipment || '-')}</td></tr>
@@ -3160,7 +3179,10 @@
             <div class="signbox">Diperiksa oleh: ______________<div class="signline">Tanda tangan &amp; tanggal</div></div>
             <div class="signbox">Ketahui oleh: ______________<div class="signline">Pengawas Lapangan — tanda tangan &amp; tanggal</div></div>
           </div>
-          <div class="footer">Ref: SOP_PM3_PM4_PM5_PM6.md (draft)<br>Dicetak dari eRAMHoist — RAM Field Prabumulih — ${now.toLocaleString('id-ID')}</div>
+          <div class="foot">
+            <div>Ref: SOP_PM3_PM4_PM5_PM6.md (draft) · Dokumen dihasilkan otomatis oleh <b>e<span class="ram">RAM</span>Hoist</b></div>
+            <div>Dicetak: ${tgl} · oleh ${who}</div>
+          </div>
         </body></html>`;
 
         const win = window.open('', '_blank');
