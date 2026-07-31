@@ -18608,6 +18608,61 @@
           ${tbl(['Tier', 'Contoh', 'PM', 'TOH', 'GOH', 'Eco life'], [['A', 'Perkins 1103A, Cummins 4BTA', '500', '6.000', '12.000', '30.000'], ['B', 'CAT C4.4, Deutz 1013', '500', '8.000', '16.000', '35.000'], ['C', 'FG Wilson P220 (Perkins 1106A)', '500', '10.000', '20.000', '40.000'], ['D', 'CAT D3406/C13/C15 (rig prime mover)', '500', '10.000', '20.000', '45.000']])}
           <p><b>Sisa PM</b> = (last_pm_hours + pm_interval_hours) − running_hours. Kalau ≤ 0 → ⚠️ lewat.</p>`)}
 
+        ${sec('#7c3aed', '🔧', 'SOP PM3 / PM4 / PM5 / PM6 — checklist tiap tier', `
+          <p><span class="inline-block bg-amber-100 text-amber-800 text-xs font-bold px-2 py-0.5 rounded">⚠️ DRAFT — belum direview mekanik senior, jangan dianggap final</span></p>
+          <p>Sistem PM berjenjang: tiap tier lebih tinggi mengerjakan <b>SEMUA item tier di bawahnya + tambahan</b> — bukan 4 servis yang terpisah-pisah.</p>
+          ${tbl(['Tier', 'Interval', 'Sifat'], [['PM3', '250 HM', 'Servis rutin/minor'], ['PM4', '500 HM', 'PM3 + menengah'], ['PM5', '1000 HM', 'PM4 + major'], ['PM6', '2000 HM', 'PM5 + komprehensif (persiapan TOH)']])}
+
+          <p class="font-bold text-slate-800 mt-3">🔹 PM3 (250 HM) — servis rutin</p>
+          <ul class="list-disc pl-5 space-y-0.5">
+            <li>Ganti oli mesin & filter oli</li>
+            <li>Drain water separator / fuel filter</li>
+            <li>Cek & bersihkan filter udara</li>
+            <li>Cek level coolant, top up bila kurang</li>
+            <li>Cek kondisi & kekencangan v-belt/fan belt</li>
+            <li>Cek kebocoran oli, bahan bakar, coolant</li>
+            <li>Cek & kencangkan baut-baut kritis (mounting, exhaust)</li>
+            <li>Grease titik-titik gemuk</li>
+            <li>Cek aki: terminal, air aki, tegangan</li>
+            <li>Bersihkan sirip radiator</li>
+            <li>Running test: cek tekanan oli & suhu kerja</li>
+          </ul>
+
+          <p class="font-bold text-slate-800 mt-3">🔹 PM4 (500 HM) — PM3 + tambahan</p>
+          <ul class="list-disc pl-5 space-y-0.5">
+            <li>Ganti filter bahan bakar (bukan cuma drain)</li>
+            <li>Ganti elemen filter udara (bukan cuma dibersihkan)</li>
+            <li>Cek & test alternator / charging system</li>
+            <li>Cek kondisi selang-selang (retak/getas/rembes)</li>
+            <li>Cek turbocharger bila ada (suara, kebocoran)</li>
+            <li>Cek & setel celah klep sesuai jadwal OEM</li>
+            <li>Analisa oli visual sederhana (warna, partikel logam)</li>
+          </ul>
+
+          <p class="font-bold text-slate-800 mt-3">🔹 PM5 (1000 HM) — PM4 + tambahan</p>
+          <ul class="list-disc pl-5 space-y-0.5">
+            <li>Ganti coolant total (flush sistem pendingin)</li>
+            <li>Kalibrasi injector (uji tekanan & pola semprot)</li>
+            <li>Ganti oli hidrolik & filter hidrolik (bila ada)</li>
+            <li>Cek motor starter (arus, kondisi brush)</li>
+            <li>Cek mounting engine (karet/dumper)</li>
+            <li>Cek sistem exhaust (manifold, muffler)</li>
+            <li><b>Ambil sampel oli untuk SOS Lab</b></li>
+          </ul>
+
+          <p class="font-bold text-slate-800 mt-3">🔹 PM6 (2000 HM) — PM5 + komprehensif (pra-TOH)</p>
+          <ul class="list-disc pl-5 space-y-0.5">
+            <li>Ganti seluruh belt & hose secara preventif</li>
+            <li>Kalibrasi ulang seluruh injector + fuel pump</li>
+            <li>Ganti thermostat</li>
+            <li>Cek sistem kelistrikan menyeluruh (wiring, sensor, ECU)</li>
+            <li><b>Wajib</b> sampel oli SOS Lab + NDT komponen kritis</li>
+            <li>Evaluasi kondisi umum vs threshold TOH</li>
+            <li>Dokumentasi foto kondisi komponen utama</li>
+          </ul>
+
+          <p class="mt-2 text-xs text-slate-500">Detail lengkap & lembar pengesahan: file <code>SOP_PM3_PM4_PM5_PM6.md</code> di GitHub repo. Setelah checklist part difinalkan tim lapangan, isikan ke menu <b>📦 PM Parts</b> sesuai tier masing-masing.</p>`)}
+
         ${sec('#0f766e', '🔎', 'RCA — Root Cause Analysis (5-Whys)', `
           <p>Metode investigasi akar masalah menggunakan <b>5-Whys</b> sesuai Pedoman Pemeliharaan PT Pertamina EP No. A04-005/PEP23000/2023-S9.</p>
           <p><b>Kapan RCA wajib dibuat?</b> Sistem otomatis memunculkan alert 🚨 bila equipment mengalami failure <b>&gt;1× dalam 12 bulan terakhir</b>.</p>
