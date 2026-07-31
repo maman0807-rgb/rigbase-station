@@ -3135,9 +3135,11 @@
           <table class="ident">
             <tr><td class="label">Tag Number</td><td><b>${escapeHtml(eq.tag_number || '-')}</b></td></tr>
             <tr><td class="label">Nama Equipment</td><td>${escapeHtml(eq.nama_equipment || '-')}</td></tr>
-            <tr><td class="label">Lokasi</td><td>${escapeHtml(getParentUnitName(eq.assigned_unit_id))}</td></tr>
+            <tr><td class="label">Lokasi (home unit)</td><td>${escapeHtml(getParentUnitName(eq.assigned_unit_id))}</td></tr>
+            <tr><td class="label">Lokasi Pekerjaan</td><td>&nbsp;____________________________</td></tr>
             <tr><td class="label">Brand / Model</td><td>${escapeHtml(eq.brand || '-')} / ${escapeHtml(eq.model || '-')}</td></tr>
-            <tr><td class="label">Running Hours saat cetak</td><td><b>${fmtNumber(Number(currentRunningHours) || 0, ' HM')}</b></td></tr>
+            <tr><td class="label">Running Hours saat cetak</td><td>${fmtNumber(Number(currentRunningHours) || 0, ' HM')} <span style="color:#999">(referensi, bukan bacaan aktual)</span></td></tr>
+            <tr><td class="label">HM saat PM dilakukan</td><td>&nbsp;____________________________</td></tr>
           </table>
           <table class="checklist">
             <thead><tr><th style="width:26px"></th><th>Item Pekerjaan</th><th>Catatan</th></tr></thead>
