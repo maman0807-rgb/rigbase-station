@@ -2146,6 +2146,7 @@
                         ${pmBadge}
                         ${urgBadge}
                         <button onclick="showPMPartsModal('${e.id}', ${pmTierIntervalHm(e._pmType, e._actualInterval)}, ${Math.round(e._remaining)}, '${escapeAttr(e.tag_number)}', '${escapeAttr(e.nama_equipment)}')" class="inline-flex items-center gap-1 text-xs bg-navy text-white px-2.5 py-0.5 rounded-full font-bold shadow-sm hover:opacity-80 transition">📦 Siapkan Part — ${e._pmType} (${pmTierIntervalHm(e._pmType, e._actualInterval)} HM)</button>
+                        <button onclick="printPMForm('${e.id}', '${escapeAttr(e.tag_number)}', '${escapeAttr(e.nama_equipment)}', ${Number(e.running_hours)||0}, ${pmTierIntervalHm(e._pmType, e._actualInterval)}, '${e._pmType}')" class="inline-flex items-center gap-1 text-xs bg-slate-700 text-white px-2.5 py-0.5 rounded-full font-bold shadow-sm hover:opacity-80 transition" title="Cetak form kerja kosong buat dibawa mekanik ke lapangan">🖨 Cetak Form PM</button>
                         <button onclick="showCatatPMModal('${e.id}', '${escapeAttr(e.tag_number)}', '${escapeAttr(e.nama_equipment)}', ${Number(e.running_hours)||0}, ${e._actualInterval}, '${e._pmType}')" class="inline-flex items-center gap-1 text-xs bg-green-600 text-white px-2.5 py-0.5 rounded-full font-bold shadow-sm hover:opacity-80 transition">✅ Catat ${e._pmType} Selesai</button>
                       </div>
                     </div>
@@ -2899,19 +2900,6 @@
 
     async function showCatatPMModal(equipmentId, tagNumber, equipmentName, currentRunningHours, actualInterval, pmType = '') {
       const nowLocal = toLocalInput(new Date().toISOString());
-      const checklist = getPMChecklistForTier(pmType);
-      const checklistHtml = checklist.length ? `
-          <div>
-            <label class="text-xs font-semibold text-slate-500 uppercase">Checklist Pekerjaan (${pmType})</label>
-            <div class="mt-1 max-h-56 overflow-y-auto border border-slate-200 rounded-lg p-3 space-y-1.5 bg-slate-50">
-              ${checklist.map(item => `
-                <label class="flex items-start gap-2 text-sm text-slate-700 cursor-pointer">
-                  <input type="checkbox" class="pm-checklist-item mt-0.5" data-item="${escapeAttr(item)}">
-                  <span>${escapeHtml(item)}</span>
-                </label>`).join('')}
-            </div>
-            <p class="text-[11px] text-slate-400 mt-1">Centang item yang sudah dikerjakan — buat catatan/audit trail, tidak menghalangi simpan PM kalau ada yang belum sempat dicentang.</p>
-          </div>` : '';
       const body = `
         <div class="space-y-4">
           <div class="bg-green-50 border border-green-200 rounded-lg px-4 py-3">
@@ -2939,7 +2927,6 @@
                 class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-green-500 mt-1">
             </div>
           </div>
-          ${checklistHtml}
           <div>
             <label class="text-xs text-slate-500">Catatan (optional)</label>
             <input id="pm-done-notes" type="text" placeholder="mis. ganti oli mesin, filter udara, cek valve…"
@@ -2987,25 +2974,8 @@
           created_by:     state.user?.id || null,
           created_by_name: state.profile?.full_name || state.profile?.email || '',
         };
-        const { data: dtRow, error: dtErr } = await state.supabase.from('downtime_events').insert(payload).select('id').single();
+        const { error: dtErr } = await state.supabase.from('downtime_events').insert(payload);
         if (dtErr) throw dtErr;
-
-        // 1b. Catat checklist yang dicentang mekanik (audit trail — non-blocking, tidak wajib semua dicentang)
-        const checklistEls = document.querySelectorAll('.pm-checklist-item');
-        if (checklistEls.length) {
-          try {
-            const clRows = Array.from(checklistEls).map(el => ({
-              equipment_id:      equipmentId,
-              downtime_event_id: dtRow.id,
-              pm_type:           pmType,
-              item_text:         el.dataset.item,
-              checked:           el.checked,
-            }));
-            await state.supabase.from('pm_checklist_log').insert(clRows);
-          } catch (clErr) {
-            console.warn('Insert checklist log gagal (non-fatal):', clErr.message);
-          }
-        }
 
         // 2. Update running_hours (samakan dgn bacaan fisik saat PM) + last_pm_hours + last_pm_date → reset counter PM
         // running_hours WAJIB ikut di-set di sini juga — kalau cuma last_pm_hours, dan running_hours sistem
@@ -3121,6 +3091,76 @@
       setTimeout(() => win.print(), 500);
     }
     window.exportPMPartsPDF = exportPMPartsPDF;
+
+    // Form kerja PM (checklist kosong siap-cetak) — dibawa mekanik ke lapangan, DIISI TANGAN di sana,
+    // bukan checklist interaktif di app. Item checklist generik per-tier, lihat PM_CHECKLIST_INCREMENTAL.
+    async function printPMForm(equipmentId, tagNumber, equipmentName, currentRunningHours, tierIntervalHm, pmType) {
+      try {
+        const { data: eq, error } = await state.supabase.from('equipment').select('*').eq('id', equipmentId).single();
+        if (error) throw error;
+
+        const checklist = getPMChecklistForTier(pmType);
+        const rows = checklist.length
+          ? checklist.map(item => `
+              <tr>
+                <td style="width:26px;text-align:center;font-size:15px">☐</td>
+                <td>${escapeHtml(item)}</td>
+                <td></td>
+              </tr>`).join('')
+          : `<tr><td colspan="3" style="text-align:center;color:#9ca3af;padding:12px">Belum ada checklist generik untuk tier "${escapeHtml(pmType || '-')}" — isi manual sesuai instruksi mekanik senior.</td></tr>`;
+
+        const now = new Date();
+        const html = `<!DOCTYPE html><html><head>
+          <meta charset="UTF-8">
+          <title>Form Kerja PM ${pmType} — ${tagNumber}</title>
+          <style>
+            body{font-family:Arial,sans-serif;font-size:12px;padding:24px;color:#222}
+            h2{color:#1E3A8A;margin-bottom:4px}
+            .sub{color:#666;font-size:11px;margin-bottom:16px}
+            table.ident{width:100%;border-collapse:collapse;margin-bottom:16px}
+            table.ident td{padding:6px 10px;border-bottom:1px solid #e5e7eb;font-size:11px}
+            table.ident td.label{background:#f1f5f9;font-weight:600;width:30%}
+            table.checklist{width:100%;border-collapse:collapse;margin-top:8px}
+            table.checklist th{background:#1E3A8A;color:#fff;padding:8px 10px;text-align:left;font-size:11px}
+            table.checklist td{padding:8px 10px;border-bottom:1px solid #e5e7eb;font-size:11.5px;vertical-align:top}
+            table.checklist tr:nth-child(even) td{background:#f9fafb}
+            .signblock{display:flex;justify-content:space-between;margin-top:32px}
+            .signbox{width:46%;font-size:11px}
+            .signline{margin-top:44px;border-top:1px solid #333;padding-top:4px;color:#666}
+            .footer{margin-top:24px;font-size:9px;color:#aaa;border-top:1px solid #eee;padding-top:8px}
+          </style>
+        </head><body>
+          <h2>🔧 Form Kerja PM — ${escapeHtml(pmType || '-')}</h2>
+          <div class="sub">Interval ${tierIntervalHm} HM &nbsp;|&nbsp; Tanggal cetak: ${now.toLocaleDateString('id-ID')}</div>
+          <table class="ident">
+            <tr><td class="label">Tag Number</td><td><b>${escapeHtml(eq.tag_number || '-')}</b></td></tr>
+            <tr><td class="label">Nama Equipment</td><td>${escapeHtml(eq.nama_equipment || '-')}</td></tr>
+            <tr><td class="label">Lokasi</td><td>${escapeHtml(getParentUnitName(eq.assigned_unit_id))}</td></tr>
+            <tr><td class="label">Brand / Model</td><td>${escapeHtml(eq.brand || '-')} / ${escapeHtml(eq.model || '-')}</td></tr>
+            <tr><td class="label">Running Hours saat cetak</td><td><b>${fmtNumber(Number(currentRunningHours) || 0, ' HM')}</b></td></tr>
+          </table>
+          <table class="checklist">
+            <thead><tr><th style="width:26px"></th><th>Item Pekerjaan</th><th>Catatan</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+          <div class="signblock">
+            <div class="signbox">Nama Mekanik: ________________________<div class="signline">Tanda tangan &amp; tanggal</div></div>
+            <div class="signbox">Diperiksa oleh: ________________________<div class="signline">Tanda tangan &amp; tanggal</div></div>
+          </div>
+          <div class="footer">Ref: SOP_PM3_PM4_PM5_PM6.md (draft)<br>Dicetak dari eRAMHoist — RAM Field Prabumulih — ${now.toLocaleString('id-ID')}</div>
+        </body></html>`;
+
+        const win = window.open('', '_blank');
+        if (!win) { toast('Pop-up diblokir browser. Izinkan pop-up untuk cetak form.', 'error'); return; }
+        win.document.write(html);
+        win.document.close();
+        win.focus();
+        setTimeout(() => win.print(), 500);
+      } catch (err) {
+        toast('Gagal cetak form: ' + err.message, 'error');
+      }
+    }
+    window.printPMForm = printPMForm;
 
     // ============================================================
     // PM PARTS TEMPLATE — page functions
@@ -7254,6 +7294,7 @@
             <div class="flex gap-2 flex-wrap">
               ${isSrMekanikOrAbove() ? `<button onclick="openHMReviseModal('${eq.id}','${escapeHtml(eq.tag_number).replace(/'/g,"&#39;")}',${Number(eq.running_hours) || 0},'${u}')" class="bg-orange-100 hover:bg-orange-200 text-orange-700 px-3 py-1.5 rounded-lg text-sm font-medium" title="Revisi HM kalau counter di unit beda dgn sistem">✏ Revisi HM</button>` : ''}
               ${isSrMekanikOrAbove() && eq.pm_type !== 'plo' && eq.pm_type !== 'time' ? `<button onclick="showCatatPMModal('${eq.id}','${escapeHtml(eq.tag_number).replace(/'/g,"&#39;")}','${escapeHtml(eq.nama_equipment || '').replace(/'/g,"&#39;")}',${_currentHM},${_eqInterval},'${_nextPmType || ''}')" class="bg-green-100 hover:bg-green-200 text-green-700 px-3 py-1.5 rounded-lg text-sm font-medium" title="Catat PM selesai — bisa diakses kapan saja, tidak perlu nunggu status due di Dashboard">✅ Catat PM Selesai</button>` : ''}
+              ${eq.pm_type !== 'plo' && eq.pm_type !== 'time' ? `<button onclick="printPMForm('${eq.id}','${escapeHtml(eq.tag_number).replace(/'/g,"&#39;")}','${escapeHtml(eq.nama_equipment || '').replace(/'/g,"&#39;")}',${_currentHM},${pmTierIntervalHm(_nextPmType, _eqInterval)},'${_nextPmType || ''}')" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg text-sm font-medium" title="Cetak form kerja kosong buat dibawa mekanik ke lapangan">🖨 Cetak Form PM</button>` : ''}
               <button onclick="generateWorkOrderPDF('${eq.id}')" class="bg-purple-100 hover:bg-purple-200 text-purple-700 px-3 py-1.5 rounded-lg text-sm font-medium" title="Generate Work Order PDF utk dibawa ke lapangan">📋 Work Order PDF</button>
               ${isSrMekanikOrAbove() ? `<button onclick="openSnoozeModal('${eq.id}','${escapeHtml(eq.tag_number).replace(/'/g,"&#39;")}')" class="bg-blue-100 hover:bg-blue-200 text-blue-700 px-3 py-1.5 rounded-lg text-sm font-medium" title="Snooze alert sampai action selesai">🔕 Snooze Alert</button>` : ''}
               <button onclick="openMaintenanceModal('${eq.id}')" class="bg-safety hover:bg-safety-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium">+ Tambah</button>
