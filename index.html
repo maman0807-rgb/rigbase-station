@@ -895,6 +895,58 @@
       const mult = { PM3: 1, PM4: 2, PM5: 4, PM6: 8, GOH: 40 }[pmType];
       return mult ? baseInterval * mult : baseInterval;
     }
+
+    // Checklist SOP PM3-PM6 — generik per-tier (sama utk semua equipment diesel), BUKAN per-equipment.
+    // Berjenjang: item PM4 = item PM3 + tambahan, dst — lihat SOP_PM3_PM4_PM5_PM6.md
+    const PM_CHECKLIST_INCREMENTAL = {
+      PM3: [
+        'Ganti oli mesin & filter oli',
+        'Drain water separator / fuel filter',
+        'Cek & bersihkan filter udara',
+        'Cek level coolant, top up bila kurang',
+        'Cek kondisi & kekencangan v-belt/fan belt',
+        'Cek kebocoran oli, bahan bakar, coolant',
+        'Cek & kencangkan baut-baut kritis (mounting, exhaust)',
+        'Grease titik-titik gemuk',
+        'Cek aki: terminal, air aki, tegangan',
+        'Bersihkan sirip radiator',
+        'Running test: cek tekanan oli & suhu kerja',
+      ],
+      PM4: [
+        'Ganti filter bahan bakar (bukan cuma drain)',
+        'Ganti elemen filter udara (bukan cuma dibersihkan)',
+        'Cek & test alternator / charging system',
+        'Cek kondisi selang-selang (retak/getas/rembes)',
+        'Cek turbocharger bila ada (suara, kebocoran)',
+        'Cek & setel celah klep sesuai jadwal OEM',
+        'Analisa oli visual sederhana (warna, partikel logam)',
+      ],
+      PM5: [
+        'Ganti coolant total (flush sistem pendingin)',
+        'Kalibrasi injector (uji tekanan & pola semprot)',
+        'Ganti oli hidrolik & filter hidrolik (bila ada)',
+        'Cek motor starter (arus, kondisi brush)',
+        'Cek mounting engine (karet/dumper)',
+        'Cek sistem exhaust (manifold, muffler)',
+        'Ambil sampel oli untuk SOS Lab',
+      ],
+      PM6: [
+        'Ganti seluruh belt & hose secara preventif',
+        'Kalibrasi ulang seluruh injector + fuel pump',
+        'Ganti thermostat',
+        'Cek sistem kelistrikan menyeluruh (wiring, sensor, ECU)',
+        'Wajib sampel oli SOS Lab + NDT komponen kritis',
+        'Evaluasi kondisi umum vs threshold TOH',
+        'Dokumentasi foto kondisi komponen utama',
+      ],
+    };
+    const PM_TIER_ORDER = ['PM3', 'PM4', 'PM5', 'PM6'];
+    // Checklist kumulatif buat 1 tier (PM5 = semua item PM3+PM4+PM5). GOH/PM-XHM custom → nggak ada checklist generik.
+    function getPMChecklistForTier(pmType) {
+      const idx = PM_TIER_ORDER.indexOf(pmType);
+      if (idx === -1) return [];
+      return PM_TIER_ORDER.slice(0, idx + 1).flatMap(t => PM_CHECKLIST_INCREMENTAL[t]);
+    }
     // PM berbasis JAM (HM): pakai running_hours (diisi mekanik via Logbook) vs last_pm_hours + pm_interval_hours.
     // Hanya unit ber-HM (running_hours > 0) yang dihitung. Tampilkan yang mendekati / sudah lewat jam PM.
     // ratio: 0.2 = warning (20% sisa interval), 0.1 = critical (10% sisa interval) — proporsional per tier.
@@ -2847,6 +2899,19 @@
 
     async function showCatatPMModal(equipmentId, tagNumber, equipmentName, currentRunningHours, actualInterval, pmType = '') {
       const nowLocal = toLocalInput(new Date().toISOString());
+      const checklist = getPMChecklistForTier(pmType);
+      const checklistHtml = checklist.length ? `
+          <div>
+            <label class="text-xs font-semibold text-slate-500 uppercase">Checklist Pekerjaan (${pmType})</label>
+            <div class="mt-1 max-h-56 overflow-y-auto border border-slate-200 rounded-lg p-3 space-y-1.5 bg-slate-50">
+              ${checklist.map(item => `
+                <label class="flex items-start gap-2 text-sm text-slate-700 cursor-pointer">
+                  <input type="checkbox" class="pm-checklist-item mt-0.5" data-item="${escapeAttr(item)}">
+                  <span>${escapeHtml(item)}</span>
+                </label>`).join('')}
+            </div>
+            <p class="text-[11px] text-slate-400 mt-1">Centang item yang sudah dikerjakan — buat catatan/audit trail, tidak menghalangi simpan PM kalau ada yang belum sempat dicentang.</p>
+          </div>` : '';
       const body = `
         <div class="space-y-4">
           <div class="bg-green-50 border border-green-200 rounded-lg px-4 py-3">
@@ -2874,6 +2939,7 @@
                 class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-green-500 mt-1">
             </div>
           </div>
+          ${checklistHtml}
           <div>
             <label class="text-xs text-slate-500">Catatan (optional)</label>
             <input id="pm-done-notes" type="text" placeholder="mis. ganti oli mesin, filter udara, cek valve…"
@@ -2921,8 +2987,25 @@
           created_by:     state.user?.id || null,
           created_by_name: state.profile?.full_name || state.profile?.email || '',
         };
-        const { error: dtErr } = await state.supabase.from('downtime_events').insert(payload);
+        const { data: dtRow, error: dtErr } = await state.supabase.from('downtime_events').insert(payload).select('id').single();
         if (dtErr) throw dtErr;
+
+        // 1b. Catat checklist yang dicentang mekanik (audit trail — non-blocking, tidak wajib semua dicentang)
+        const checklistEls = document.querySelectorAll('.pm-checklist-item');
+        if (checklistEls.length) {
+          try {
+            const clRows = Array.from(checklistEls).map(el => ({
+              equipment_id:      equipmentId,
+              downtime_event_id: dtRow.id,
+              pm_type:           pmType,
+              item_text:         el.dataset.item,
+              checked:           el.checked,
+            }));
+            await state.supabase.from('pm_checklist_log').insert(clRows);
+          } catch (clErr) {
+            console.warn('Insert checklist log gagal (non-fatal):', clErr.message);
+          }
+        }
 
         // 2. Update running_hours (samakan dgn bacaan fisik saat PM) + last_pm_hours + last_pm_date → reset counter PM
         // running_hours WAJIB ikut di-set di sini juga — kalau cuma last_pm_hours, dan running_hours sistem
