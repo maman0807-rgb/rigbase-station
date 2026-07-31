@@ -16646,6 +16646,15 @@
         if (!okBig) return;
       }
       try {
+        // PENTING: ambil snapshot children SEBELUM update induk dikirim. Trigger DB `cascade_hm_to_children`
+        // langsung nyalin running_hours ke anak SINKRON begitu induk di-update (dalam transaksi yang sama) —
+        // kalau snapshot anak diambil SETELAH update induk, running_hours anak udah keburu ke-update duluan
+        // oleh trigger, bikin delta anak keitung 0 (bug yang sempat kejadian, ketauan dari kasus ENGINE-MP-KB150B).
+        const { data: followersBefore } = await state.supabase.from('equipment')
+          .select('id, tag_number, running_hours, last_pm_hours, last_toh_hours, last_goh_hours')
+          .eq('parent_equipment_id', equipmentId)
+          .eq('follow_parent_hm', true);
+
         // Ambil last_pm/toh/goh_hours SEBELUM update — digeser sebesar delta yang sama (bukan direset ke 0),
         // supaya jarak/gap ke PM/TOH/GOH tetap akurat setelah koreksi (kalau error-nya sistemik, biasanya ikut
         // ter-drag bareng running_hours). Ini BEDA dari "Catat PM Selesai" — nggak pernah klaim PM baru terjadi,
@@ -16658,18 +16667,14 @@
         if (eqBefore?.last_toh_hours != null) eqUpdate.last_toh_hours = Math.max(0, Number(eqBefore.last_toh_hours) + delta);
         if (eqBefore?.last_goh_hours != null) eqUpdate.last_goh_hours = Math.max(0, Number(eqBefore.last_goh_hours) + delta);
 
-        // Update equipment
+        // Update equipment (ini juga men-trigger DB cascade_hm_to_children yang nyalin running_hours ke children)
         const { error: updErr } = await state.supabase.from('equipment').update(eqUpdate).eq('id', equipmentId);
         if (updErr) throw updErr;
-        // Cascade ke children yang follow_parent_hm = true — running_hours anak disamakan ABSOLUT ke induk
-        // (desain lama), tapi last_pm/toh/goh_hours anak digeser sebesar DELTA ANAK SENDIRI (bisa beda dari
-        // delta induk kalau HM anak sempat menyimpang), bukan delta induk — supaya gap anak juga tetap akurat.
-        const { data: followers } = await state.supabase.from('equipment')
-          .select('id, tag_number, running_hours, last_pm_hours, last_toh_hours, last_goh_hours')
-          .eq('parent_equipment_id', equipmentId)
-          .eq('follow_parent_hm', true);
-        if (followers && followers.length) {
-          for (const f of followers) {
+        // Susulkan shift last_pm/toh/goh_hours ke children — running_hours mereka udah ke-cascade trigger DB
+        // di atas, di sini cuma nyusulin field yang trigger nggak sentuh, pakai snapshot SEBELUM update tadi.
+        // Delta anak = ANAK SENDIRI (bisa beda dari delta induk kalau HM anak sempat menyimpang).
+        if (followersBefore && followersBefore.length) {
+          for (const f of followersBefore) {
             const fDelta = newHM - Number(f.running_hours || 0);
             const fUpdate = { running_hours: newHM, updated_by: state.user.id, updated_at: new Date().toISOString() };
             if (f.last_pm_hours != null)  fUpdate.last_pm_hours  = Math.max(0, Number(f.last_pm_hours) + fDelta);
