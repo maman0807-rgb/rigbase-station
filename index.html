@@ -16690,42 +16690,29 @@
         if (!okBig) return;
       }
       try {
-        // PENTING: ambil snapshot children SEBELUM update induk dikirim. Trigger DB `cascade_hm_to_children`
-        // langsung nyalin running_hours ke anak SINKRON begitu induk di-update (dalam transaksi yang sama) —
-        // kalau snapshot anak diambil SETELAH update induk, running_hours anak udah keburu ke-update duluan
-        // oleh trigger, bikin delta anak keitung 0 (bug yang sempat kejadian, ketauan dari kasus ENGINE-MP-KB150B).
-        const { data: followersBefore } = await state.supabase.from('equipment')
-          .select('id, tag_number, running_hours, last_pm_hours, last_toh_hours, last_goh_hours')
+        // Update equipment — CUMA running_hours. last_pm/toh/goh_hours SENGAJA TIDAK ikut digeser:
+        // user eksplisit minta "Sisa ke PM" bereaksi natural mengikuti koreksi HM (HM dikoreksi lebih
+        // kecil → Sisa ke PM bertambah, dan sebaliknya) — bukan dijaga tetap konstan (itu perilaku
+        // delta-shift yang sempat dicoba 2026-07-31, di-revert 2026-08-01 karena berlawanan dgn ekspektasi).
+        // Kalau "Sisa ke PM" muncul lebih besar dari interval penuh setelah revisi, itu SINYAL last_pm_hours
+        // sendiri perlu dikoreksi terpisah (cek downtime_events buat cari angka PM asli) — bukan otomatis.
+        const { error: updErr } = await state.supabase.from('equipment').update({
+          running_hours: newHM,
+          updated_by: state.user.id,
+          updated_at: new Date().toISOString(),
+        }).eq('id', equipmentId);
+        if (updErr) throw updErr;
+        // Cascade ke children yang follow_parent_hm = true
+        const { data: followers } = await state.supabase.from('equipment')
+          .select('id, tag_number')
           .eq('parent_equipment_id', equipmentId)
           .eq('follow_parent_hm', true);
-
-        // Ambil last_pm/toh/goh_hours SEBELUM update — digeser sebesar delta yang sama (bukan direset ke 0),
-        // supaya jarak/gap ke PM/TOH/GOH tetap akurat setelah koreksi (kalau error-nya sistemik, biasanya ikut
-        // ter-drag bareng running_hours). Ini BEDA dari "Catat PM Selesai" — nggak pernah klaim PM baru terjadi,
-        // cuma jaga gap yang sudah ada tetap konsisten lewat koreksi HM.
-        const { data: eqBefore } = await state.supabase.from('equipment')
-          .select('last_pm_hours, last_toh_hours, last_goh_hours')
-          .eq('id', equipmentId).maybeSingle();
-        const eqUpdate = { running_hours: newHM, updated_by: state.user.id, updated_at: new Date().toISOString() };
-        if (eqBefore?.last_pm_hours != null)  eqUpdate.last_pm_hours  = Math.max(0, Number(eqBefore.last_pm_hours) + delta);
-        if (eqBefore?.last_toh_hours != null) eqUpdate.last_toh_hours = Math.max(0, Number(eqBefore.last_toh_hours) + delta);
-        if (eqBefore?.last_goh_hours != null) eqUpdate.last_goh_hours = Math.max(0, Number(eqBefore.last_goh_hours) + delta);
-
-        // Update equipment (ini juga men-trigger DB cascade_hm_to_children yang nyalin running_hours ke children)
-        const { error: updErr } = await state.supabase.from('equipment').update(eqUpdate).eq('id', equipmentId);
-        if (updErr) throw updErr;
-        // Susulkan shift last_pm/toh/goh_hours ke children — running_hours mereka udah ke-cascade trigger DB
-        // di atas, di sini cuma nyusulin field yang trigger nggak sentuh, pakai snapshot SEBELUM update tadi.
-        // Delta anak = ANAK SENDIRI (bisa beda dari delta induk kalau HM anak sempat menyimpang).
-        if (followersBefore && followersBefore.length) {
-          for (const f of followersBefore) {
-            const fDelta = newHM - Number(f.running_hours || 0);
-            const fUpdate = { running_hours: newHM, updated_by: state.user.id, updated_at: new Date().toISOString() };
-            if (f.last_pm_hours != null)  fUpdate.last_pm_hours  = Math.max(0, Number(f.last_pm_hours) + fDelta);
-            if (f.last_toh_hours != null) fUpdate.last_toh_hours = Math.max(0, Number(f.last_toh_hours) + fDelta);
-            if (f.last_goh_hours != null) fUpdate.last_goh_hours = Math.max(0, Number(f.last_goh_hours) + fDelta);
-            await state.supabase.from('equipment').update(fUpdate).eq('id', f.id);
-          }
+        if (followers && followers.length) {
+          await state.supabase.from('equipment').update({
+            running_hours: newHM,
+            updated_by: state.user.id,
+            updated_at: new Date().toISOString(),
+          }).in('id', followers.map(f => f.id));
         }
         // Audit log
         await logActivity('hm_revised', 'equipment', equipmentId, tagDisplay, {
@@ -16734,7 +16721,6 @@
           delta: delta,
           unit: unit,
           reason: reason,
-          pm_toh_goh_shifted_by_delta: true,
         });
         // Telegram alert (transparansi tim)
         sendTelegramAlert(
@@ -16743,11 +16729,10 @@
           `📊 Sistem: <code>${fmtNumber(oldHM, ' ' + unit)}</code> → Actual: <code>${fmtNumber(newHM, ' ' + unit)}</code>\n` +
           `📈 Δ ${delta > 0 ? '+' : ''}${fmtNumber(delta, ' ' + unit)} (${pctChange.toFixed(0)}%)\n` +
           `📋 ${reason}\n` +
-          `🔧 last_pm/toh/goh_hours ikut digeser Δ yang sama (gap ke PM/TOH/GOH tetap konsisten)\n` +
           `👷 oleh: ${escapeHtml(state.profile?.full_name || state.profile?.email || '-')}`
         );
         closeModal();
-        toast(`✓ HM ${tagDisplay} di-revisi dari ${fmtNumber(oldHM, ' ' + unit)} → ${fmtNumber(newHM, ' ' + unit)}. last_pm/toh/goh_hours ikut digeser sebesar delta yang sama.`, 'success');
+        toast(`✓ HM ${tagDisplay} di-revisi dari ${fmtNumber(oldHM, ' ' + unit)} → ${fmtNumber(newHM, ' ' + unit)}.`, 'success');
         // Refresh detail page kalau ada
         if (state.currentEquipmentId === equipmentId) {
           setEquipmentView('detail', equipmentId);
