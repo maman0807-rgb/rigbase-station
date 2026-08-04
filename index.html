@@ -950,7 +950,7 @@
     }
     // PM berbasis JAM (HM): pakai running_hours (diisi mekanik via Logbook) vs last_pm_hours + pm_interval_hours.
     // Hanya unit ber-HM (running_hours > 0) yang dihitung. Tampilkan yang mendekati / sudah lewat jam PM.
-    // ratio: 0.2 = warning (20% sisa interval), 0.1 = critical (10% sisa interval) — proporsional per tier.
+    // ratio: 0.2 = warning (threshold flat 100 jam), 0.1 = critical (threshold flat 50 jam) — lihat _threshold di bawah.
     async function fetchPMDueByHours(ratio = 0.2) {
       const { data, error } = await state.supabase
         .from('equipment')
@@ -976,8 +976,8 @@
           const _pmType   = (interval % 250 !== 0)
                             ? `PM-${interval}HM`
                             : (() => { const t = getPMTypeByCycle(nextCycle); return (t === 'GOH' && e.goh_interval_hours) ? 'PM3' : t; })();
-          // Threshold proporsional: 20% interval untuk warning, 10% untuk critical, min 50 HM
-          const _threshold = Math.max(50, Math.round(interval * ratio));
+          // Threshold flat (disepakati 2026-08-04, bukan proporsional per interval lagi): 100 jam untuk warning, 50 jam untuk critical
+          const _threshold = ratio <= 0.1 ? 50 : 100;
           // Fallback time-based (opsional, cuma aktif kalau pm_max_interval_days diisi) — buat equipment
           // yang jarang jalan (mis. MP well-service, 3-5 jam/sumur) supaya HM bukan satu-satunya pemicu PM.
           // "Mana duluan": HM ATAU batas hari sejak PM terakhir.
