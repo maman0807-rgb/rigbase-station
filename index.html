@@ -980,12 +980,13 @@
           const _threshold = ratio <= 0.1 ? 50 : 100;
           // Fallback time-based (opsional, cuma aktif kalau pm_max_interval_days diisi) — buat equipment
           // yang jarang jalan (mis. MP well-service, 3-5 jam/sumur) supaya HM bukan satu-satunya pemicu PM.
-          // "Mana duluan": HM ATAU batas hari sejak PM terakhir.
+          // "Mana duluan": HM ATAU batas hari sejak PM terakhir. Threshold flat 10% hari (disepakati 2026-08-06,
+          // sebelumnya proporsional ikut ratio 0.2/0.1 warna panel — sekarang sama-sama 10% terlepas panelnya).
           let _daysRemaining = null, _dayThreshold = null;
           if (e.pm_max_interval_days && e.last_pm_date) {
             const daysSince = Math.floor((Date.now() - new Date(e.last_pm_date).getTime()) / 86400000);
             _daysRemaining = Number(e.pm_max_interval_days) - daysSince;
-            _dayThreshold  = Math.max(7, Math.round(Number(e.pm_max_interval_days) * ratio));
+            _dayThreshold  = Math.max(7, Math.round(Number(e.pm_max_interval_days) * 0.1));
           }
           const _dueByHM   = remaining <= _threshold;
           const _dueByTime = _daysRemaining != null && _daysRemaining <= _dayThreshold;
