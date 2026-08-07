@@ -1003,10 +1003,13 @@
 
     // PM berbasis KM: utk Damkar, Slickline truck, Kendaraan (pm_type='km').
     // Field running_hours dipakai sbg odometer KM; pm_interval_hours dipakai sbg interval KM (default 5.000 km).
+    // Fallback time-based (pm_max_interval_days) ditambah 2026-08-07 — sebelumnya cuma ada di fetchPMDueByHours,
+    // jadi kendaraan yang jarang jalan (KM nggak nambah) tapi udah lama nggak PM nggak pernah muncul di dashboard
+    // manapun (kasus nyata: CT-BG8200CE, lewat 76 hari tapi KM masih full karena nggak pernah dipakai).
     async function fetchPMDueByKm(thresholdKm = 500) {
       const { data, error } = await state.supabase
         .from('equipment')
-        .select('id, tag_number, nama_equipment, assigned_unit_id, status_operasi, running_hours, last_pm_hours, pm_interval_hours, pm_type')
+        .select('id, tag_number, nama_equipment, assigned_unit_id, status_operasi, running_hours, last_pm_hours, last_pm_date, pm_interval_hours, pm_type, pm_max_interval_days')
         .eq('pm_type', 'km');
       if (error) throw error;
       return (data || [])
@@ -1014,9 +1017,17 @@
           const interval  = Number(e.pm_interval_hours) || 5000;
           const used      = Number(e.running_hours || 0) - Number(e.last_pm_hours || 0);
           const remaining = interval - used;
-          return { ...e, _interval: interval, _used: used, _remaining: remaining };
+          let _daysRemaining = null, _dayThreshold = null;
+          if (e.pm_max_interval_days && e.last_pm_date) {
+            const daysSince = Math.floor((Date.now() - new Date(e.last_pm_date).getTime()) / 86400000);
+            _daysRemaining = Number(e.pm_max_interval_days) - daysSince;
+            _dayThreshold  = Math.max(7, Math.round(Number(e.pm_max_interval_days) * 0.1));
+          }
+          const _dueByKm   = Number(e.running_hours) > 0 && remaining <= thresholdKm;
+          const _dueByTime = _daysRemaining != null && _daysRemaining <= _dayThreshold;
+          return { ...e, _interval: interval, _used: used, _remaining: remaining, _daysRemaining, _dayThreshold, _dueByKm, _dueByTime };
         })
-        .filter(e => Number(e.running_hours) > 0 && e._remaining <= thresholdKm)
+        .filter(e => e._dueByKm || e._dueByTime)
         .sort((a, b) => a._remaining - b._remaining)
         .slice(0, 15);
     }
@@ -2074,7 +2085,7 @@
           <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
               <h4 class="text-base font-bold text-slate-800 mb-3 flex items-center gap-2">🔧 Mendekati Maintenance PM</h4>
-              <p class="text-xs text-slate-400 mb-3">Equipment dengan sisa HM ≤ 20% interval PM tiap unit (proporsional per tier).</p>
+              <p class="text-xs text-slate-400 mb-3">Equipment dengan sisa ≤100 HM, atau sisa ≤10% dari batas hari (kalau nggak jalan-jalan).</p>
               <div id="dash-due" class="space-y-2 text-sm">Memuat…</div>
             </div>
             <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
@@ -2230,16 +2241,25 @@
             $('#dash-pmkm').innerHTML = pmKm.length === 0
               ? '<div class="text-slate-400 text-sm">Tidak ada kendaraan mendekati km PM. (Isi pm_interval_hours sbg interval km, atau pakai default 5.000 km.)</div>'
               : pmKm.map(e => {
-                  const over  = e._remaining < 0;
-                  const color = over ? 'text-red-700' : (e._remaining <= 200 ? 'text-amber-700' : 'text-slate-700');
+                  // Kendaraan yang due KARENA WAKTU (bukan KM) — jarang jalan, KM masih jauh dari interval.
+                  const dueByTimeOnly = e._dueByTime && !e._dueByKm;
+                  const daysRem = e._daysRemaining;
+                  const over  = dueByTimeOnly ? daysRem <= 0 : e._remaining < 0;
+                  const color = dueByTimeOnly
+                    ? (daysRem <= 0 ? 'text-red-700' : 'text-amber-700')
+                    : (over ? 'text-red-700' : (e._remaining <= 200 ? 'text-amber-700' : 'text-slate-700'));
+                  const label = dueByTimeOnly
+                    ? (daysRem <= 0 ? `lewat ${fmtNumber(Math.abs(Math.round(daysRem)), ' hari')}` : `sisa ${fmtNumber(Math.round(daysRem), ' hari')}`)
+                    : (over ? `lewat ${fmtNumber(-e._remaining, ' km')}` : `sisa ${fmtNumber(e._remaining, ' km')}`);
                   return `<button onclick="setEquipmentView('detail','${e.id}'); navigate('equipment')" class="w-full text-left flex items-center justify-between hover:bg-slate-50 px-2 py-1.5 rounded">
                     <div class="min-w-0">
                       <div class="font-semibold text-navy text-sm truncate">${escapeHtml(e.tag_number)}</div>
                       <div class="text-xs text-slate-500 truncate">${escapeHtml(e.nama_equipment)} • ${escapeHtml(getParentUnitName(e.assigned_unit_id))}</div>
                     </div>
                     <div class="text-right flex-shrink-0 ml-2">
-                      <div class="${color} font-semibold text-sm">${over ? `lewat ${fmtNumber(-e._remaining, ' km')}` : `sisa ${fmtNumber(e._remaining, ' km')}`}</div>
+                      <div class="${color} font-semibold text-sm">${label}</div>
                       <div class="text-xs text-slate-500">${fmtNumber(e.running_hours, ' km')} · PM tiap ${fmtNumber(e._interval, ' km')}</div>
+                      ${dueByTimeOnly ? `<div class="text-[11px] text-slate-400 mt-0.5">KM baru terpakai ${Math.round(e._used)} dari ${e._interval} — due karena sudah ${(Number(e.pm_max_interval_days) - daysRem)} hari sejak PM terakhir</div>` : ''}
                     </div>
                   </button>`;
                 }).join('');
