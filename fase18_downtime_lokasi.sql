@@ -1,0 +1,1 @@
+ALTER TABLE downtime_events ADD COLUMN IF NOT EXISTS lokasi TEXT;

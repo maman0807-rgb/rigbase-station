@@ -14701,6 +14701,9 @@
               ${Object.entries(DT_CAT).map(([k, l]) => `<option value="${k}" ${e.category === k ? 'selected' : ''}>${l}</option>`).join('')}
             </select>
             <p class="text-[11px] text-slate-400 mt-1">💡 <b>Gejala</b> = alat masih jalan tapi ada tanda-tanda aneh (asap, suara, getaran). Tidak menurunkan availability. Kalau benar-benar rusak → pilih Breakdown / Troubleshoot.</p></div>
+          <div><label class="text-xs text-slate-500">Lokasi</label>
+            <input id="dt-lokasi" value="${escapeHtml(e.lokasi || '')}" placeholder="mis. SKG Beringin, SP1 GNK, Rig BW KB150.C" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy">
+            <p class="text-[11px] text-slate-400 mt-1">Lokasi fisik kejadian downtime/perbaikan — biar kelihatan di laporan WAHA/Telegram.</p></div>
           <div><label class="text-xs text-slate-500">Dilaporkan oleh (operator / motoris)</label>
             <input id="dt-reporter" value="${escapeHtml(e.created_by_name || (existing ? '' : (state.profile?.full_name || state.profile?.email || '')))}" placeholder="mis. Sukirman (motoris shift 1)" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy">
             <p class="text-[11px] text-slate-400 mt-1">Nama orang yg melaporkan ke mekanik (bisa diisi manual). Default = nama login.</p></div>
@@ -14766,6 +14769,7 @@
       const payload = {
         equipment_id: eqId, equipment_tag: opt?.dataset?.tag || null, equipment_name: opt?.dataset?.name || null,
         unit_id: unitId, unit_name: unitId ? getParentUnitName(unitId) : null,
+        lokasi: (document.getElementById('dt-lokasi')?.value || '').trim() || null,
         start_at: new Date(startV).toISOString(), end_at: endV ? new Date(endV).toISOString() : null,
         category: document.getElementById('dt-cat')?.value || 'lainnya',
         notes: (document.getElementById('dt-notes')?.value || '').trim() || null,
@@ -14797,6 +14801,7 @@
           const cat = payload.category;
           const tag = payload.equipment_tag || '?';
           const unit = payload.unit_name || '?';
+          const lokasiText = payload.lokasi || unit;
           const notes = (payload.notes || '').slice(0, 100) || '-';
           const reporter = reporterName || '-';
           if (cat === GEJALA_CAT) {
@@ -14804,7 +14809,7 @@
               `🟡 <b>GEJALA BARU</b> · ${tag}\n` +
               `📋 ${notes}\n` +
               `👷 Dilaporkan: <b>${reporter}</b>\n` +
-              `📍 ${unit}\n` +
+              `📍 ${lokasiText}\n` +
               `🕐 baru saja\n\n` +
               `→ Buka di eRAMHoist`
             );
@@ -14815,7 +14820,7 @@
               `${emoji} <b>${catLabel.toUpperCase()} BARU</b> · ${tag}\n` +
               `📋 ${notes}\n` +
               `👷 Dilaporkan: <b>${reporter}</b>\n` +
-              `📍 ${unit}\n` +
+              `📍 ${lokasiText}\n` +
               `🕐 baru saja\n\n` +
               `→ Buka di eRAMHoist`
             );
@@ -15469,7 +15474,7 @@
           while (true) {
             const { data: page, error: histErr } = await state.supabase
               .from('downtime_events')
-              .select('id, equipment_id, equipment_tag, equipment_name, unit_id, unit_name, category, start_at, end_at, notes')
+              .select('id, equipment_id, equipment_tag, equipment_name, unit_id, unit_name, lokasi, category, start_at, end_at, notes')
               .gte('start_at', histStartIso)
               .order('start_at', { ascending: false })
               .range(from, from + pageSize - 1);
@@ -15795,7 +15800,7 @@
             <tr class="border-b border-slate-100 hover:bg-slate-50 cursor-pointer" onclick="setEquipmentView('detail','${d.equipment_id}'); navigate('equipment')">
               <td class="px-3 py-2 text-sm text-slate-500">${i + 1}</td>
               <td class="px-3 py-2 text-sm"><div class="font-mono font-bold text-navy">${escapeHtml(d.equipment_tag || '-')}</div><div class="text-xs text-slate-500">${escapeHtml(d.equipment_name || '')}</div></td>
-              <td class="px-3 py-2 text-sm text-slate-600 whitespace-nowrap">${escapeHtml(d.unit_name || '-')}</td>
+              <td class="px-3 py-2 text-sm text-slate-600 whitespace-nowrap">${escapeHtml(d.unit_name || '-')}${d.lokasi ? `<div class="text-xs text-slate-400">📍 ${escapeHtml(d.lokasi)}</div>` : ''}</td>
               <td class="px-3 py-2 text-center whitespace-nowrap">${catBadge(d)}</td>
               <td class="px-3 py-2 text-sm text-center whitespace-nowrap">${fmtDate((d.start_at || '').slice(0, 10))}</td>
               <td class="px-3 py-2 text-sm text-center whitespace-nowrap">${durText(d)}</td>
@@ -18164,7 +18169,7 @@
       if (!newCat) { toast('Pilihan tidak valid.', 'warn'); return; }
       const note = prompt('Catatan eskalasi (opsional, mis. "asap makin tebal, alat berhenti jam 14:00"):') || '';
       // ambil row dulu utk gabung catatan lama
-      const { data: row } = await state.supabase.from('downtime_events').select('notes,equipment_tag,equipment_name,unit_name').eq('id', id).maybeSingle();
+      const { data: row } = await state.supabase.from('downtime_events').select('notes,equipment_tag,equipment_name,unit_name,lokasi').eq('id', id).maybeSingle();
       const oldNotes = row?.notes || '';
       const stamp = new Date().toLocaleString('id-ID');
       const newNotes = [oldNotes, `[ESKALASI ${stamp}] ${note}`].filter(Boolean).join(' · ');
@@ -18189,7 +18194,7 @@
         `${emoji} ${row?.equipment_tag || '?'} (${row?.equipment_name || '-'})\n` +
         `📋 ${(note || 'Tanpa catatan eskalasi').slice(0, 100)}\n` +
         `👷 Eskalasi oleh: <b>${state.profile?.full_name || state.profile?.email || '-'}</b>\n` +
-        `📍 ${row?.unit_name || '?'}\n` +
+        `📍 ${row?.lokasi || row?.unit_name || '?'}\n` +
         `🕐 baru saja\n\n` +
         `→ Buka di eRAMHoist`
       );
