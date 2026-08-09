@@ -1750,17 +1750,33 @@
 
     // ============================================================
     // DAILY ALERT — PM critical, SKPI, Findings open
-    // Dedup via localStorage (key: rb_daily_YYYY-MM-DD)
-    // Dipanggil otomatis saat dashboard dibuka, max 1x per hari.
+    // Dedup server-side via alert_log (alert_type='daily-critical', sent_at
+    // hari ini) — BUKAN localStorage, supaya nggak kekirim ulang tiap staff
+    // beda buka dashboard di hari yang sama dari device masing-masing.
+    // Dipanggil otomatis saat dashboard dibuka, max 1x per hari (total, semua device).
+    // Dikirim BERTAHAP: 1 pesan pembuka + 1 pesan per kategori (bukan digabung).
     // ============================================================
-    async function runDailyAlerts() {
+    async function runDailyAlerts(force) {
       if (!state.supabase || !state.user) return;
-      const today = new Date().toISOString().slice(0, 10);
-      const lsKey = `rb_daily_${today}`;
-      if (localStorage.getItem(lsKey) === '1') return;
+
+      if (!force) {
+        try {
+          const todayStart = new Date();
+          todayStart.setHours(0, 0, 0, 0);
+          const { data: already } = await state.supabase
+            .from('alert_log').select('id')
+            .eq('alert_type', 'daily-critical')
+            .gte('sent_at', todayStart.toISOString())
+            .limit(1);
+          if (already && already.length) return;
+        } catch (err) {
+          console.warn('[runDailyAlerts] dedup check failed', err.message);
+          return; // aman: gagal cek dedup = jangan kirim, daripada resiko spam
+        }
+      }
 
       try {
-        const alerts = [];
+        const sections = [];
 
         // 1. PM Critical (≤ 10% interval tiap unit atau sudah lewat)
         const pmCritical = await fetchPMDueByHours(0.1).catch(() => []);
@@ -1772,7 +1788,7 @@
               : `⚠️ Sisa ${Math.round(rem)} HM`;
             return `  • <b>${escapeHtml(e.tag_number)}</b> [${escapeHtml(getParentUnitName(e.assigned_unit_id))}] — ${status}`;
           }).join('\n');
-          alerts.push(`🔧 <b>PM CRITICAL — ${pmCritical.length} Equipment</b>\n${lines}\n📦 Siapkan part &amp; jadwalkan PM segera.`);
+          sections.push(`🔧 <b>PM CRITICAL — ${pmCritical.length} Equipment</b>\n${lines}\n📦 Siapkan part &amp; jadwalkan PM segera.`);
         }
 
         // 2. SKPI / Sertifikat ≤ 30 hari
@@ -1784,7 +1800,7 @@
             const status = d < 0 ? `⛔ EXPIRED ${Math.abs(d)} hari lalu` : `⚠️ ${d} hari lagi`;
             return `  • <b>${escapeHtml(e.tag_number)}</b> — ${status}`;
           }).join('\n');
-          alerts.push(`📜 <b>SERTIFIKAT ALERT — ${skpiCritical.length} Equipment</b>\n${lines}\n🔔 Segera perpanjang SKPI/sertifikat.`);
+          sections.push(`📜 <b>SERTIFIKAT ALERT — ${skpiCritical.length} Equipment</b>\n${lines}\n🔔 Segera perpanjang SKPI/sertifikat.`);
         }
 
         // 3. Open findings inspeksi (rig masih ditahan)
@@ -1796,18 +1812,26 @@
           const lines = openInsp.map(r =>
             `  • <b>${escapeHtml(r.rig || '—')}</b> [${escapeHtml(r.inspection_code)}] — ${r.open_count} temuan Open`
           ).join('\n');
-          alerts.push(`🔒 <b>INSPEKSI — ${openInsp.length} RIG DITAHAN</b>\n${lines}\n✅ Tutup semua temuan agar rig bisa beroperasi.`);
+          sections.push(`🔒 <b>INSPEKSI — ${openInsp.length} RIG DITAHAN</b>\n${lines}\n✅ Tutup semua temuan agar rig bisa beroperasi.`);
         }
 
-        if (!alerts.length) { localStorage.setItem(lsKey, '1'); return; }
+        if (!sections.length) return;
 
         const date = new Date().toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-        const sep = '━'.repeat(28);
-        const msg = `📢 <b>RIGBASE DAILY ALERT</b>\n${date}\n${sep}\n\n` +
-                    alerts.join(`\n\n${sep}\n\n`) +
-                    `\n\n${sep}\n⏰ eRAMHoist — auto alert harian`;
-        await sendTelegramAlert(msg);
-        localStorage.setItem(lsKey, '1');
+
+        await sendTelegramAlert(`📢 <b>RIGBASE DAILY ALERT</b>\n${date}`);
+        for (let i = 0; i < sections.length; i++) {
+          const isLast = i === sections.length - 1;
+          await sendTelegramAlert(sections[i] + (isLast ? `\n\n⏰ <i>eRAMHoist — auto alert harian</i>` : ''));
+        }
+
+        // Penanda dedup server-side (terpisah dari log per-pesan di sendTelegramAlert)
+        await state.supabase.from('alert_log').insert({
+          alert_type: 'daily-critical',
+          message: `Daily critical: ${pmCritical.length} PM, ${skpiCritical.length} SKPI, ${(openInsp || []).length} inspeksi`,
+          sent_to: 'group',
+          status: 'sent',
+        });
       } catch (err) {
         console.warn('[runDailyAlerts]', err.message);
       }
@@ -1831,12 +1855,10 @@
     }
     window.testTelegramDirect = testTelegramDirect;
 
-    // Force kirim daily alert (reset dedup lalu jalankan ulang)
+    // Force kirim daily alert (bypass dedup server-side)
     async function triggerDailyAlerts() {
-      const today = new Date().toISOString().slice(0, 10);
-      localStorage.removeItem(`rb_daily_${today}`);
       toast('Mengirim daily alert…', 'info');
-      await runDailyAlerts();
+      await runDailyAlerts(true);
       toast('Daily alert selesai. Cek grup Telegram.', 'success');
     }
     window.triggerDailyAlerts = triggerDailyAlerts;
