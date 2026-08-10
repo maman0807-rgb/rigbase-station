@@ -340,6 +340,7 @@
       { id: 'reliability', label: 'RAM',          icon: '📈', group: 'Analisa',      srOnly: true, bottomNav: true },
       { id: 'calendar',    label: 'Kalender',    icon: '📅', group: 'Analisa',      srOnly: true },
       { id: 'pm-parts',    label: 'PM Parts',     icon: '📦', group: 'Pemeliharaan', adminOnly: true },
+      { id: 'audit-gudang', label: 'Audit Gudang', icon: '📋', group: 'Pemeliharaan', gudangOnly: true },
       { id: 'categories',  label: 'Kategori',     icon: '🏷️', group: 'Administrasi', adminOnly: true },
       { id: 'users',       label: 'User',         icon: '👥', group: 'Administrasi', adminOnly: true },
       { id: 'activity',    label: 'Activity Log', icon: '📜', group: 'Administrasi', adminOnly: true },
@@ -1976,6 +1977,9 @@
     function isSrMekanikOrAbove() {
       return ['sr_mekanik','spv','sr_spv','astmen','admin'].includes(state.profile?.role);
     }
+    function isGudangOrAbove() {
+      return ['gudang','spv','sr_spv','astmen','admin'].includes(state.profile?.role);
+    }
     function canWrite() {
       // Tamu dan role tidak dikenal = read-only
       return !['tamu'].includes(state.profile?.role);
@@ -1986,6 +1990,7 @@
       return NAV_ITEMS.filter(item =>
         (!item.adminOnly  || state.profile?.role === 'admin') &&
         (!item.srOnly     || isSrMekanikOrAbove()) &&
+        (!item.gudangOnly || isGudangOrAbove()) &&
         (!item.payrollOnly || state.profile?.can_payroll)
       );
     }
@@ -2035,6 +2040,10 @@
       }
       if (item.srOnly && !isSrMekanikOrAbove()) {
         toast('Halaman ini khusus Sr Mekanik ke atas.', 'warn');
+        return;
+      }
+      if (item.gudangOnly && !isGudangOrAbove()) {
+        toast('Halaman ini khusus tim Gudang ke atas.', 'warn');
         return;
       }
       if (item.payrollOnly && !state.profile?.can_payroll) {
@@ -12485,6 +12494,352 @@
     window.setCsppFilter = setCsppFilter;
     window.setCsppFilterQ = setCsppFilterQ;
     window.setCsppPreset = setCsppPreset;
+
+    // ============================================================
+    // 10y2. AUDIT GUDANG — cocokkan stok sistem vs fisik (tim Gudang+)
+    // ============================================================
+    let auditGudangView = { mode: 'list', auditId: null };
+    let auditGudangItems = [];
+    let auditGudangFilterQ = '';
+
+    PAGES['audit-gudang'] = function () {
+      const div = document.createElement('div');
+      div.className = 'page space-y-5';
+      div.id = 'audit-gudang-root';
+      div.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat data Audit Gudang…</div>';
+      renderAuditGudangRoot(div);
+      return div;
+    };
+
+    async function renderAuditGudangRoot(host) {
+      if (!host) host = document.getElementById('audit-gudang-root');
+      if (!host) return;
+      try {
+        if (auditGudangView.mode === 'entry' && auditGudangView.auditId) {
+          await renderAuditEntryPage(host, auditGudangView.auditId);
+        } else if (auditGudangView.mode === 'detail' && auditGudangView.auditId) {
+          await renderAuditDetailPage(host, auditGudangView.auditId);
+        } else {
+          await renderAuditListPage(host);
+        }
+      } catch (e) {
+        host.innerHTML = `<div class="bg-red-50 text-red-700 p-4 rounded-xl text-sm">Gagal memuat: ${escapeHtml(e.message)}</div>`;
+      }
+    }
+    window.renderAuditGudangRoot = renderAuditGudangRoot;
+
+    async function renderAuditListPage(host) {
+      const { data: drafts, error: e1 } = await state.supabase
+        .from('audit_gudang').select('*').eq('status', 'draft')
+        .order('created_at', { ascending: false }).limit(1);
+      if (e1) throw e1;
+      const { data: riwayat, error: e2 } = await state.supabase
+        .from('audit_gudang').select('*').eq('status', 'selesai')
+        .order('tanggal_audit', { ascending: false }).limit(50);
+      if (e2) throw e2;
+      const draft = (drafts || [])[0] || null;
+
+      let draftCount = 0, draftFilled = 0;
+      if (draft) {
+        const { count } = await state.supabase.from('audit_temuan').select('id', { count: 'exact', head: true }).eq('audit_id', draft.id);
+        const { count: filled } = await state.supabase.from('audit_temuan').select('id', { count: 'exact', head: true }).eq('audit_id', draft.id).not('stock_fisik', 'is', null);
+        draftCount = count || 0; draftFilled = filled || 0;
+      }
+
+      host.innerHTML = `
+        <div class="flex items-center justify-between flex-wrap gap-2">
+          <h2 class="text-lg font-bold text-slate-800">📋 Audit Gudang</h2>
+          ${!draft ? `<button onclick="openMulaiAuditForm()" class="bg-navy hover:bg-navy-700 text-white px-4 py-2.5 rounded-lg text-sm font-semibold">+ Mulai Audit Baru</button>` : ''}
+        </div>
+
+        ${draft ? `
+          <div class="bg-amber-50 border border-amber-200 rounded-xl p-5">
+            <div class="flex items-center justify-between flex-wrap gap-3">
+              <div>
+                <div class="text-xs font-semibold text-amber-700 uppercase mb-1">🟡 Audit Sedang Berjalan</div>
+                <div class="font-bold text-slate-800">${fmtDate(draft.tanggal_audit)} — ${escapeHtml(draft.dilakukan_oleh || '-')}</div>
+                <div class="text-sm text-slate-500 mt-1">${draftFilled} / ${draftCount} item sudah diisi stock fisik</div>
+              </div>
+              <button onclick="setAuditGudangView('entry','${draft.id}')" class="bg-safety hover:bg-safety/90 text-white px-4 py-2.5 rounded-lg text-sm font-semibold whitespace-nowrap">Lanjutkan Entry Temuan →</button>
+            </div>
+          </div>
+        ` : ''}
+
+        <div class="bg-white rounded-xl border border-slate-200">
+          <div class="px-5 py-3 border-b border-slate-200 font-semibold text-slate-700 text-sm">Riwayat Audit Selesai</div>
+          <div class="divide-y divide-slate-100">
+            ${(riwayat || []).length ? riwayat.map(a => `
+              <div class="px-5 py-3 flex items-center justify-between hover:bg-slate-50 cursor-pointer" onclick="setAuditGudangView('detail','${a.id}')">
+                <div>
+                  <div class="font-semibold text-slate-800">${fmtDate(a.tanggal_audit)} — ${escapeHtml(a.dilakukan_oleh || '-')}</div>
+                  <div class="text-xs text-slate-400">Selesai ${a.selesai_at ? new Date(a.selesai_at).toLocaleString('id-ID') : '-'}</div>
+                </div>
+                <span class="text-slate-400">→</span>
+              </div>
+            `).join('') : '<div class="px-5 py-8 text-center text-slate-400 text-sm">Belum ada audit yang selesai.</div>'}
+          </div>
+        </div>
+      `;
+    }
+
+    function setAuditGudangView(mode, auditId) {
+      auditGudangView = { mode, auditId: auditId || null };
+      auditGudangFilterQ = '';
+      renderAuditGudangRoot();
+    }
+    window.setAuditGudangView = setAuditGudangView;
+
+    function openMulaiAuditForm() {
+      const today = new Date().toISOString().slice(0, 10);
+      const body = `
+        <div class="space-y-3">
+          <div><label class="text-xs text-slate-500">Tanggal Audit *</label>
+            <input id="ag-tanggal" type="date" value="${today}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy"></div>
+          <div><label class="text-xs text-slate-500">Dilakukan oleh *</label>
+            <input id="ag-oleh" value="${escapeHtml(state.profile?.full_name || state.profile?.email || '')}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy"></div>
+          <div><label class="text-xs text-slate-500">Catatan Umum</label>
+            <textarea id="ag-catatan" rows="2" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy"></textarea></div>
+          <p class="text-[11px] text-slate-400">Begitu dimulai, semua item di master Gudang akan di-snapshot stok sistemnya saat ini — isi stock fisik dilakukan di halaman berikutnya.</p>
+        </div>`;
+      const footer = `<button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
+        <button onclick="mulaiAuditBaru()" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy-700 text-white text-sm font-semibold">Mulai Audit</button>`;
+      openModal({ title: 'Mulai Audit Baru', body, footer, maxWidth: 'max-w-lg' });
+    }
+    window.openMulaiAuditForm = openMulaiAuditForm;
+
+    async function mulaiAuditBaru() {
+      const tanggal = document.getElementById('ag-tanggal')?.value;
+      const oleh = (document.getElementById('ag-oleh')?.value || '').trim();
+      const catatan = (document.getElementById('ag-catatan')?.value || '').trim() || null;
+      if (!tanggal) { toast('Isi tanggal audit.', 'warn'); return; }
+      if (!oleh) { toast('Isi nama yang melakukan audit.', 'warn'); return; }
+      try {
+        const { data: audit, error: e1 } = await state.supabase.from('audit_gudang').insert({
+          tanggal_audit: tanggal, dilakukan_oleh: oleh, catatan_umum: catatan,
+          status: 'draft', created_by: state.user.id,
+        }).select('id').single();
+        if (e1) throw e1;
+
+        let allMats = [];
+        for (let f = 0; ; f += 1000) {
+          const { data, error } = await state.supabase.from('materials').select('id, stok').range(f, f + 999);
+          if (error) throw error;
+          allMats = allMats.concat(data || []);
+          if (!data || data.length < 1000) break;
+        }
+        if (!allMats.length) { toast('Tidak ada item di master Gudang (materials) untuk diaudit.', 'warn'); return; }
+        const rows = allMats.map(m => ({ audit_id: audit.id, material_id: m.id, stock_sistem: Number(m.stok) || 0 }));
+        for (let i = 0; i < rows.length; i += 500) {
+          const { error } = await state.supabase.from('audit_temuan').insert(rows.slice(i, i + 500));
+          if (error) throw error;
+        }
+        toast(`Audit dimulai, ${rows.length} item di-snapshot.`, 'success');
+        closeModal();
+        setAuditGudangView('entry', audit.id);
+      } catch (e) { toast('Gagal mulai audit: ' + e.message, 'error'); }
+    }
+    window.mulaiAuditBaru = mulaiAuditBaru;
+
+    async function renderAuditEntryPage(host, auditId) {
+      const { data: audit, error: e1 } = await state.supabase.from('audit_gudang').select('*').eq('id', auditId).maybeSingle();
+      if (e1) throw e1;
+      if (!audit) { host.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Audit tidak ditemukan.</div>'; return; }
+
+      let items = [], from = 0;
+      while (true) {
+        const { data, error } = await state.supabase.from('audit_temuan')
+          .select('id, material_id, stock_sistem, stock_fisik, keterangan, selisih, materials(part_number, description, category, satuan)')
+          .eq('audit_id', auditId).order('created_at').range(from, from + 999);
+        if (error) throw error;
+        items = items.concat(data || []);
+        if (!data || data.length < 1000) break;
+        from += 1000;
+      }
+      auditGudangItems = items;
+
+      const q = auditGudangFilterQ.trim().toLowerCase();
+      const filtered = q ? items.filter(i =>
+        (i.materials?.part_number || '').toLowerCase().includes(q) ||
+        (i.materials?.description || '').toLowerCase().includes(q)
+      ) : items;
+      const filledCount = items.filter(i => i.stock_fisik !== null).length;
+
+      host.innerHTML = `
+        <div class="flex items-center justify-between flex-wrap gap-2">
+          <div>
+            <button onclick="setAuditGudangView('list')" class="text-sm text-slate-500 hover:text-navy mb-1">← Kembali</button>
+            <h2 class="text-lg font-bold text-slate-800">Entry Temuan — ${fmtDate(audit.tanggal_audit)}</h2>
+            <div class="text-sm text-slate-500">${escapeHtml(audit.dilakukan_oleh || '-')} · ${filledCount} / ${items.length} item terisi</div>
+          </div>
+          <button onclick="selesaikanAuditGudang('${audit.id}')" class="bg-safety hover:bg-safety/90 text-white px-4 py-2.5 rounded-lg text-sm font-semibold whitespace-nowrap">✅ Selesaikan Audit</button>
+        </div>
+
+        <input id="ag-search" type="text" placeholder="🔍 Cari part number / nama item…" value="${escapeHtml(auditGudangFilterQ)}"
+          oninput="setAuditGudangFilterQ(this.value)" class="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy">
+
+        <div class="bg-white rounded-xl border border-slate-200 overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-slate-50 text-slate-500 text-xs uppercase">
+              <tr>
+                <th class="px-3 py-2 text-left">Item</th>
+                <th class="px-3 py-2 text-center">Stok Sistem</th>
+                <th class="px-3 py-2 text-center">Stok Fisik</th>
+                <th class="px-3 py-2 text-center">Selisih</th>
+                <th class="px-3 py-2 text-left">Keterangan</th>
+              </tr>
+            </thead>
+            <tbody id="ag-entry-tbody">
+              ${filtered.length ? filtered.map(i => auditTemuanRow(i)).join('') : '<tr><td colspan="5" class="px-3 py-8 text-center text-slate-400">Tidak ada item sesuai pencarian.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    function auditTemuanRow(i) {
+      const filled = i.stock_fisik !== null && i.stock_fisik !== undefined;
+      const selisih = filled ? Number(i.stock_fisik) - Number(i.stock_sistem) : null;
+      const highlight = filled && selisih !== 0;
+      return `
+        <tr class="border-b border-slate-100 ${highlight ? 'bg-amber-50' : ''}">
+          <td class="px-3 py-2">
+            <div class="font-mono font-bold text-navy text-xs">${escapeHtml(i.materials?.part_number || '-')}</div>
+            <div class="text-xs text-slate-500">${escapeHtml(i.materials?.description || '')}</div>
+          </td>
+          <td class="px-3 py-2 text-center text-slate-600">${Number(i.stock_sistem)} <span class="text-xs text-slate-400">${escapeHtml(i.materials?.satuan || '')}</span></td>
+          <td class="px-3 py-2 text-center">
+            <input type="number" inputmode="decimal" value="${filled ? Number(i.stock_fisik) : ''}"
+              placeholder="isi…" onchange="saveAuditTemuanFisik('${i.id}', this.value)"
+              class="w-20 px-2 py-1.5 border border-slate-300 rounded-lg text-sm text-center outline-none focus:ring-2 focus:ring-navy">
+          </td>
+          <td class="px-3 py-2 text-center font-semibold ${highlight ? 'text-amber-700' : 'text-slate-400'}">${filled ? (selisih > 0 ? '+' + selisih : selisih) : '-'}</td>
+          <td class="px-3 py-2">
+            <input type="text" value="${escapeHtml(i.keterangan || '')}" placeholder="opsional"
+              onchange="saveAuditTemuanKeterangan('${i.id}', this.value)"
+              class="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy">
+          </td>
+        </tr>`;
+    }
+
+    let _agFilterDeb;
+    function setAuditGudangFilterQ(v) {
+      auditGudangFilterQ = v;
+      clearTimeout(_agFilterDeb);
+      _agFilterDeb = setTimeout(() => renderAuditGudangRoot(), 250);
+    }
+    window.setAuditGudangFilterQ = setAuditGudangFilterQ;
+
+    async function saveAuditTemuanFisik(id, value) {
+      const v = value === '' ? null : Number(value);
+      if (value !== '' && Number.isNaN(v)) { toast('Angka tidak valid.', 'warn'); return; }
+      try {
+        const { error } = await state.supabase.from('audit_temuan').update({ stock_fisik: v }).eq('id', id);
+        if (error) throw error;
+        const item = auditGudangItems.find(i => i.id === id);
+        if (item) item.stock_fisik = v;
+        renderAuditGudangRoot();
+      } catch (e) { toast('Gagal simpan: ' + e.message, 'error'); }
+    }
+    window.saveAuditTemuanFisik = saveAuditTemuanFisik;
+
+    async function saveAuditTemuanKeterangan(id, value) {
+      try {
+        const { error } = await state.supabase.from('audit_temuan').update({ keterangan: value.trim() || null }).eq('id', id);
+        if (error) throw error;
+      } catch (e) { toast('Gagal simpan: ' + e.message, 'error'); }
+    }
+    window.saveAuditTemuanKeterangan = saveAuditTemuanKeterangan;
+
+    async function selesaikanAuditGudang(auditId) {
+      const items = auditGudangItems;
+      const filled = items.filter(i => i.stock_fisik !== null && i.stock_fisik !== undefined);
+      const belumIsi = items.length - filled.length;
+      const berubah = filled.filter(i => Number(i.stock_fisik) - Number(i.stock_sistem) !== 0);
+
+      let msg = `${berubah.length} item stoknya akan disesuaikan ke hasil fisik audit (nyambung ke data Gudang/Logbook).`;
+      if (belumIsi > 0) msg += ` ${belumIsi} item belum diisi, akan dilewati (stok sistemnya TIDAK berubah). `;
+      msg += ' Lanjutkan?';
+      const ok = await confirmDialog({ title: 'Selesaikan Audit', message: msg, confirmText: 'Ya, Selesaikan', danger: berubah.length > 0 });
+      if (!ok) return;
+
+      try {
+        const { data: audit } = await state.supabase.from('audit_gudang').select('tanggal_audit').eq('id', auditId).maybeSingle();
+        for (const i of berubah) {
+          if (!i.material_id) continue;
+          const stokBaru = Number(i.stock_fisik);
+          const stokLama = Number(i.stock_sistem);
+          const { error: eUpd } = await state.supabase.from('materials').update({ stok: stokBaru, updated_by: state.user.id, updated_at: new Date().toISOString() }).eq('id', i.material_id);
+          if (eUpd) throw eUpd;
+          await state.supabase.from('stock_transactions').insert({
+            material_id: i.material_id,
+            part_number: i.materials?.part_number || null,
+            description: i.materials?.description || null,
+            tipe: stokBaru > stokLama ? 'masuk' : 'keluar',
+            jumlah: Math.abs(stokBaru - stokLama),
+            stok_sebelum: stokLama, stok_sesudah: stokBaru,
+            keterangan: `Penyesuaian hasil Audit Gudang ${fmtDate(audit?.tanggal_audit)}`,
+            referensi: auditId, sumber: 'audit_gudang',
+            user_id: state.user.id, user_name: state.profile?.full_name || state.profile?.email || '-',
+          });
+        }
+        const { error: eFin } = await state.supabase.from('audit_gudang').update({ status: 'selesai', selesai_at: new Date().toISOString() }).eq('id', auditId);
+        if (eFin) throw eFin;
+        toast('Audit selesai, stok Gudang tersinkron.', 'success');
+        setAuditGudangView('detail', auditId);
+      } catch (e) { toast('Gagal selesaikan audit: ' + e.message, 'error'); }
+    }
+    window.selesaikanAuditGudang = selesaikanAuditGudang;
+
+    async function renderAuditDetailPage(host, auditId) {
+      const { data: audit, error: e1 } = await state.supabase.from('audit_gudang').select('*').eq('id', auditId).maybeSingle();
+      if (e1) throw e1;
+      if (!audit) { host.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Audit tidak ditemukan.</div>'; return; }
+      const { count: total } = await state.supabase.from('audit_temuan').select('id', { count: 'exact', head: true }).eq('audit_id', auditId);
+      const { data: selisihRows, error: e2 } = await state.supabase.from('v_audit_selisih').select('*').eq('audit_id', auditId);
+      if (e2) throw e2;
+      const cocok = (total || 0) - (selisihRows || []).length;
+
+      host.innerHTML = `
+        <div>
+          <button onclick="setAuditGudangView('list')" class="text-sm text-slate-500 hover:text-navy mb-1">← Kembali</button>
+          <h2 class="text-lg font-bold text-slate-800">Hasil Audit — ${fmtDate(audit.tanggal_audit)}</h2>
+          <div class="text-sm text-slate-500">${escapeHtml(audit.dilakukan_oleh || '-')} · Selesai ${audit.selesai_at ? new Date(audit.selesai_at).toLocaleString('id-ID') : '-'}</div>
+          ${audit.catatan_umum ? `<div class="text-sm text-slate-500 mt-1">📝 ${escapeHtml(audit.catatan_umum)}</div>` : ''}
+        </div>
+
+        <div class="grid grid-cols-3 gap-3">
+          ${statCard('Total Dicek', total || 0, '📦', 'bg-navy')}
+          ${statCard('Cocok', cocok, '✅', 'bg-green-600')}
+          ${statCard('Ada Selisih', (selisihRows || []).length, '⚠️', 'bg-amber-500')}
+        </div>
+
+        <div class="bg-white rounded-xl border border-slate-200 overflow-x-auto">
+          <div class="px-5 py-3 border-b border-slate-200 font-semibold text-slate-700 text-sm">Detail Item Selisih</div>
+          <table class="w-full text-sm">
+            <thead class="bg-slate-50 text-slate-500 text-xs uppercase">
+              <tr>
+                <th class="px-3 py-2 text-left">Item</th>
+                <th class="px-3 py-2 text-center">Stok Sistem</th>
+                <th class="px-3 py-2 text-center">Stok Fisik</th>
+                <th class="px-3 py-2 text-center">Selisih</th>
+                <th class="px-3 py-2 text-left">Keterangan</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${(selisihRows || []).length ? selisihRows.map(r => `
+                <tr class="border-b border-slate-100">
+                  <td class="px-3 py-2"><div class="font-mono font-bold text-navy text-xs">${escapeHtml(r.part_number || '-')}</div><div class="text-xs text-slate-500">${escapeHtml(r.description || '')}</div></td>
+                  <td class="px-3 py-2 text-center text-slate-600">${Number(r.stock_sistem)}</td>
+                  <td class="px-3 py-2 text-center text-slate-600">${Number(r.stock_fisik)}</td>
+                  <td class="px-3 py-2 text-center font-semibold ${Number(r.selisih) > 0 ? 'text-green-700' : 'text-red-700'}">${Number(r.selisih) > 0 ? '+' + r.selisih : r.selisih}</td>
+                  <td class="px-3 py-2 text-slate-600">${escapeHtml(r.keterangan || '-')}</td>
+                </tr>
+              `).join('') : '<tr><td colspan="5" class="px-3 py-8 text-center text-slate-400">Tidak ada selisih — semua item cocok.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
 
     // ============================================================
     // 10x. FMEA — Failure Mode & Effects Analysis (analisa Sr Mekanik+)
