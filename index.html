@@ -12669,7 +12669,7 @@
           <div>
             <button onclick="setAuditGudangView('list')" class="text-sm text-slate-500 hover:text-navy mb-1">← Kembali</button>
             <h2 class="text-lg font-bold text-slate-800">Entry Temuan — ${fmtDate(audit.tanggal_audit)}</h2>
-            <div class="text-sm text-slate-500">${escapeHtml(audit.dilakukan_oleh || '-')} · ${filledCount} / ${items.length} item terisi</div>
+            <div class="text-sm text-slate-500">${escapeHtml(audit.dilakukan_oleh || '-')} · <span id="ag-filled-count">${filledCount}</span> / ${items.length} item terisi</div>
           </div>
           <button onclick="selesaikanAuditGudang('${audit.id}')" class="bg-safety hover:bg-safety/90 text-white px-4 py-2.5 rounded-lg text-sm font-semibold whitespace-nowrap">✅ Selesaikan Audit</button>
         </div>
@@ -12701,7 +12701,7 @@
       const selisih = filled ? Number(i.stock_fisik) - Number(i.stock_sistem) : null;
       const highlight = filled && selisih !== 0;
       return `
-        <tr class="border-b border-slate-100 ${highlight ? 'bg-amber-50' : ''}">
+        <tr id="ag-row-${i.id}" class="border-b border-slate-100 ${highlight ? 'bg-amber-50' : ''}">
           <td class="px-3 py-2">
             <div class="font-mono font-bold text-navy text-xs">${escapeHtml(i.materials?.part_number || '-')}</div>
             <div class="text-xs text-slate-500">${escapeHtml(i.materials?.description || '')}</div>
@@ -12737,7 +12737,13 @@
         if (error) throw error;
         const item = auditGudangItems.find(i => i.id === id);
         if (item) item.stock_fisik = v;
-        renderAuditGudangRoot();
+        // Update baris itu doang (bukan refresh seluruh tabel) — biar scroll posisi nggak lompat
+        // ke atas pas isi banyak item berturut-turut di list gudang yang panjang.
+        const rowEl = document.getElementById('ag-row-' + id);
+        if (item && rowEl) rowEl.outerHTML = auditTemuanRow(item);
+        const filledCount = auditGudangItems.filter(i => i.stock_fisik !== null && i.stock_fisik !== undefined).length;
+        const countEl = document.getElementById('ag-filled-count');
+        if (countEl) countEl.textContent = filledCount;
       } catch (e) { toast('Gagal simpan: ' + e.message, 'error'); }
     }
     window.saveAuditTemuanFisik = saveAuditTemuanFisik;
