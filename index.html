@@ -7468,7 +7468,7 @@
               <div class="mb-4">
                 <div class="bg-slate-50 border border-dashed border-slate-300 rounded-lg p-3 text-xs text-slate-500">
                   🔧 Belum ada part kritis di-mapping ke kategori <b>${escapeHtml(getCategoryName(eq.kategori_id))}</b>.
-                  <button onclick="navigate('cspp')" class="text-navy underline font-semibold">Atur di CSPP →</button>
+                  <button onclick="goToCsppPage()" class="text-navy underline font-semibold">Atur di CSPP →</button>
                 </div>
               </div>`;
           }
@@ -12677,6 +12677,15 @@
       renderCsppMappingList();
     }
     window.openCsppMappingModal = openCsppMappingModal;
+
+    // CSPP itu sub-tab di dalam RAM → Reliability, bukan halaman utama — navigate('cspp')
+    // langsung gagal diam-diam karena bukan NAV_ITEMS id. Ini shortcut yang benar.
+    function goToCsppPage() {
+      state.ramTab = 'reliability';
+      state.reliabilityTab = 'cspp';
+      navigate('reliability');
+    }
+    window.goToCsppPage = goToCsppPage;
 
     function renderCsppMappingList() {
       const kategoriId = document.getElementById('cspp-map-kat')?.value || '';
