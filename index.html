@@ -3831,6 +3831,88 @@
     }
     window.exportEquipmentToExcel = exportEquipmentToExcel;
 
+    // Export gabungan Kendaraan + Alat Berat (status Aktif) — buat pengajuan anggaran ke planner.
+    // 2 sheet terpisah per armada (bukan campur 1 sheet) supaya langsung bisa dikirim tanpa perlu filter manual lagi.
+    async function exportAnggaranKendaraanAlatBerat() {
+      try {
+        toast('Menyiapkan data export…', 'info');
+        const targetTypes = ['Kendaraan', 'Alat Berat'];
+        const unitIdsByType = {};
+        targetTypes.forEach(t => {
+          unitIdsByType[t] = state.parentUnits.filter(u => u.type === t).map(u => u.id);
+        });
+        const allUnitIds = Object.values(unitIdsByType).flat();
+        if (!allUnitIds.length) {
+          toast('Parent unit tipe Kendaraan/Alat Berat tidak ditemukan.', 'warn');
+          return;
+        }
+
+        const { data, error } = await state.supabase.from('equipment').select('*')
+          .in('assigned_unit_id', allUnitIds)
+          .eq('status_operasi', 'Aktif')
+          .order('tag_number');
+        if (error) throw error;
+        if (!data || data.length === 0) {
+          toast('Tidak ada unit Aktif di kategori Kendaraan/Alat Berat.', 'warn');
+          return;
+        }
+
+        const toRow = eq => ({
+          'Tag Number': eq.tag_number,
+          'Nama Equipment': eq.nama_equipment,
+          'Kategori': getCategoryName(eq.kategori_id),
+          'Parent Unit': getParentUnitName(eq.assigned_unit_id),
+          'Brand': eq.brand,
+          'Model': eq.model,
+          'Serial Number': eq.serial_number,
+          'Tahun Pembuatan': eq.tahun_pembuatan,
+          'Status Operasi': eq.status_operasi,
+          'Kondisi Fisik': eq.kondisi_fisik,
+          'Lokasi Fisik': eq.lokasi_fisik,
+          'Running Hours/KM': eq.running_hours,
+          'PM Type': eq.pm_type,
+          'Tgl Pembelian': eq.tgl_pembelian,
+          'Harga Perolehan': eq.harga_perolehan,
+          'Nomor PO/Invoice': eq.nomor_po_invoice,
+          'Vendor/Supplier': eq.vendor_supplier,
+          'Cost Center': eq.cost_center,
+          'Remarks': eq.remarks,
+        });
+
+        const wb = XLSX.utils.book_new();
+        targetTypes.forEach(t => {
+          const rows = data.filter(eq => unitIdsByType[t].includes(eq.assigned_unit_id)).map(toRow);
+          const ws = rows.length ? XLSX.utils.json_to_sheet(rows) : XLSX.utils.aoa_to_sheet([['Tidak ada unit Aktif di kategori ini']]);
+          if (rows.length) {
+            ws['!cols'] = Object.keys(rows[0]).map(key => {
+              const maxLen = Math.max(key.length, ...rows.map(r => String(r[key] || '').length));
+              return { wch: Math.min(Math.max(maxLen + 2, 12), 40) };
+            });
+          }
+          XLSX.utils.book_append_sheet(wb, ws, t);
+        });
+
+        const meta = [
+          ['Export Anggaran — eRAMHoist'],
+          ['Tanggal Export', new Date().toLocaleString('id-ID')],
+          ['Filter', 'Status Operasi = Aktif, Parent Unit tipe Kendaraan & Alat Berat'],
+          ['Total Kendaraan', data.filter(eq => unitIdsByType['Kendaraan'].includes(eq.assigned_unit_id)).length],
+          ['Total Alat Berat', data.filter(eq => unitIdsByType['Alat Berat'].includes(eq.assigned_unit_id)).length],
+        ];
+        const wsMeta = XLSX.utils.aoa_to_sheet(meta);
+        wsMeta['!cols'] = [{ wch: 22 }, { wch: 35 }];
+        XLSX.utils.book_append_sheet(wb, wsMeta, 'Info');
+
+        const ts = new Date().toISOString().slice(0, 16).replace(/[:\-T]/g, '');
+        const filename = `eramhoist_anggaran_unit_aktif_${ts}.xlsx`;
+        XLSX.writeFile(wb, filename);
+        toast(`✅ ${data.length} unit aktif ter-export ke ${filename}`, 'success');
+      } catch (err) {
+        toast('Gagal export: ' + err.message, 'error');
+      }
+    }
+    window.exportAnggaranKendaraanAlatBerat = exportAnggaranKendaraanAlatBerat;
+
     // Print equipment detail (browser native, hasil bisa di-save jadi PDF)
     function printEquipmentDetail() {
       window.print();
@@ -6570,6 +6652,10 @@
             <button onclick="exportEquipmentToExcel()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 shadow-sm" title="Export ke Excel (hasil filter saat ini)">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
               Export Excel
+            </button>
+            <button onclick="exportAnggaranKendaraanAlatBerat()" class="bg-navy hover:opacity-90 text-white px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 shadow-sm" title="Export Kendaraan + Alat Berat (status Aktif) — 2 sheet terpisah, buat pengajuan anggaran">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"/></svg>
+              📊 Export Anggaran
             </button>
           </div>
           <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
