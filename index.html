@@ -18886,7 +18886,7 @@
           <div class="card green"><div class="num">${data.length}</div><div class="lbl">Total Unit Aktif</div></div>
         </div>`;
         const chart = chartBars('Unit Aktif per Kategori', catNames.map(n => ({ label: n, value: byCat[n] || 0, color: '#11335d' })));
-        const intro = `<p>Daftar unit aktif kategori <b>${catNames.map(n => escapeHtml(n)).join(', ')}</b> sebagai dasar pengajuan anggaran operasional/pemeliharaan, berdasarkan data terkini sistem RAM eRAMHoist.</p>`;
+        const intro = `<p>Daftar unit aktif kategori <b>${catNames.map(n => escapeHtml(n)).join(', ')}</b> berdasarkan data terkini sistem RAM eRAMHoist.</p>`;
 
         const rows = data.map((eq, i) => {
           const kat = getCategoryName(eq.kategori_id);
@@ -18902,7 +18902,7 @@
           : `data harga perolehan belum lengkap di sistem untuk unit-unit ini`;
         const kesimpulan = `<b>Ringkasan:</b> Total <b>${data.length} unit aktif</b> pada kategori ${catNames.map(n => escapeHtml(n)).join(', ')}, ${nilaiTxt}.<br><br><b style="color:#16a34a">✅ Permohonan:</b> mohon dukungan alokasi anggaran operasional/pemeliharaan untuk unit-unit di atas guna menjaga kesiapan (Availability) armada.`;
 
-        openSignDialog({ title: 'Justifikasi Pengajuan Anggaran Unit Aktif', type: 'ANGGARAN', summary, chart, intro, table, kesimpulan });
+        openSignDialog({ title: 'Unit Aktif Hoist & Heavy Equipment', type: 'ANGGARAN', summary, chart, intro, table, kesimpulan });
       } catch (err) {
         toast('Gagal menyiapkan data: ' + err.message, 'error');
       }
