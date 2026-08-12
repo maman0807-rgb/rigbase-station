@@ -7435,9 +7435,49 @@
           }
         } catch (e) { /* table mungkin belum ada — skip */ }
 
+        // CSPP Enrichment — part kritis relevan buat kategori equipment ini (mis. Generator Set)
+        let csppRelevantHtml = '';
+        try {
+          const { data: mapRows } = await state.supabase.from('cspp_kategori_mapping')
+            .select('material_id').eq('kategori_id', eq.kategori_id);
+          if (mapRows && mapRows.length) {
+            const matIds = mapRows.map(m => m.material_id);
+            const { data: mats } = await state.supabase.from('materials')
+              .select('part_number, description, stok, safety_stock').in('id', matIds);
+            const n = v => Number(v) || 0;
+            const rows = (mats || []).map(m => {
+              const s = n(m.stok), sf = n(m.safety_stock);
+              const status = s === 0 ? '🔴 Habis' : (sf > 0 && s < sf) ? '🟠 Rendah' : '🟢 Aman';
+              const cls = s === 0 ? 'text-red-700' : (sf > 0 && s < sf) ? 'text-amber-700' : 'text-green-700';
+              return `<div class="flex items-center justify-between text-sm py-1 border-b border-slate-100 last:border-0">
+                <span class="text-slate-700">${escapeHtml(m.part_number || '-')} — ${escapeHtml(m.description || '')}</span>
+                <span class="font-semibold ${cls} shrink-0 ml-2">${status} (${s})</span>
+              </div>`;
+            }).join('');
+            const habisCount = (mats || []).filter(m => n(m.stok) === 0).length;
+            csppRelevantHtml = `
+              <div class="mb-4">
+                <h4 class="font-bold text-navy text-base uppercase tracking-wider mb-2">🔧 Part Kritis Relevan</h4>
+                <div class="bg-white border border-slate-200 rounded-lg p-4">
+                  ${habisCount > 0 ? `<div class="text-xs text-red-700 font-semibold mb-2">⚠️ ${habisCount} part habis stok — cek sebelum unit ini down lama.</div>` : ''}
+                  ${rows}
+                </div>
+              </div>`;
+          } else if (isSrMekanikOrAbove()) {
+            csppRelevantHtml = `
+              <div class="mb-4">
+                <div class="bg-slate-50 border border-dashed border-slate-300 rounded-lg p-3 text-xs text-slate-500">
+                  🔧 Belum ada part kritis di-mapping ke kategori <b>${escapeHtml(getCategoryName(eq.kategori_id))}</b>.
+                  <button onclick="navigate('cspp')" class="text-navy underline font-semibold">Atur di CSPP →</button>
+                </div>
+              </div>`;
+          }
+        } catch (e) { /* tabel cspp_kategori_mapping mungkin belum ada — skip */ }
+
         container.innerHTML = `
           ${cascadeBadge}
           ${summaryHtml}
+          ${csppRelevantHtml}
           ${prepHtml}
           ${snoozeBadge}
           <div class="flex items-center justify-between mb-3 mt-5 flex-wrap gap-2">
