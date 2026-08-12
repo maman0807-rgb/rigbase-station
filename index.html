@@ -7468,7 +7468,7 @@
               <div class="mb-4">
                 <div class="bg-slate-50 border border-dashed border-slate-300 rounded-lg p-3 text-xs text-slate-500">
                   🔧 Belum ada part kritis di-mapping ke kategori <b>${escapeHtml(getCategoryName(eq.kategori_id))}</b>.
-                  <button onclick="goToCsppPage()" class="text-navy underline font-semibold">Atur di CSPP →</button>
+                  <button onclick="goToCsppPage(${eq.kategori_id})" class="text-navy underline font-semibold">Atur di CSPP →</button>
                 </div>
               </div>`;
           }
@@ -12599,6 +12599,13 @@
           </table></div>
         </div>`;
       renderCsppList();
+      // Auto-buka modal Kelola Part Kritis kalau datang dari shortcut "Atur di CSPP" (equipment detail)
+      if (window.__csppAutoOpenKategori) {
+        csppFilter.kategoriId = window.__csppAutoOpenKategori;
+        const sel = document.getElementById('cspp-eqkat'); if (sel) sel.value = window.__csppAutoOpenKategori;
+        window.__csppAutoOpenKategori = null;
+        openCsppMappingModal();
+      }
     }
 
     function csppStatus(m) {
@@ -12680,7 +12687,11 @@
 
     // CSPP itu sub-tab di dalam RAM → Reliability, bukan halaman utama — navigate('cspp')
     // langsung gagal diam-diam karena bukan NAV_ITEMS id. Ini shortcut yang benar.
-    function goToCsppPage() {
+    // kategoriId opsional: kalau diisi (dari panel "Part Kritis Relevan" di equipment detail),
+    // modal Kelola Part Kritis langsung kebuka dengan kategori itu sudah kepilih — user nggak
+    // perlu pilih manual lagi, tinggal search & tambah part.
+    function goToCsppPage(kategoriId) {
+      window.__csppAutoOpenKategori = kategoriId || null;
       state.ramTab = 'reliability';
       state.reliabilityTab = 'cspp';
       navigate('reliability');
