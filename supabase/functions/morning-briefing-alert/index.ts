@@ -91,7 +91,7 @@ serve(async (_req) => {
 
     // Downtime events ongoing (end_at = null)
     const { data: ongoingDt } = await sb.from("downtime_events")
-      .select("equipment_tag, equipment_name, unit_name, category, start_at, notes")
+      .select("equipment_tag, equipment_name, unit_name, lokasi, category, start_at, notes")
       .is("end_at", null)
       .in("category", ["breakdown", "troubleshoot"])
       .order("start_at", { ascending: true });
@@ -123,15 +123,19 @@ serve(async (_req) => {
       ongoingDt.slice(0, 5).forEach((d) => {
         const hSince = Math.round((Date.now() - new Date(d.start_at).getTime()) / 3600000);
         const tipe = d.category === "breakdown" ? "BD" : "TS";
-        lines.push(`• <b>${d.equipment_tag}</b> [${tipe}] sejak ${hSince}j lalu — ${(d.notes || "-").slice(0, 50)}`);
+        const lokasi = d.lokasi || d.unit_name || "—";
+        lines.push(`• <b>${d.equipment_tag}</b> [${tipe}] @ ${lokasi} sejak ${hSince}j lalu — ${(d.notes || "-").slice(0, 50)}`);
       });
       if (ongoingDt.length > 5) lines.push(`<i>...dan ${ongoingDt.length - 5} lainnya</i>`);
     }
 
     if (down && down.length > 0) {
+      const lokasiByTag: Record<string, string> = {};
+      (ongoingDt || []).forEach((d) => { if (d.equipment_tag && (d.lokasi || d.unit_name)) lokasiByTag[d.equipment_tag] = d.lokasi || d.unit_name; });
       lines.push(`\n🛑 <b>STATUS DOWN (${down.length})</b>`);
       down.slice(0, 5).forEach((e) => {
-        lines.push(`• <b>${e.tag_number}</b> @ ${unitName[e.assigned_unit_id] || "—"}`);
+        const lokasi = lokasiByTag[e.tag_number] || unitName[e.assigned_unit_id] || "—";
+        lines.push(`• <b>${e.tag_number}</b> @ ${lokasi}`);
       });
       if (down.length > 5) lines.push(`<i>...dan ${down.length - 5} lainnya</i>`);
     }

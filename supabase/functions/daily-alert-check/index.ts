@@ -59,9 +59,18 @@ serve(async (_req) => {
 
     // Equipment Down
     const { data: down } = await sb.from("equipment")
-      .select("tag_number, nama_equipment, assigned_unit_id")
+      .select("id, tag_number, nama_equipment, assigned_unit_id")
       .eq("status_operasi", "Down")
       .order("tag_number");
+
+    // Lokasi kejadian downtime yang masih ongoing (end_at null) — buat dilampirkan di list Down
+    const { data: ongoingLokasi } = await sb.from("downtime_events")
+      .select("equipment_id, lokasi, unit_name")
+      .is("end_at", null);
+    const lokasiByEqId: Record<string, string> = {};
+    (ongoingLokasi || []).forEach((d) => {
+      if (d.equipment_id && (d.lokasi || d.unit_name)) lokasiByEqId[d.equipment_id] = d.lokasi || d.unit_name;
+    });
 
     // Get parent unit names (mapping)
     const { data: units } = await sb.from("parent_units").select("id, name");
@@ -74,7 +83,7 @@ serve(async (_req) => {
       .gt("running_hours", 0);
 
     // FASE 3: kategorisasi lebih granular sesuai panel Maintenance Due Soon
-    const pmHoursDue: any[] = [];      // PM: sisa 0-500 jam
+    const pmHoursDue: any[] = [];      // PM: sisa 0-100 jam (flat threshold, samakan dgn dashboard)
     const overhaulDue: any[] = [];     // TOH/GOH: sisa 0-2000 jam (PERLU PLAN)
     const nearEOL: any[] = [];         // Umur ekonomis >= 80%
     (hmEq || []).forEach((e) => {
@@ -82,7 +91,9 @@ serve(async (_req) => {
       const pmInt = Number(e.pm_interval_hours) || 0;
       if (pmInt > 0) {
         const rem = pmInt - (rh - (Number(e.last_pm_hours) || 0));
-        if (rem >= 0 && rem <= 500) pmHoursDue.push({ ...e, _rem: rem });
+        // Threshold flat 100 jam — samakan dgn kartu "Mendekati Maintenance PM" di dashboard app
+        // (disepakati 2026-08-04, lihat commit 9ac53c5), biar alert & tampilan app konsisten.
+        if (rem >= 0 && rem <= 100) pmHoursDue.push({ ...e, _rem: rem });
       }
       const tohInt = Number(e.toh_interval_hours) || 0;
       const gohInt = Number(e.goh_interval_hours) || 0;
@@ -132,7 +143,8 @@ serve(async (_req) => {
     if (down && down.length > 0) {
       lines.push(`\n🛑 <b>Equipment Down (${down.length})</b>`);
       down.slice(0, 10).forEach((e) => {
-        lines.push(`• <b>${e.tag_number}</b> @ ${unitName[e.assigned_unit_id] || "—"} — ${e.nama_equipment}`);
+        const lokasi = lokasiByEqId[e.id] || unitName[e.assigned_unit_id] || "—";
+        lines.push(`• <b>${e.tag_number}</b> @ ${lokasi} — ${e.nama_equipment}`);
       });
       if (down.length > 10) lines.push(`<i>...dan ${down.length - 10} lainnya</i>`);
     }
