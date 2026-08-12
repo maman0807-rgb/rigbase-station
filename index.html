@@ -8536,9 +8536,10 @@
                     const pBadge = ({ before:'border-red-300',after:'border-green-300',part:'border-blue-300',other:'border-slate-300' })[p.phase||'other'];
                     const dt = p.event_date ? fmtDate(p.event_date) : '';
                     const tip = (p.caption || p.phase || '') + (dt ? ` · ${dt}` : '');
-                    return `<div class="relative inline-block">
+                    return `<div class="relative inline-block group">
                       <img src="${url}" loading="lazy" class="w-20 h-20 object-cover rounded border-2 ${pBadge} cursor-pointer hover:scale-105 transition" onclick="event.stopPropagation();viewPhotoFullsize('${url}','${cap}')" title="${escapeHtml(tip)}">
                       ${dt ? `<span class="absolute bottom-0 inset-x-0 text-[9px] text-center bg-black/60 text-white py-0.5 rounded-b truncate">${escapeHtml(dt)}</span>` : ''}
+                      ${state.profile?.role === 'admin' ? `<button onclick="event.stopPropagation();openEditDowntimePhotoModal('${p.id}','${p.phase||'other'}','${cap}','${p.event_date||''}')" class="absolute top-1 right-1 hidden group-hover:flex items-center justify-center w-5 h-5 bg-navy text-white text-[10px] rounded-full shadow" title="Edit fase/tanggal/caption">✎</button>` : ''}
                     </div>`;
                   }).join('')}</div>` : ''}
                 </div>
@@ -15337,6 +15338,7 @@
             <img src="${url}" class="w-full h-24 object-cover cursor-pointer" onclick="viewPhotoFullsize('${url}','${cap}')">
             <span class="absolute top-1 left-1 text-[10px] px-1.5 py-0.5 rounded ${phaseBadge(p.phase)}">${escapeHtml(p.phase || 'other')}</span>
             ${dt ? `<span class="absolute bottom-1 left-1 right-1 text-[10px] px-1 py-0.5 rounded bg-black/60 text-white truncate">📅 ${escapeHtml(dt)}</span>` : ''}
+            ${state.profile?.role === 'admin' ? `<button onclick="openEditDowntimePhotoModal('${p.id}','${p.phase||'other'}','${cap}','${p.event_date||''}','${eventId}')" class="absolute top-1 right-6 hidden group-hover:block bg-navy text-white text-[10px] px-1.5 py-0.5 rounded">✎</button>` : ''}
             <button onclick="deleteDowntimePhoto('${p.id}','${p.storage_path}','${eventId}')" class="absolute top-1 right-1 hidden group-hover:block bg-red-600 text-white text-[10px] px-1.5 py-0.5 rounded">✕</button>
           </div>`;
         }).join('')}</div>`;
@@ -15353,6 +15355,57 @@
       } catch (e) { toast('Gagal hapus: ' + e.message, 'error'); }
     }
     window.deleteDowntimePhoto = deleteDowntimePhoto;
+
+    // Edit fase/tanggal/caption foto downtime TANPA hapus+upload ulang gambarnya.
+    // Admin-only. eventId opsional: kalau diisi berarti dibuka dari modal Catat/Edit
+    // Downtime (refresh loadExistingDowntimePhotos), kalau kosong berarti dari tab
+    // History (refresh renderHistoryTab).
+    function openEditDowntimePhotoModal(photoId, phase, caption, eventDate, eventId) {
+      const body = `
+        <div class="space-y-3">
+          <div>
+            <label class="text-xs font-semibold text-slate-500 uppercase">Fase</label>
+            <select id="edit-photo-phase" class="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg text-sm">
+              <option value="before" ${phase === 'before' ? 'selected' : ''}>Sebelum / Bukti Kerusakan</option>
+              <option value="part"   ${phase === 'part'   ? 'selected' : ''}>Part / Spare Part</option>
+              <option value="after"  ${phase === 'after'  ? 'selected' : ''}>Sesudah / Bukti Perbaikan</option>
+              <option value="other"  ${phase === 'other'  ? 'selected' : ''}>Lainnya</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-xs font-semibold text-slate-500 uppercase">Tanggal Kejadian Foto</label>
+            <input id="edit-photo-date" type="date" value="${escapeAttr(eventDate)}" class="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg text-sm">
+          </div>
+          <div>
+            <label class="text-xs font-semibold text-slate-500 uppercase">Caption</label>
+            <input id="edit-photo-caption" type="text" maxlength="200" value="${escapeAttr(caption)}" class="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg text-sm">
+          </div>
+        </div>`;
+      const footer = `
+        <button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
+        <button onclick="saveDowntimePhotoEdit('${photoId}','${eventId || ''}')" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy-700 text-white text-sm font-semibold">💾 Simpan</button>`;
+      openModal({ title: '✎ Edit Foto', body, footer, maxWidth: 'max-w-sm' });
+    }
+    window.openEditDowntimePhotoModal = openEditDowntimePhotoModal;
+
+    async function saveDowntimePhotoEdit(photoId, eventId) {
+      const phase = document.getElementById('edit-photo-phase')?.value || 'other';
+      const eventDate = document.getElementById('edit-photo-date')?.value || null;
+      const caption = (document.getElementById('edit-photo-caption')?.value || '').trim().slice(0, 200) || null;
+      try {
+        const { error } = await state.supabase.from('downtime_photos')
+          .update({ phase, event_date: eventDate, caption }).eq('id', photoId);
+        if (error) throw error;
+        toast('Foto diupdate.', 'success');
+        closeModal();
+        if (eventId) {
+          loadExistingDowntimePhotos(eventId);
+        } else if (window.__hist && window.__histHost) {
+          renderHistoryTab(window.__hist.eq, window.__histHost);
+        }
+      } catch (e) { toast('Gagal simpan: ' + e.message, 'error'); }
+    }
+    window.saveDowntimePhotoEdit = saveDowntimePhotoEdit;
 
     function viewPhotoFullsize(url, caption) {
       const div = document.createElement('div');
