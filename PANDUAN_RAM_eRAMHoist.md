@@ -330,7 +330,7 @@ RLS `equipment`: write **admin only**. Edit lewat Logbook **gagal diam-diam tanp
 - [ ] **Edit foto** (caption/phase/date) setelah upload — sekarang cuma delete+re-upload
 - [ ] **Print report Downtime dengan foto inline** — currently cetak summary tabel saja
 - [ ] **Mobile responsive** — optimize untuk HP saat lapangan
-- [ ] **Notification ke Telegram** untuk Down baru — Fase 5 (sudah ada cron alert untuk PM-jam)
+- [x] **Notification ke Telegram** untuk Down baru — sudah jalan (real-time alert breakdown/troubleshoot/gejala, lihat index.html ~L15263)
 - [ ] **CSPP enrichment** — auto-suggest part based on equipment kategori
 
 ---
