@@ -19,7 +19,7 @@ CREATE POLICY dp_update ON downtime_photos FOR UPDATE TO authenticated
 -- ============================================================
 -- VERIFIKASI
 -- ============================================================
-SELECT polname, cmd, roles FROM pg_policies WHERE tablename = 'downtime_photos' ORDER BY polname;
+SELECT policyname, cmd, roles FROM pg_policies WHERE tablename = 'downtime_photos' ORDER BY policyname;
 -- harusnya ada 4 baris: dp_delete, dp_insert, dp_read, dp_update
 
 NOTIFY pgrst, 'reload schema';
