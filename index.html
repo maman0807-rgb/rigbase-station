@@ -8286,6 +8286,28 @@
           const partOrOtherPhotos = allPhotos.filter(p => p.phase === 'part' || p.phase === 'other');
           const afterPhotos = allPhotos.filter(p => p.phase === 'after');
 
+          // PM (Catat PM Selesai) — 1 event bersih, BUKAN pasangan DOWN+SELESAI kayak breakdown
+          // (start_at/end_at PM biasanya sama hari, jadi kalau dipecah kayak downtime malah
+          // muncul 2 baris redundan: "Penyebab: PM" merah + "SELESAI" hijau utk kejadian yg sama).
+          if (d.category === 'pm') {
+            const m = /^(\S+)/.exec((d.notes || '').trim());
+            const subKind = m ? m[1] : 'PM';
+            const dur = d.end_at ? (new Date(d.end_at) - new Date(d.start_at)) / 3600000 : null;
+            const pmDetail = [];
+            if (d.created_by_name) pmDetail.push(`👷 Oleh: <b>${escapeHtml(d.created_by_name)}</b>`);
+            if (d.notes) pmDetail.push(`📝 ${escapeHtml(d.notes)}`);
+            events.push({
+              group: 'pm', kind: 'pm',
+              date: d.end_at || d.start_at,
+              title: `✅ ${escapeHtml(subKind)} Selesai${dur ? ` (${fmtH(dur)})` : ''}`,
+              detail: pmDetail.join('<br>') || null,
+              detailIsHtml: true,
+              color: 'bg-green-600',
+              eventId: d.id,
+            });
+            return;
+          }
+
           // Pecah notes: bagian original (sebelum TINDAKAN/ESKALASI) vs daftar TINDAKAN/ESKALASI
           // notes format: "originalNotes · [TINDAKAN 28/5/2026, 09.17] isi · [TINDAKAN ...] ..."
           const rawNotes = d.notes || '';
@@ -8418,7 +8440,7 @@
       const h = window.__hist, container = window.__histHost;
       if (!h || !container) return;
       const all = h.events;
-      const cnt = { all: all.length, mutasi: 0, pinjam: 0, downtime: 0 };
+      const cnt = { all: all.length, mutasi: 0, pinjam: 0, downtime: 0, pm: 0 };
       all.forEach(e => { cnt[e.group] = (cnt[e.group] || 0) + 1; });
       const ev = historyFilter === 'all' ? all : all.filter(e => e.group === historyFilter);
 
@@ -8426,9 +8448,10 @@
 
       container.innerHTML = `
         <div class="flex items-center justify-between flex-wrap gap-2 mb-3">
-          <h4 class="font-bold text-slate-800">Riwayat Mutasi, Pinjaman & Downtime</h4>
+          <h4 class="font-bold text-slate-800">Riwayat Mutasi, Pinjaman, PM & Downtime</h4>
           <div class="flex items-center gap-1.5 flex-wrap">
             ${chip('all', 'Semua')}
+            ${chip('pm', 'PM')}
             ${chip('mutasi', 'Mutasi')}
             ${chip('pinjam', 'Pinjaman')}
             ${chip('downtime', 'Downtime')}
@@ -8479,7 +8502,7 @@
       const all = h.events;
       const ev = historyFilter === 'all' ? all : all.filter(e => e.group === historyFilter);
       // Pisahkan downtime real vs gejala (early warning) — bukan kelas yg sama
-      const cnt = { mutasi: 0, pinjam: 0, downtime: 0, gejala: 0 };
+      const cnt = { mutasi: 0, pinjam: 0, downtime: 0, gejala: 0, pm: 0 };
       all.forEach(e => {
         if (e.group === 'downtime') {
           if (e.subgroup === 'gejala') cnt.gejala++;
@@ -8488,11 +8511,12 @@
           cnt[e.group] = (cnt[e.group] || 0) + 1;
         }
       });
-      const grpLabel = { mutasi: 'Mutasi', pinjam: 'Pinjaman', downtime: 'Downtime', gejala: 'Gejala' };
+      const grpLabel = { mutasi: 'Mutasi', pinjam: 'Pinjaman', downtime: 'Downtime', gejala: 'Gejala', pm: 'PM' };
       const filterLabel = historyFilter === 'all' ? 'Semua Kejadian' : grpLabel[historyFilter];
 
       const summary = `<div class="cards">
         <div class="card navy"><div class="num">${ev.length}</div><div class="lbl">Total Kejadian</div></div>
+        <div class="card green"><div class="num">${cnt.pm}</div><div class="lbl">PM Selesai</div></div>
         <div class="card navy"><div class="num">${cnt.mutasi}</div><div class="lbl">Mutasi</div></div>
         <div class="card amber"><div class="num">${cnt.pinjam}</div><div class="lbl">Pinjaman</div></div>
         <div class="card red"><div class="num">${cnt.downtime}</div><div class="lbl">Downtime</div></div>
@@ -8500,7 +8524,7 @@
       </div>`;
       const intro = `<p><b>Equipment:</b> ${escapeHtml(eq.tag_number || '-')} — ${escapeHtml(eq.nama_equipment || '')}<br>
         <b>Filter:</b> ${filterLabel} &nbsp;|&nbsp; <b>Jumlah baris:</b> ${ev.length}<br>
-        Dokumen ini merupakan rekaman pergerakan (mutasi/pinjaman), downtime, &amp; gejala (early warning) equipment untuk keperluan penelusuran (traceability).<br>
+        Dokumen ini merupakan rekaman PM selesai, pergerakan (mutasi/pinjaman), downtime, &amp; gejala (early warning) equipment untuk keperluan penelusuran (traceability).<br>
         <span style="color:#92400e"><b>Catatan:</b> <i>Gejala</i> = tanda awal kelainan; alat masih jalan, TIDAK menurunkan availability. Dipisah dari Downtime real (alat berhenti).</span></p>`;
       // Helper: detail bisa HTML (ada <b>, <br>, <span>) → render rapi di PDF.
       // Strip tag yg tidak perlu utk print, ganti <br> jadi " · ", buang class CSS.
@@ -8515,7 +8539,7 @@
           .replace(/<\/b>/gi, '</strong>');
       };
       const rows = ev.slice(0, 500).map((e, i) => {
-        const title = e.title.replace(/[🔴🟢🤝↩️🟡📦📝]/g, '').trim();
+        const title = e.title.replace(/[✅🔴🟢🤝↩️🟡📦📝]/g, '').trim();
         // Tentukan label Jenis: untuk group downtime, lihat subgroup
         const jenis = e.group === 'downtime'
           ? (e.subgroup === 'gejala' ? 'Gejala' : 'Downtime')
@@ -8525,8 +8549,9 @@
         return `<tr${rowStyle}><td style="text-align:center">${i + 1}</td><td style="text-align:center">${escapeHtml(fmtDate(e.date))}</td><td style="text-align:center">${escapeHtml(jenis)}</td><td>${escapeHtml(title)}</td><td>${detailForPrint(e)}</td></tr>`;
       }).join('');
       const table = `<table><thead><tr><th>No</th><th>Tanggal</th><th>Jenis</th><th>Keterangan</th><th>Detail / Alasan</th></tr></thead><tbody>${rows || '<tr><td colspan="5" style="text-align:center">Tidak ada data</td></tr>'}</tbody></table>`;
-      const kesimpulan = `Rekaman riwayat di atas digunakan untuk pelacakan pergerakan aset, audit, dan dasar analisa keandalan (RAM). Total <b>${ev.length}</b> kejadian tercatat untuk equipment <b>${escapeHtml(eq.tag_number || '')}</b> — terdiri dari <b>${cnt.downtime}</b> downtime real, <b>${cnt.gejala}</b> gejala (early warning), <b>${cnt.mutasi}</b> mutasi, <b>${cnt.pinjam}</b> pinjaman.`;
+      const kesimpulan = `Rekaman riwayat di atas digunakan untuk pelacakan pergerakan aset, audit, dan dasar analisa keandalan (RAM). Total <b>${ev.length}</b> kejadian tercatat untuk equipment <b>${escapeHtml(eq.tag_number || '')}</b> — terdiri dari <b>${cnt.pm}</b> PM selesai, <b>${cnt.downtime}</b> downtime real, <b>${cnt.gejala}</b> gejala (early warning), <b>${cnt.mutasi}</b> mutasi, <b>${cnt.pinjam}</b> pinjaman.`;
       const chart = (typeof chartBars === 'function') ? chartBars('Jumlah Kejadian per Jenis', [
+        { label: 'PM Selesai', value: cnt.pm, color: '#16a34a' },
         { label: 'Mutasi', value: cnt.mutasi, color: '#11335d' },
         { label: 'Pinjaman', value: cnt.pinjam, color: '#0891b2' },
         { label: 'Downtime', value: cnt.downtime, color: '#dc2626' },
