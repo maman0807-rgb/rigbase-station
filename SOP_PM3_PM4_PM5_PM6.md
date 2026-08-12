@@ -1,7 +1,7 @@
 # SOP Preventive Maintenance PM3 / PM4 / PM5 / PM6
 **Fleet Hoist & Heavy Equipment — RAM Field Prabumulih**
 
-> **Status: DRAFT v0.1 (2026-07-31)** — disusun dari praktik standar servis diesel engine industri (Perkins/Caterpillar/Cummins/Deutz), **belum di-review mekanik senior/tim lapangan**. Jangan dipakai sebagai acuan final sebelum di-cek & disahkan. Setelah disahkan, isi checklist part di sini yang jadi dasar input menu **📦 PM Parts** di eRAMHoist.
+> **Status: DISAHKAN v1.0 (12 Agustus 2026, oleh Abdul Rachman/Maman)** — disusun dari praktik standar servis diesel engine industri (Perkins/Caterpillar/Cummins/Deutz). Perubahan/penambahan berikutnya dibahas & disahkan ulang sesuai kebutuhan lapangan. Isi checklist part di sini jadi dasar input menu **📦 PM Parts** di eRAMHoist.
 
 ---
 
