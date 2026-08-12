@@ -6657,6 +6657,10 @@
               <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"/></svg>
               📊 Export Anggaran
             </button>
+            <button onclick="openJustifikasiAnggaranModal()" class="bg-safety hover:bg-safety-700 text-white px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 shadow-sm" title="Dokumen resmi siap cetak/PDF — pilih kategori, lengkap letterhead & blok tanda tangan">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+              📄 Cetak Justifikasi
+            </button>
           </div>
           <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
             <select id="filter-unit" class="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">${parentOpts}</select>
@@ -18903,6 +18907,77 @@
       openSignDialog({ title: 'Justifikasi Tindakan Perbaikan', type: 'FMEA', summary, chart, intro, table, kesimpulan });
     }
     window.cetakFmeaReport = cetakFmeaReport;
+
+    // Justifikasi Pengajuan Anggaran — pilih kategori armada dulu (checkbox), baru generate
+    // dokumen letterhead resmi (sama pola dgn Justifikasi CSPP/FMEA) berisi daftar unit Aktif
+    // + estimasi nilai perolehan, siap cetak/PDF dgn blok tanda tangan Dibuat/Diperiksa/Disetujui.
+    function openJustifikasiAnggaranModal() {
+      const types = [...new Set(state.parentUnits.map(u => u.type).filter(Boolean))];
+      const defaultChecked = ['Kendaraan', 'Alat Berat'];
+      const body = `
+        <p class="text-xs text-slate-500 mb-3">Pilih kategori armada yang mau dimasukkan ke dokumen justifikasi (cuma unit status <b>Aktif</b> yang diambil).</p>
+        <div class="space-y-2">
+          ${types.map(t => `
+            <label class="flex items-center gap-2 text-sm px-3 py-2 border border-slate-200 rounded-lg hover:bg-slate-50 cursor-pointer">
+              <input type="checkbox" class="justif-cat-chk" value="${escapeAttr(t)}" ${defaultChecked.includes(t) ? 'checked' : ''}>
+              ${escapeHtml(t)}
+            </label>`).join('')}
+        </div>`;
+      const footer = `
+        <button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
+        <button onclick="generateJustifikasiAnggaran()" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy-700 text-white text-sm font-semibold">Lanjut →</button>`;
+      openModal({ title: '📊 Justifikasi Pengajuan Anggaran', body, footer, maxWidth: 'max-w-sm' });
+    }
+    window.openJustifikasiAnggaranModal = openJustifikasiAnggaranModal;
+
+    async function generateJustifikasiAnggaran() {
+      const checked = Array.from(document.querySelectorAll('.justif-cat-chk:checked')).map(el => el.value);
+      if (!checked.length) { toast('Pilih minimal 1 kategori', 'warn'); return; }
+      closeModal();
+      try {
+        toast('Menyiapkan data…', 'info');
+        const unitsInScope = state.parentUnits.filter(u => checked.includes(u.type));
+        const unitIds = unitsInScope.map(u => u.id);
+        const { data, error } = await state.supabase.from('equipment').select('*')
+          .in('assigned_unit_id', unitIds).eq('status_operasi', 'Aktif').order('tag_number');
+        if (error) throw error;
+        if (!data || !data.length) { toast('Tidak ada unit Aktif di kategori terpilih.', 'warn'); return; }
+
+        const byType = {};
+        checked.forEach(t => { byType[t] = 0; });
+        let totalNilai = 0, countNilai = 0;
+        data.forEach(eq => {
+          const unit = unitsInScope.find(u => u.id === eq.assigned_unit_id);
+          if (unit) byType[unit.type] = (byType[unit.type] || 0) + 1;
+          if (eq.harga_perolehan) { totalNilai += Number(eq.harga_perolehan) || 0; countNilai++; }
+        });
+
+        const summary = `<div class="cards">
+          ${checked.map(t => `<div class="card navy"><div class="num">${byType[t] || 0}</div><div class="lbl">${escapeHtml(t)}</div></div>`).join('')}
+          <div class="card green"><div class="num">${data.length}</div><div class="lbl">Total Unit Aktif</div></div>
+        </div>`;
+        const chart = chartBars('Unit Aktif per Kategori', checked.map(t => ({ label: t, value: byType[t] || 0, color: '#11335d' })));
+        const intro = `<p>Daftar unit aktif kategori <b>${checked.map(t => escapeHtml(t)).join(', ')}</b> sebagai dasar pengajuan anggaran operasional/pemeliharaan, berdasarkan data terkini sistem RAM eRAMHoist.</p>`;
+
+        const rows = data.map((eq, i) => {
+          const unit = getParentUnitName(eq.assigned_unit_id);
+          const merkModel = [eq.brand, eq.model].filter(Boolean).join(' ') || '-';
+          const harga = eq.harga_perolehan ? 'Rp ' + Number(eq.harga_perolehan).toLocaleString('id-ID') : '-';
+          return `<tr><td style="text-align:center">${i + 1}</td><td>${escapeHtml(eq.tag_number || '-')}</td><td>${escapeHtml(eq.nama_equipment || '-')}</td><td>${escapeHtml(unit)}</td><td>${escapeHtml(merkModel)}</td><td style="text-align:center">${eq.tahun_pembuatan || '-'}</td><td style="text-align:right">${harga}</td></tr>`;
+        }).join('');
+        const table = `<table><thead><tr><th>No</th><th>Tag Number</th><th>Nama Equipment</th><th>Armada</th><th>Merk/Model</th><th>Th. Buat</th><th>Harga Perolehan</th></tr></thead><tbody>${rows}</tbody></table>`;
+
+        const nilaiTxt = countNilai
+          ? `dengan estimasi nilai perolehan tercatat <b>Rp ${totalNilai.toLocaleString('id-ID')}</b> (${countNilai} dari ${data.length} unit punya data harga di sistem)`
+          : `data harga perolehan belum lengkap di sistem untuk unit-unit ini`;
+        const kesimpulan = `<b>Ringkasan:</b> Total <b>${data.length} unit aktif</b> pada kategori ${checked.map(t => escapeHtml(t)).join(', ')}, ${nilaiTxt}.<br><br><b style="color:#16a34a">✅ Permohonan:</b> mohon dukungan alokasi anggaran operasional/pemeliharaan untuk unit-unit di atas guna menjaga kesiapan (Availability) armada.`;
+
+        openSignDialog({ title: 'Justifikasi Pengajuan Anggaran Unit Aktif', type: 'ANGGARAN', summary, chart, intro, table, kesimpulan });
+      } catch (err) {
+        toast('Gagal menyiapkan data: ' + err.message, 'error');
+      }
+    }
+    window.generateJustifikasiAnggaran = generateJustifikasiAnggaran;
 
     function cetakAvailReport() {
       const dataAll = availFilteredData();
