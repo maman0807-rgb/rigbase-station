@@ -12478,7 +12478,8 @@
     // Phase 1: dashboard risiko stok (read-only). Forecast/enrichment menyusul.
     // ============================================================
     let csppMats = [];
-    let csppFilter = { category: '', q: '', critOnly: false, outOnly: false, belowOnly: false };
+    let csppMappings = [];   // cspp_kategori_mapping rows — part kritis per kategori equipment (enrichment)
+    let csppFilter = { category: '', q: '', critOnly: false, outOnly: false, belowOnly: false, kategoriId: '' };
 
     PAGES.cspp = function () {
       const div = document.createElement('div');
@@ -12493,12 +12494,17 @@
         const all = [];
         for (let f = 0; ; f += 1000) {
           const { data, error } = await state.supabase.from('materials')
-            .select('part_number, description, category, satuan, stok, safety_stock, lead_time_days, penyimpanan').range(f, f + 999);
+            .select('id, part_number, description, category, satuan, stok, safety_stock, lead_time_days, penyimpanan').range(f, f + 999);
           if (error) throw error;
           all.push(...(data || []));
           if (!data || data.length < 1000) break;
         }
         csppMats = all;
+        // Enrichment: mapping part kritis per kategori equipment — tabel baru, boleh kosong (belum ada fase21)
+        try {
+          const { data: maps } = await state.supabase.from('cspp_kategori_mapping').select('*');
+          csppMappings = maps || [];
+        } catch (e) { csppMappings = []; }
       } catch (e) {
         host.innerHTML = `<div class="bg-red-50 text-red-700 p-4 rounded-xl text-sm">Gagal memuat: ${escapeHtml(e.message)}</div>`;
         return;
@@ -12535,9 +12541,14 @@
                 <option value="">Semua Kategori</option>
                 ${['Critical', 'Fast Moving', 'Slow Moving', 'Consumable', 'Lubricant'].map(c => `<option value="${c}">${c}</option>`).join('')}
               </select>
+              <select id="cspp-eqkat" onchange="setCsppFilter('kategoriId', this.value)" class="px-2 py-1.5 border border-purple-300 rounded-lg text-xs bg-purple-50 outline-none focus:ring-2 focus:ring-navy">
+                <option value="">🔧 Semua Kategori Equipment</option>
+                ${state.categories.slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(c => `<option value="${c.id}">${escapeHtml(c.name)}${csppMappings.filter(m=>m.kategori_id===c.id).length ? ` (${csppMappings.filter(m=>m.kategori_id===c.id).length})` : ''}</option>`).join('')}
+              </select>
               <input id="cspp-q" oninput="setCsppFilterQ(this.value)" placeholder="Cari part number / deskripsi…" class="flex-1 min-w-[140px] px-2 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-navy">
               <label class="text-xs flex items-center gap-1"><input type="checkbox" id="cspp-crit" onchange="setCsppFilter('critOnly', this.checked)"> Critical</label>
               <label class="text-xs flex items-center gap-1"><input type="checkbox" id="cspp-out" onchange="setCsppFilter('outOnly', this.checked)"> Habis stok</label>
+              ${isSrMekanikOrAbove() ? `<button onclick="openCsppMappingModal()" class="ml-auto text-xs bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded-lg font-semibold">🔧 Kelola Part Kritis per Kategori</button>` : ''}
             </div>
           </div>
           <div class="overflow-x-auto max-h-[28rem] overflow-y-auto"><table class="w-full">
@@ -12558,7 +12569,11 @@
     }
     function csppFiltered() {
       const n = v => Number(v) || 0; const f = csppFilter; const q = (f.q || '').toLowerCase().trim();
+      const mappedIds = f.kategoriId
+        ? new Set(csppMappings.filter(m => String(m.kategori_id) === String(f.kategoriId)).map(m => m.material_id))
+        : null;
       return csppMats.filter(m => {
+        if (mappedIds && !mappedIds.has(m.id)) return false;
         if (f.category && m.category !== f.category) return false;
         if (f.critOnly && String(m.category || '').toLowerCase() !== 'critical') return false;
         if (f.outOnly && n(m.stok) !== 0) return false;
@@ -12586,17 +12601,101 @@
     function setCsppFilter(k, v) { csppFilter.belowOnly = false; csppFilter[k] = v; renderCsppList(); }
     function setCsppFilterQ(v) { csppFilter.belowOnly = false; csppFilter.q = v; clearTimeout(_csppDeb); _csppDeb = setTimeout(renderCsppList, 300); }
     function setCsppPreset(p) {
-      csppFilter = { category: '', q: '', critOnly: false, outOnly: false, belowOnly: false };
+      csppFilter = { category: '', q: '', critOnly: false, outOnly: false, belowOnly: false, kategoriId: '' };
       if (p === 'critout') { csppFilter.critOnly = true; csppFilter.outOnly = true; }
       if (p === 'below') { csppFilter.belowOnly = true; }
       const set = (id, prop, val) => { const el = document.getElementById(id); if (el) el[prop] = val; };
       set('cspp-crit', 'checked', csppFilter.critOnly); set('cspp-out', 'checked', csppFilter.outOnly);
-      set('cspp-cat', 'value', ''); set('cspp-q', 'value', '');
+      set('cspp-cat', 'value', ''); set('cspp-q', 'value', ''); set('cspp-eqkat', 'value', '');
       renderCsppList();
     }
     window.setCsppFilter = setCsppFilter;
     window.setCsppFilterQ = setCsppFilterQ;
     window.setCsppPreset = setCsppPreset;
+
+    // ===== CSPP Enrichment — kelola mapping part kritis per kategori equipment =====
+    function openCsppMappingModal() {
+      const kategoriId = csppFilter.kategoriId || '';
+      const body = `
+        <div class="space-y-3">
+          <div>
+            <label class="text-xs font-semibold text-slate-500 uppercase">Kategori Equipment</label>
+            <select id="cspp-map-kat" onchange="renderCsppMappingList()" class="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg text-sm">
+              <option value="">-- Pilih kategori --</option>
+              ${state.categories.slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(c => `<option value="${c.id}" ${String(c.id)===String(kategoriId)?'selected':''}>${escapeHtml(c.name)}</option>`).join('')}
+            </select>
+          </div>
+          <div id="cspp-map-list" class="space-y-1 max-h-48 overflow-y-auto"></div>
+          <div class="border-t pt-3">
+            <label class="text-xs font-semibold text-slate-500 uppercase">Tambah Part Kritis</label>
+            <input id="cspp-map-search" type="text" placeholder="Cari part number / deskripsi…" autocomplete="off"
+              oninput="renderCsppMapSearchResults(this.value)" class="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg text-sm">
+            <div id="cspp-map-search-results" class="max-h-40 overflow-y-auto border border-slate-200 rounded-lg mt-1 hidden bg-white shadow"></div>
+          </div>
+        </div>`;
+      openModal({ title: '🔧 Kelola Part Kritis per Kategori', body, footer: `<button onclick="closeModal(); renderCsppList();" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy-700 text-white text-sm font-semibold">Selesai</button>`, maxWidth: 'max-w-lg' });
+      renderCsppMappingList();
+    }
+    window.openCsppMappingModal = openCsppMappingModal;
+
+    function renderCsppMappingList() {
+      const kategoriId = document.getElementById('cspp-map-kat')?.value || '';
+      const host = document.getElementById('cspp-map-list'); if (!host) return;
+      if (!kategoriId) { host.innerHTML = '<p class="text-xs text-slate-400 text-center py-3">Pilih kategori dulu.</p>'; return; }
+      const rows = csppMappings.filter(m => String(m.kategori_id) === String(kategoriId));
+      if (!rows.length) { host.innerHTML = '<p class="text-xs text-slate-400 text-center py-3">Belum ada part kritis di-mapping ke kategori ini.</p>'; return; }
+      host.innerHTML = rows.map(m => {
+        const mat = csppMats.find(x => x.id === m.material_id);
+        return `<div class="flex items-center justify-between gap-2 bg-slate-50 rounded-lg px-3 py-1.5 text-xs">
+          <span class="truncate">${escapeHtml(mat?.part_number || '?')} — ${escapeHtml(mat?.description || '(part tidak ditemukan)')}</span>
+          <button onclick="removeCsppMapping('${m.id}')" class="text-red-500 hover:text-red-700 shrink-0">✕</button>
+        </div>`;
+      }).join('');
+    }
+    window.renderCsppMappingList = renderCsppMappingList;
+
+    function renderCsppMapSearchResults(q) {
+      const box = document.getElementById('cspp-map-search-results'); if (!box) return;
+      q = (q || '').toLowerCase().trim();
+      if (!q) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+      const results = csppMats.filter(m =>
+        (m.part_number || '').toLowerCase().includes(q) || (m.description || '').toLowerCase().includes(q)
+      ).slice(0, 20);
+      box.classList.remove('hidden');
+      box.innerHTML = results.length
+        ? results.map(m => `<div onclick="addCsppMapping('${m.id}')" class="px-3 py-1.5 text-xs hover:bg-purple-50 cursor-pointer border-b border-slate-100 last:border-0">${escapeHtml(m.part_number || '?')} — ${escapeHtml(m.description || '')}</div>`).join('')
+        : '<div class="px-3 py-1.5 text-xs text-slate-400">Tidak ketemu.</div>';
+    }
+    window.renderCsppMapSearchResults = renderCsppMapSearchResults;
+
+    async function addCsppMapping(materialId) {
+      const kategoriId = document.getElementById('cspp-map-kat')?.value || '';
+      if (!kategoriId) { toast('Pilih kategori dulu.', 'warn'); return; }
+      try {
+        const { data, error } = await state.supabase.from('cspp_kategori_mapping')
+          .insert({ kategori_id: Number(kategoriId), material_id: materialId, created_by: state.user.id })
+          .select().single();
+        if (error) throw error;
+        csppMappings.push(data);
+        document.getElementById('cspp-map-search').value = '';
+        document.getElementById('cspp-map-search-results').classList.add('hidden');
+        renderCsppMappingList();
+        toast('Part ditambahkan.', 'success');
+      } catch (e) {
+        toast(e.message.includes('duplicate') ? 'Part ini sudah ada di mapping.' : 'Gagal: ' + e.message, 'error');
+      }
+    }
+    window.addCsppMapping = addCsppMapping;
+
+    async function removeCsppMapping(id) {
+      try {
+        const { error } = await state.supabase.from('cspp_kategori_mapping').delete().eq('id', id);
+        if (error) throw error;
+        csppMappings = csppMappings.filter(m => m.id !== id);
+        renderCsppMappingList();
+      } catch (e) { toast('Gagal hapus: ' + e.message, 'error'); }
+    }
+    window.removeCsppMapping = removeCsppMapping;
 
     // ============================================================
     // 10y2. AUDIT GUDANG — cocokkan stok sistem vs fisik (tim Gudang+)
