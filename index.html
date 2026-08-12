@@ -8198,11 +8198,15 @@
         const childIds = children.map(c => c.id);
         const childById = Object.fromEntries(children.map(c => [c.id, c]));
 
-        const [muts, loans, dt, childMuts] = await Promise.all([
+        const [muts, loans, dt, mlog, childMuts] = await Promise.all([
           fetchMutationLog(eq.id),
           fetchLoanHistory(eq.id).catch(() => []),
           state.supabase.from('downtime_events').select('*').eq('equipment_id', eq.id)
             .then(r => r.data || []).catch(() => []),
+          // Catatan lama dari "+ Tambah" (tab Maintenance) — jalur terpisah dari "Catat PM Selesai",
+          // bebas teks, nggak selalu PM. Ditampilkan sbg grup sendiri biar kelihatan, TIDAK
+          // ikut dihitung ke grup "pm" (biar count PM formal tetap akurat, bukan tebak-tebakan teks).
+          fetchMaintenanceLog(eq.id).catch(() => []),
           // Mutasi children — sekali query semua sekaligus
           childIds.length
             ? state.supabase.from('mutation_log').select('*').in('equipment_id', childIds)
@@ -8276,6 +8280,22 @@
               color: 'bg-green-500',
             });
           }
+        });
+        // Catatan manual dari "+ Tambah" (tab Maintenance) — sumber lama, terpisah dari
+        // "Catat PM Selesai". Bebas teks (Service rutin/Repair/Overhaul/dll), jadi ditampilkan
+        // apa adanya, TIDAK dipaksa masuk hitungan PM formal.
+        mlog.forEach(m => {
+          const mlogDetail = [];
+          if (m.pic_mechanic) mlogDetail.push(`👷 PIC: <b>${escapeHtml(m.pic_mechanic)}</b>`);
+          if (m.notes) mlogDetail.push(`📝 ${escapeHtml(m.notes)}`);
+          events.push({
+            group: 'maintenance_manual', kind: 'maintenance_manual',
+            date: m.maintenance_date,
+            title: `🛠️ ${escapeHtml(m.maintenance_type || 'Maintenance Log')} (catatan manual)`,
+            detail: mlogDetail.join('<br>') || null,
+            detailIsHtml: true,
+            color: 'bg-slate-500',
+          });
         });
         // Downtime & Perbaikan — pecah per milestone (DOWN → part datang/dipasang → SELESAI)
         dt.forEach(d => {
@@ -8440,7 +8460,7 @@
       const h = window.__hist, container = window.__histHost;
       if (!h || !container) return;
       const all = h.events;
-      const cnt = { all: all.length, mutasi: 0, pinjam: 0, downtime: 0, pm: 0 };
+      const cnt = { all: all.length, mutasi: 0, pinjam: 0, downtime: 0, pm: 0, maintenance_manual: 0 };
       all.forEach(e => { cnt[e.group] = (cnt[e.group] || 0) + 1; });
       const ev = historyFilter === 'all' ? all : all.filter(e => e.group === historyFilter);
 
@@ -8452,6 +8472,7 @@
           <div class="flex items-center gap-1.5 flex-wrap">
             ${chip('all', 'Semua')}
             ${chip('pm', 'PM')}
+            ${chip('maintenance_manual', 'Maintenance Log (manual)')}
             ${chip('mutasi', 'Mutasi')}
             ${chip('pinjam', 'Pinjaman')}
             ${chip('downtime', 'Downtime')}
@@ -8502,7 +8523,7 @@
       const all = h.events;
       const ev = historyFilter === 'all' ? all : all.filter(e => e.group === historyFilter);
       // Pisahkan downtime real vs gejala (early warning) — bukan kelas yg sama
-      const cnt = { mutasi: 0, pinjam: 0, downtime: 0, gejala: 0, pm: 0 };
+      const cnt = { mutasi: 0, pinjam: 0, downtime: 0, gejala: 0, pm: 0, maintenance_manual: 0 };
       all.forEach(e => {
         if (e.group === 'downtime') {
           if (e.subgroup === 'gejala') cnt.gejala++;
@@ -8511,12 +8532,13 @@
           cnt[e.group] = (cnt[e.group] || 0) + 1;
         }
       });
-      const grpLabel = { mutasi: 'Mutasi', pinjam: 'Pinjaman', downtime: 'Downtime', gejala: 'Gejala', pm: 'PM' };
+      const grpLabel = { mutasi: 'Mutasi', pinjam: 'Pinjaman', downtime: 'Downtime', gejala: 'Gejala', pm: 'PM', maintenance_manual: 'Maintenance Log (manual)' };
       const filterLabel = historyFilter === 'all' ? 'Semua Kejadian' : grpLabel[historyFilter];
 
       const summary = `<div class="cards">
         <div class="card navy"><div class="num">${ev.length}</div><div class="lbl">Total Kejadian</div></div>
         <div class="card green"><div class="num">${cnt.pm}</div><div class="lbl">PM Selesai</div></div>
+        <div class="card navy"><div class="num">${cnt.maintenance_manual}</div><div class="lbl">Maintenance Log (manual)</div></div>
         <div class="card navy"><div class="num">${cnt.mutasi}</div><div class="lbl">Mutasi</div></div>
         <div class="card amber"><div class="num">${cnt.pinjam}</div><div class="lbl">Pinjaman</div></div>
         <div class="card red"><div class="num">${cnt.downtime}</div><div class="lbl">Downtime</div></div>
@@ -8539,7 +8561,7 @@
           .replace(/<\/b>/gi, '</strong>');
       };
       const rows = ev.slice(0, 500).map((e, i) => {
-        const title = e.title.replace(/[✅🔴🟢🤝↩️🟡📦📝]/g, '').trim();
+        const title = e.title.replace(/[✅🔴🟢🤝↩️🟡📦📝🛠️]/g, '').trim();
         // Tentukan label Jenis: untuk group downtime, lihat subgroup
         const jenis = e.group === 'downtime'
           ? (e.subgroup === 'gejala' ? 'Gejala' : 'Downtime')
@@ -8549,9 +8571,10 @@
         return `<tr${rowStyle}><td style="text-align:center">${i + 1}</td><td style="text-align:center">${escapeHtml(fmtDate(e.date))}</td><td style="text-align:center">${escapeHtml(jenis)}</td><td>${escapeHtml(title)}</td><td>${detailForPrint(e)}</td></tr>`;
       }).join('');
       const table = `<table><thead><tr><th>No</th><th>Tanggal</th><th>Jenis</th><th>Keterangan</th><th>Detail / Alasan</th></tr></thead><tbody>${rows || '<tr><td colspan="5" style="text-align:center">Tidak ada data</td></tr>'}</tbody></table>`;
-      const kesimpulan = `Rekaman riwayat di atas digunakan untuk pelacakan pergerakan aset, audit, dan dasar analisa keandalan (RAM). Total <b>${ev.length}</b> kejadian tercatat untuk equipment <b>${escapeHtml(eq.tag_number || '')}</b> — terdiri dari <b>${cnt.pm}</b> PM selesai, <b>${cnt.downtime}</b> downtime real, <b>${cnt.gejala}</b> gejala (early warning), <b>${cnt.mutasi}</b> mutasi, <b>${cnt.pinjam}</b> pinjaman.`;
+      const kesimpulan = `Rekaman riwayat di atas digunakan untuk pelacakan pergerakan aset, audit, dan dasar analisa keandalan (RAM). Total <b>${ev.length}</b> kejadian tercatat untuk equipment <b>${escapeHtml(eq.tag_number || '')}</b> — terdiri dari <b>${cnt.pm}</b> PM selesai (formal), <b>${cnt.maintenance_manual}</b> maintenance log manual, <b>${cnt.downtime}</b> downtime real, <b>${cnt.gejala}</b> gejala (early warning), <b>${cnt.mutasi}</b> mutasi, <b>${cnt.pinjam}</b> pinjaman.`;
       const chart = (typeof chartBars === 'function') ? chartBars('Jumlah Kejadian per Jenis', [
         { label: 'PM Selesai', value: cnt.pm, color: '#16a34a' },
+        { label: 'Maint. Manual', value: cnt.maintenance_manual, color: '#64748b' },
         { label: 'Mutasi', value: cnt.mutasi, color: '#11335d' },
         { label: 'Pinjaman', value: cnt.pinjam, color: '#0891b2' },
         { label: 'Downtime', value: cnt.downtime, color: '#dc2626' },
