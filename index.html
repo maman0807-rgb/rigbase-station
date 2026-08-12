@@ -3831,88 +3831,6 @@
     }
     window.exportEquipmentToExcel = exportEquipmentToExcel;
 
-    // Export gabungan Kendaraan + Alat Berat (status Aktif) — buat pengajuan anggaran ke planner.
-    // 2 sheet terpisah per armada (bukan campur 1 sheet) supaya langsung bisa dikirim tanpa perlu filter manual lagi.
-    async function exportAnggaranKendaraanAlatBerat() {
-      try {
-        toast('Menyiapkan data export…', 'info');
-        const targetTypes = ['Kendaraan', 'Alat Berat'];
-        const unitIdsByType = {};
-        targetTypes.forEach(t => {
-          unitIdsByType[t] = state.parentUnits.filter(u => u.type === t).map(u => u.id);
-        });
-        const allUnitIds = Object.values(unitIdsByType).flat();
-        if (!allUnitIds.length) {
-          toast('Parent unit tipe Kendaraan/Alat Berat tidak ditemukan.', 'warn');
-          return;
-        }
-
-        const { data, error } = await state.supabase.from('equipment').select('*')
-          .in('assigned_unit_id', allUnitIds)
-          .eq('status_operasi', 'Aktif')
-          .order('tag_number');
-        if (error) throw error;
-        if (!data || data.length === 0) {
-          toast('Tidak ada unit Aktif di kategori Kendaraan/Alat Berat.', 'warn');
-          return;
-        }
-
-        const toRow = eq => ({
-          'Tag Number': eq.tag_number,
-          'Nama Equipment': eq.nama_equipment,
-          'Kategori': getCategoryName(eq.kategori_id),
-          'Parent Unit': getParentUnitName(eq.assigned_unit_id),
-          'Brand': eq.brand,
-          'Model': eq.model,
-          'Serial Number': eq.serial_number,
-          'Tahun Pembuatan': eq.tahun_pembuatan,
-          'Status Operasi': eq.status_operasi,
-          'Kondisi Fisik': eq.kondisi_fisik,
-          'Lokasi Fisik': eq.lokasi_fisik,
-          'Running Hours/KM': eq.running_hours,
-          'PM Type': eq.pm_type,
-          'Tgl Pembelian': eq.tgl_pembelian,
-          'Harga Perolehan': eq.harga_perolehan,
-          'Nomor PO/Invoice': eq.nomor_po_invoice,
-          'Vendor/Supplier': eq.vendor_supplier,
-          'Cost Center': eq.cost_center,
-          'Remarks': eq.remarks,
-        });
-
-        const wb = XLSX.utils.book_new();
-        targetTypes.forEach(t => {
-          const rows = data.filter(eq => unitIdsByType[t].includes(eq.assigned_unit_id)).map(toRow);
-          const ws = rows.length ? XLSX.utils.json_to_sheet(rows) : XLSX.utils.aoa_to_sheet([['Tidak ada unit Aktif di kategori ini']]);
-          if (rows.length) {
-            ws['!cols'] = Object.keys(rows[0]).map(key => {
-              const maxLen = Math.max(key.length, ...rows.map(r => String(r[key] || '').length));
-              return { wch: Math.min(Math.max(maxLen + 2, 12), 40) };
-            });
-          }
-          XLSX.utils.book_append_sheet(wb, ws, t);
-        });
-
-        const meta = [
-          ['Export Anggaran — eRAMHoist'],
-          ['Tanggal Export', new Date().toLocaleString('id-ID')],
-          ['Filter', 'Status Operasi = Aktif, Parent Unit tipe Kendaraan & Alat Berat'],
-          ['Total Kendaraan', data.filter(eq => unitIdsByType['Kendaraan'].includes(eq.assigned_unit_id)).length],
-          ['Total Alat Berat', data.filter(eq => unitIdsByType['Alat Berat'].includes(eq.assigned_unit_id)).length],
-        ];
-        const wsMeta = XLSX.utils.aoa_to_sheet(meta);
-        wsMeta['!cols'] = [{ wch: 22 }, { wch: 35 }];
-        XLSX.utils.book_append_sheet(wb, wsMeta, 'Info');
-
-        const ts = new Date().toISOString().slice(0, 16).replace(/[:\-T]/g, '');
-        const filename = `eramhoist_anggaran_unit_aktif_${ts}.xlsx`;
-        XLSX.writeFile(wb, filename);
-        toast(`✅ ${data.length} unit aktif ter-export ke ${filename}`, 'success');
-      } catch (err) {
-        toast('Gagal export: ' + err.message, 'error');
-      }
-    }
-    window.exportAnggaranKendaraanAlatBerat = exportAnggaranKendaraanAlatBerat;
-
     // Print equipment detail (browser native, hasil bisa di-save jadi PDF)
     function printEquipmentDetail() {
       window.print();
@@ -6652,10 +6570,6 @@
             <button onclick="exportEquipmentToExcel()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 shadow-sm" title="Export ke Excel (hasil filter saat ini)">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
               Export Excel
-            </button>
-            <button onclick="exportAnggaranKendaraanAlatBerat()" class="bg-navy hover:opacity-90 text-white px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 shadow-sm" title="Export Kendaraan + Alat Berat (status Aktif) — 2 sheet terpisah, buat pengajuan anggaran">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"/></svg>
-              📊 Export Anggaran
             </button>
             <button onclick="openJustifikasiAnggaranModal()" class="bg-safety hover:bg-safety-700 text-white px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 shadow-sm" title="Dokumen resmi siap cetak/PDF — pilih kategori, lengkap letterhead & blok tanda tangan">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
@@ -18908,69 +18822,85 @@
     }
     window.cetakFmeaReport = cetakFmeaReport;
 
-    // Justifikasi Pengajuan Anggaran — pilih kategori armada dulu (checkbox), baru generate
+    // Justifikasi Pengajuan Anggaran — pilih per-KATEGORI (bukan per-armada besar), baru generate
     // dokumen letterhead resmi (sama pola dgn Justifikasi CSPP/FMEA) berisi daftar unit Aktif
     // + estimasi nilai perolehan, siap cetak/PDF dgn blok tanda tangan Dibuat/Diperiksa/Disetujui.
+    // Kenapa per-kategori: beberapa kategori "ambigu" (mis. Damkar — truk + pompa, masuk armada
+    // Fire & Safety tapi dari sisi anggaran kadang mau dihitung bareng Kendaraan) — jadi user yang
+    // tentukan tiap kali cetak mana yang mau digabung, bukan hardcode di kode.
     function openJustifikasiAnggaranModal() {
-      const types = [...new Set(state.parentUnits.map(u => u.type).filter(Boolean))];
-      const defaultChecked = ['Kendaraan', 'Alat Berat'];
+      const defaultTypes = ['Kendaraan', 'Alat Berat'];
+      const byType = {};
+      state.categories.forEach(c => {
+        const t = c.parent_unit_type;
+        if (!t || t === 'Both') return;
+        (byType[t] = byType[t] || []).push(c);
+      });
+      const typeOrder = Object.keys(byType).sort((a, b) => (defaultTypes.includes(b) ? 1 : 0) - (defaultTypes.includes(a) ? 1 : 0));
       const body = `
-        <p class="text-xs text-slate-500 mb-3">Pilih kategori armada yang mau dimasukkan ke dokumen justifikasi (cuma unit status <b>Aktif</b> yang diambil).</p>
-        <div class="space-y-2">
-          ${types.map(t => `
-            <label class="flex items-center gap-2 text-sm px-3 py-2 border border-slate-200 rounded-lg hover:bg-slate-50 cursor-pointer">
-              <input type="checkbox" class="justif-cat-chk" value="${escapeAttr(t)}" ${defaultChecked.includes(t) ? 'checked' : ''}>
-              ${escapeHtml(t)}
-            </label>`).join('')}
+        <p class="text-xs text-slate-500 mb-3">Pilih kategori equipment yang mau dimasukkan ke dokumen justifikasi (cuma unit status <b>Aktif</b> yang diambil). Kategori seperti Damkar bisa dicentang manual kalau mau ikut dihitung bareng Kendaraan.</p>
+        <div class="space-y-3 max-h-80 overflow-y-auto pr-1">
+          ${typeOrder.map(t => `
+            <div>
+              <div class="text-xs font-bold text-navy uppercase mb-1">${escapeHtml(t)}</div>
+              <div class="grid grid-cols-2 gap-1.5">
+                ${byType[t].map(c => `
+                  <label class="flex items-center gap-1.5 text-xs px-2.5 py-1.5 border border-slate-200 rounded-lg hover:bg-slate-50 cursor-pointer">
+                    <input type="checkbox" class="justif-cat-chk" value="${c.id}" ${defaultTypes.includes(t) ? 'checked' : ''}>
+                    ${escapeHtml(c.name)}
+                  </label>`).join('')}
+              </div>
+            </div>`).join('')}
         </div>`;
       const footer = `
         <button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
         <button onclick="generateJustifikasiAnggaran()" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy-700 text-white text-sm font-semibold">Lanjut →</button>`;
-      openModal({ title: '📊 Justifikasi Pengajuan Anggaran', body, footer, maxWidth: 'max-w-sm' });
+      openModal({ title: '📊 Justifikasi Pengajuan Anggaran', body, footer, maxWidth: 'max-w-lg' });
     }
     window.openJustifikasiAnggaranModal = openJustifikasiAnggaranModal;
 
     async function generateJustifikasiAnggaran() {
-      const checked = Array.from(document.querySelectorAll('.justif-cat-chk:checked')).map(el => el.value);
-      if (!checked.length) { toast('Pilih minimal 1 kategori', 'warn'); return; }
+      const checkedIds = Array.from(document.querySelectorAll('.justif-cat-chk:checked')).map(el => Number(el.value));
+      if (!checkedIds.length) { toast('Pilih minimal 1 kategori', 'warn'); return; }
       closeModal();
       try {
         toast('Menyiapkan data…', 'info');
-        const unitsInScope = state.parentUnits.filter(u => checked.includes(u.type));
-        const unitIds = unitsInScope.map(u => u.id);
         const { data, error } = await state.supabase.from('equipment').select('*')
-          .in('assigned_unit_id', unitIds).eq('status_operasi', 'Aktif').order('tag_number');
+          .in('kategori_id', checkedIds).eq('status_operasi', 'Aktif').order('nama_equipment');
         if (error) throw error;
         if (!data || !data.length) { toast('Tidak ada unit Aktif di kategori terpilih.', 'warn'); return; }
 
-        const byType = {};
-        checked.forEach(t => { byType[t] = 0; });
+        const checkedCats = state.categories.filter(c => checkedIds.includes(c.id));
+        const byCat = {};
+        checkedCats.forEach(c => { byCat[c.name] = 0; });
         let totalNilai = 0, countNilai = 0;
         data.forEach(eq => {
-          const unit = unitsInScope.find(u => u.id === eq.assigned_unit_id);
-          if (unit) byType[unit.type] = (byType[unit.type] || 0) + 1;
+          const cat = getCategoryName(eq.kategori_id);
+          byCat[cat] = (byCat[cat] || 0) + 1;
           if (eq.harga_perolehan) { totalNilai += Number(eq.harga_perolehan) || 0; countNilai++; }
         });
+        const catNames = checkedCats.map(c => c.name);
 
         const summary = `<div class="cards">
-          ${checked.map(t => `<div class="card navy"><div class="num">${byType[t] || 0}</div><div class="lbl">${escapeHtml(t)}</div></div>`).join('')}
+          ${catNames.map(n => `<div class="card navy"><div class="num">${byCat[n] || 0}</div><div class="lbl">${escapeHtml(n)}</div></div>`).join('')}
           <div class="card green"><div class="num">${data.length}</div><div class="lbl">Total Unit Aktif</div></div>
         </div>`;
-        const chart = chartBars('Unit Aktif per Kategori', checked.map(t => ({ label: t, value: byType[t] || 0, color: '#11335d' })));
-        const intro = `<p>Daftar unit aktif kategori <b>${checked.map(t => escapeHtml(t)).join(', ')}</b> sebagai dasar pengajuan anggaran operasional/pemeliharaan, berdasarkan data terkini sistem RAM eRAMHoist.</p>`;
+        const chart = chartBars('Unit Aktif per Kategori', catNames.map(n => ({ label: n, value: byCat[n] || 0, color: '#11335d' })));
+        const intro = `<p>Daftar unit aktif kategori <b>${catNames.map(n => escapeHtml(n)).join(', ')}</b> sebagai dasar pengajuan anggaran operasional/pemeliharaan, berdasarkan data terkini sistem RAM eRAMHoist.</p>`;
 
         const rows = data.map((eq, i) => {
+          const kat = getCategoryName(eq.kategori_id);
           const unit = getParentUnitName(eq.assigned_unit_id);
           const merkModel = [eq.brand, eq.model].filter(Boolean).join(' ') || '-';
           const harga = eq.harga_perolehan ? 'Rp ' + Number(eq.harga_perolehan).toLocaleString('id-ID') : '-';
-          return `<tr><td style="text-align:center">${i + 1}</td><td>${escapeHtml(eq.tag_number || '-')}</td><td>${escapeHtml(eq.nama_equipment || '-')}</td><td>${escapeHtml(unit)}</td><td>${escapeHtml(merkModel)}</td><td style="text-align:center">${eq.tahun_pembuatan || '-'}</td><td style="text-align:right">${harga}</td></tr>`;
+          return `<tr><td style="text-align:center">${i + 1}</td><td>${escapeHtml(eq.nama_equipment || '-')}</td><td>${escapeHtml(kat)}</td><td>${escapeHtml(unit)}</td><td>${escapeHtml(merkModel)}</td><td style="text-align:center">${eq.tahun_pembuatan || '-'}</td><td style="text-align:right">${harga}</td></tr>`;
         }).join('');
-        const table = `<table><thead><tr><th>No</th><th>Tag Number</th><th>Nama Equipment</th><th>Armada</th><th>Merk/Model</th><th>Th. Buat</th><th>Harga Perolehan</th></tr></thead><tbody>${rows}</tbody></table>`;
+        const table = `<table><thead><tr><th>No</th><th>Nama Equipment</th><th>Kategori</th><th>Armada</th><th>Merk/Model</th><th>Th. Buat</th><th>Harga Perolehan</th></tr></thead><tbody>${rows}</tbody></table>`;
 
         const nilaiTxt = countNilai
           ? `dengan estimasi nilai perolehan tercatat <b>Rp ${totalNilai.toLocaleString('id-ID')}</b> (${countNilai} dari ${data.length} unit punya data harga di sistem)`
           : `data harga perolehan belum lengkap di sistem untuk unit-unit ini`;
-        const kesimpulan = `<b>Ringkasan:</b> Total <b>${data.length} unit aktif</b> pada kategori ${checked.map(t => escapeHtml(t)).join(', ')}, ${nilaiTxt}.<br><br><b style="color:#16a34a">✅ Permohonan:</b> mohon dukungan alokasi anggaran operasional/pemeliharaan untuk unit-unit di atas guna menjaga kesiapan (Availability) armada.`;
+        const kesimpulan = `<b>Ringkasan:</b> Total <b>${data.length} unit aktif</b> pada kategori ${catNames.map(n => escapeHtml(n)).join(', ')}, ${nilaiTxt}.<br><br><b style="color:#16a34a">✅ Permohonan:</b> mohon dukungan alokasi anggaran operasional/pemeliharaan untuk unit-unit di atas guna menjaga kesiapan (Availability) armada.`;
 
         openSignDialog({ title: 'Justifikasi Pengajuan Anggaran Unit Aktif', type: 'ANGGARAN', summary, chart, intro, table, kesimpulan });
       } catch (err) {
