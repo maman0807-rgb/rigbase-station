@@ -2116,6 +2116,7 @@
             ${statCard('Down',            '…', ICONS.warning, 'bg-red-100 text-red-700')}
             ${statCard('Alert Aktif',     '…', ICONS.bell,    'bg-orange-100 text-orange-700')}
           </div>
+          ${state.profile?.role === 'admin' ? `<div id="dash-hmphoto-wrap"></div>` : ''}
           <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
               <h4 class="text-base font-bold text-slate-800 mb-3 flex items-center gap-2">🔧 Mendekati Maintenance PM</h4>
@@ -2161,7 +2162,7 @@
 
         (async () => {
           try {
-            const [stats, due, skpi, loans, pmHours, pmKm, overhaul, inspAktif] = await Promise.all([
+            const [stats, due, skpi, loans, pmHours, pmKm, overhaul, inspAktif, pendingHmPhotos] = await Promise.all([
               fetchDashboardStats(),
               fetchPMDueByHours(0.2).catch(() => []),
               fetchExpiringSkpi(60),
@@ -2170,6 +2171,9 @@
               fetchPMDueByKm(500).catch(() => []),
               fetchOverhaulDue(0.05).catch(() => []),
               state.supabase.from('v_inspection_downtime').select('*').eq('is_holding', true).order('mulai').then(r => r).catch(() => ({ data: [] })),
+              state.profile?.role === 'admin'
+                ? state.supabase.from('hm_photo_reports').select('*').eq('status', 'pending').order('created_at').then(r => r.data || []).catch(() => [])
+                : Promise.resolve([]),
             ]);
             // Stats
             $('#dash-stats').innerHTML = `
@@ -2178,6 +2182,22 @@
               ${statCard('Down',            fmtNumber(stats.down),    ICONS.warning, 'bg-red-100 text-red-700')}
               ${statCard('Warning PM', fmtNumber(due.length) + (pmHours.length ? ` (${pmHours.length} kritis)` : ''), ICONS.bell, 'bg-orange-100 text-orange-700')}
             `;
+            // Foto HM menunggu approval (admin only) — approve di sini langsung update running_hours (= Revisi HM)
+            const hmPhotoWrap = $('#dash-hmphoto-wrap');
+            if (hmPhotoWrap) {
+              window.__pendingHmPhotos = pendingHmPhotos;
+              hmPhotoWrap.innerHTML = pendingHmPhotos.length === 0 ? '' : `
+                <div class="bg-purple-50 border border-purple-300 rounded-xl p-5 shadow-sm flex items-center justify-between flex-wrap gap-3">
+                  <div class="flex items-center gap-3">
+                    <span class="text-3xl">📸</span>
+                    <div>
+                      <div class="font-bold text-purple-900">${pendingHmPhotos.length} Foto HM menunggu approval</div>
+                      <div class="text-xs text-purple-600">Dari app Logbook — setujui untuk auto-update running_hours (setara Revisi HM)</div>
+                    </div>
+                  </div>
+                  <button onclick="openHmPhotoApprovalModal()" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-sm font-semibold shrink-0">Review Sekarang →</button>
+                </div>`;
+            }
             // Mendekati Maintenance PM (HM-based, threshold proporsional 20% interval tiap unit)
             $('#dash-due').innerHTML = due.length === 0
               ? '<div class="text-slate-400 text-sm">Tidak ada equipment yang mendekati jadwal PM.</div>'
@@ -17577,6 +17597,112 @@
       }
     }
     window.submitHMRevise = submitHMRevise;
+
+    // ============================================================
+    // FOTO HM APPROVAL — dari app Logbook (hm_photo_reports), setuju = setara Revisi HM
+    // Sama persis pola audit trail submitHMRevise() di atas: SET running_hours absolute,
+    // cascade ke children follow_parent_hm, logActivity, alert Telegram. Admin-only (role
+    // check di render kartu Dashboard sudah gate, tapi RLS UPDATE hm_photo_reports juga
+    // admin-only jadi aman kalau ada yg coba akses langsung).
+    // ============================================================
+    function openHmPhotoApprovalModal() {
+      const rows = window.__pendingHmPhotos || [];
+      const body = rows.length === 0
+        ? '<p class="text-sm text-slate-400 text-center py-6">Tidak ada Foto HM menunggu approval.</p>'
+        : `<div class="space-y-3 max-h-[28rem] overflow-y-auto">${rows.map(r => `
+            <div id="hmphoto-row-${r.id}" class="border border-slate-200 rounded-xl p-3 flex gap-3">
+              <img src="${r.photo_url}" onclick="viewPhotoFullsize('${r.photo_url}','')" class="w-20 h-20 object-cover rounded-lg border border-slate-200 cursor-pointer shrink-0">
+              <div class="flex-1 min-w-0">
+                <div class="font-semibold text-slate-800 text-sm">${escapeHtml(r.equipment_name || '-')}</div>
+                <div class="text-xs text-slate-400">${escapeHtml(r.equipment_tag || '-')}</div>
+                <div class="text-sm mt-1">HM di foto: <b class="text-navy">${fmtNumber(r.hm_value)}</b></div>
+                ${r.notes ? `<div class="text-xs text-slate-500 italic mt-0.5">"${escapeHtml(r.notes)}"</div>` : ''}
+                <div class="text-[11px] text-slate-400 mt-0.5">${escapeHtml(r.reported_by_name || '-')} · ${fmtDate(r.created_at)}</div>
+                <div class="flex gap-2 mt-2">
+                  <button onclick="approveHmPhotoEram('${r.id}')" class="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-xs font-semibold">✓ Setujui → Update HM</button>
+                  <button onclick="rejectHmPhotoEram('${r.id}')" class="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-xs font-semibold">Tolak</button>
+                </div>
+              </div>
+            </div>`).join('')}</div>`;
+      openModal({ title: '📸 Verifikasi Foto HM', body, footer: `<button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Tutup</button>`, maxWidth: 'max-w-lg' });
+    }
+    window.openHmPhotoApprovalModal = openHmPhotoApprovalModal;
+
+    async function approveHmPhotoEram(reportId) {
+      const report = (window.__pendingHmPhotos || []).find(r => r.id === reportId);
+      if (!report) return;
+      const row = document.getElementById(`hmphoto-row-${reportId}`);
+      if (row) row.style.opacity = '0.5';
+      try {
+        const newHM = Number(report.hm_value);
+        const { data: eq, error: eqErr } = await state.supabase.from('equipment')
+          .select('id, tag_number, nama_equipment, running_hours').eq('id', report.equipment_id).single();
+        if (eqErr) throw eqErr;
+        const oldHM = Number(eq.running_hours) || 0;
+        const delta = newHM - oldHM;
+
+        const { error: updErr } = await state.supabase.from('equipment').update({
+          running_hours: newHM, updated_by: state.user.id, updated_at: new Date().toISOString(),
+        }).eq('id', report.equipment_id);
+        if (updErr) throw updErr;
+
+        const { data: followers } = await state.supabase.from('equipment')
+          .select('id').eq('parent_equipment_id', report.equipment_id).eq('follow_parent_hm', true);
+        if (followers?.length) {
+          await state.supabase.from('equipment').update({
+            running_hours: newHM, updated_by: state.user.id, updated_at: new Date().toISOString(),
+          }).in('id', followers.map(f => f.id));
+        }
+
+        await logActivity('hm_revised', 'equipment', report.equipment_id, eq.tag_number || eq.nama_equipment, {
+          old_hm: oldHM, new_hm: newHM, delta, source: 'foto_hm', photo_url: report.photo_url,
+          reason: report.notes || '(verifikasi Foto HM, tanpa catatan tambahan)',
+          reported_by_name: report.reported_by_name,
+        });
+        sendTelegramAlert(
+          `✏ <b>REVISI HM (via Foto HM)</b>\n` +
+          `📍 <b>${escapeHtml(eq.tag_number || eq.nama_equipment)}</b>\n` +
+          `📊 Sistem: <code>${fmtNumber(oldHM)}</code> → Actual: <code>${fmtNumber(newHM)}</code> (Δ ${delta > 0 ? '+' : ''}${fmtNumber(delta)})\n` +
+          `📸 Dilaporkan: ${escapeHtml(report.reported_by_name || '-')}\n` +
+          `✅ Diverifikasi: ${escapeHtml(state.profile?.full_name || state.profile?.email || '-')}`
+        );
+
+        const { error: repErr } = await state.supabase.from('hm_photo_reports').update({
+          status: 'approved', reviewed_by: state.user.id,
+          reviewed_by_name: state.profile?.full_name || state.profile?.email || null,
+          reviewed_at: new Date().toISOString(),
+        }).eq('id', reportId);
+        if (repErr) throw repErr;
+
+        window.__pendingHmPhotos = (window.__pendingHmPhotos || []).filter(r => r.id !== reportId);
+        row?.remove();
+        toast(`✓ HM ${eq.tag_number || eq.nama_equipment} di-update ke ${fmtNumber(newHM)}.`, 'success');
+        if (!window.__pendingHmPhotos.length) closeModal();
+      } catch (err) {
+        if (row) row.style.opacity = '1';
+        toast('Gagal approve: ' + err.message, 'error');
+      }
+    }
+    window.approveHmPhotoEram = approveHmPhotoEram;
+
+    async function rejectHmPhotoEram(reportId) {
+      const row = document.getElementById(`hmphoto-row-${reportId}`);
+      try {
+        const { error } = await state.supabase.from('hm_photo_reports').update({
+          status: 'rejected', reviewed_by: state.user.id,
+          reviewed_by_name: state.profile?.full_name || state.profile?.email || null,
+          reviewed_at: new Date().toISOString(),
+        }).eq('id', reportId);
+        if (error) throw error;
+        window.__pendingHmPhotos = (window.__pendingHmPhotos || []).filter(r => r.id !== reportId);
+        row?.remove();
+        toast('Foto HM ditolak.', 'success');
+        if (!window.__pendingHmPhotos.length) closeModal();
+      } catch (err) {
+        toast('Gagal tolak: ' + err.message, 'error');
+      }
+    }
+    window.rejectHmPhotoEram = rejectHmPhotoEram;
 
     // ============================================================
     // CASCADE HM — toggle follow_parent_hm
