@@ -6900,7 +6900,7 @@
         `,
         footer: `
           <button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
-          <button onclick="submitBulkStatus()" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy-700 text-white text-sm font-semibold">Update ${count} Equipment</button>
+          <button id="bulk-status-submit-btn" onclick="submitBulkStatus()" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy-700 text-white text-sm font-semibold">Update ${count} Equipment</button>
         `,
       });
     }
@@ -6912,6 +6912,10 @@
       const notes = form.elements.notes.value;
       if (!status) { toast('Pilih status dulu.', 'warn'); return; }
       const ids = Array.from(state.selectedEquipmentIds);
+      if (window.__bulkStatusSaving) return;
+      window.__bulkStatusSaving = true;
+      const bulkBtn = document.getElementById('bulk-status-submit-btn');
+      if (bulkBtn) { bulkBtn.disabled = true; bulkBtn.textContent = 'Memproses…'; }
       try {
         const { error } = await state.supabase.from('equipment').update({
           status_operasi: status, updated_by: state.user.id,
@@ -6930,6 +6934,9 @@
         reloadEquipmentList();
       } catch (err) {
         toast('Gagal: ' + err.message, 'error');
+      } finally {
+        window.__bulkStatusSaving = false;
+        if (bulkBtn) { bulkBtn.disabled = false; bulkBtn.textContent = `Update ${ids.length} Equipment`; }
       }
     }
     window.submitBulkStatus = submitBulkStatus;
@@ -9360,6 +9367,7 @@
     }
 
     async function submitReplace(oldEquipmentId, oldUnitId, independentUnitId) {
+      if (window.__replaceSaving) return;
       const form = document.getElementById('replace-form');
       const submitBtn = document.getElementById('replace-submit-btn');
       const cancelBtn = document.getElementById('replace-cancel-btn');
@@ -9382,10 +9390,11 @@
         confirmText: 'Ya, Lanjutkan',
       });
       if (!ok) return;
+      window.__replaceSaving = true;
 
       // Modal konfirmasi nutup modal replace, kita harus buka lagi atau langsung jalan?
       // Karena confirmDialog override modal, replace modal udah ke-close.
-      // Disable button gak bisa lagi — langsung kerja saja.
+      // Disable button gak bisa lagi — pakai flag __replaceSaving sbg guard reentrancy.
 
       // Fetch ulang equipment baru (data fresh — antisipasi race condition)
       let newEq;
@@ -9471,6 +9480,8 @@
       } catch (err) {
         toast('Gagal: ' + err.message + ' — Cek manual via SQL Editor.', 'error');
         console.error('Replace failed:', err);
+      } finally {
+        window.__replaceSaving = false;
       }
     }
     window.submitReplace = submitReplace;
@@ -9794,7 +9805,7 @@
         `,
         footer: `
           <button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm">Batal</button>
-          <button onclick="submitMaintenance('${equipmentId}')" class="px-4 py-2 rounded-lg bg-safety hover:bg-safety-700 text-white text-sm font-semibold">Simpan</button>
+          <button id="maint-submit-btn" onclick="submitMaintenance('${equipmentId}')" class="px-4 py-2 rounded-lg bg-safety hover:bg-safety-700 text-white text-sm font-semibold">Simpan</button>
         `,
       });
     }
@@ -9810,6 +9821,10 @@
         notes: f.elements.notes.value || null,
       };
       if (!payload.maintenance_date) { toast('Tanggal wajib diisi.', 'warn'); return; }
+      if (window.__maintSaving) return;
+      window.__maintSaving = true;
+      const maintBtn = document.getElementById('maint-submit-btn');
+      if (maintBtn) { maintBtn.disabled = true; maintBtn.textContent = 'Menyimpan…'; }
       try {
         await createMaintenanceLog(payload);
         const eq = window.__currentEq;
@@ -9825,6 +9840,9 @@
         }
       } catch (err) {
         toast('Gagal simpan: ' + err.message, 'error');
+      } finally {
+        window.__maintSaving = false;
+        if (maintBtn) { maintBtn.disabled = false; maintBtn.textContent = 'Simpan'; }
       }
     }
     window.submitMaintenance = submitMaintenance;
@@ -10249,7 +10267,7 @@
         </div>
         <div class="flex justify-end gap-2 mt-4">
           <button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 text-sm font-semibold text-slate-700 hover:bg-slate-50">Batal</button>
-          <button onclick="savePayrollEmp('${id||''}')" class="px-5 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-bold">💾 Simpan</button>
+          <button id="pef-submit-btn" onclick="savePayrollEmp('${id||''}')" class="px-5 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-bold">💾 Simpan</button>
         </div>`;
       openModal({ title: emp ? 'Edit Karyawan' : 'Tambah Karyawan', body: html, maxWidth: 'max-w-2xl' });
     }
@@ -10277,6 +10295,10 @@
         aktif: g('aktif')?.checked ?? true,
       };
       if (!payload.nik || !payload.nama || !payload.jabatan) { toast('NIK, Nama, dan Jabatan wajib diisi.','warn'); return; }
+      if (window.__payrollEmpSaving) return;
+      window.__payrollEmpSaving = true;
+      const pefBtn = document.getElementById('pef-submit-btn');
+      if (pefBtn) { pefBtn.disabled = true; pefBtn.textContent = 'Menyimpan…'; }
       try {
         if (id) { const { error } = await state.supabase.from('payroll_employees').update(payload).eq('id',id); if(error)throw error; }
         else { payload.created_by = state.user.id; const { error } = await state.supabase.from('payroll_employees').insert(payload); if(error)throw error; }
@@ -10284,6 +10306,10 @@
         payrollState.employees = [];
         renderPayrollTab();
       } catch(e) { toast('Gagal: '+e.message,'error'); }
+      finally {
+        window.__payrollEmpSaving = false;
+        if (pefBtn) { pefBtn.disabled = false; pefBtn.textContent = '💾 Simpan'; }
+      }
     }
     window.savePayrollEmp = savePayrollEmp;
 
@@ -10548,7 +10574,7 @@
         </div>
         <div class="flex justify-end gap-2 mt-4">
           <button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 text-sm font-semibold text-slate-700 hover:bg-slate-50">Batal</button>
-          <button onclick="saveKasbon()" class="px-5 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-bold">💾 Simpan</button>
+          <button id="kb-submit-btn" onclick="saveKasbon()" class="px-5 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-bold">💾 Simpan</button>
         </div>`;
       openModal({ title: 'Tambah Kasbon', body: html, maxWidth: 'max-w-lg' });
     }
@@ -10560,10 +10586,16 @@
       const cicilan = Number(document.getElementById('kb-cicilan')?.value)||0;
       const tgl = document.getElementById('kb-tgl')?.value;
       if (!empId||!jumlah||!cicilan||!tgl) { toast('Semua field wajib diisi.','warn'); return; }
+      if (window.__kasbonSaving) return;
+      window.__kasbonSaving = true;
+      const kbBtn = document.getElementById('kb-submit-btn');
+      if (kbBtn) { kbBtn.disabled = true; kbBtn.textContent = 'Menyimpan…'; }
       const { error } = await state.supabase.from('payroll_kasbon').insert({
         employee_id:empId, tanggal:tgl, jumlah, cicilan_per_bulan:cicilan,
         sisa_pinjaman:jumlah, keterangan:document.getElementById('kb-ket')?.value||null,
       });
+      window.__kasbonSaving = false;
+      if (kbBtn) { kbBtn.disabled = false; kbBtn.textContent = '💾 Simpan'; }
       if (error) { toast('Gagal: '+error.message,'error'); return; }
       toast('Kasbon tersimpan.','success'); closeModal(); renderPayrollTab();
     }
@@ -12437,7 +12469,7 @@
         </div>`;
       const footer = `
         <button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
-        <button onclick="saveMobilization()" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy-700 text-white text-sm font-semibold">💾 Simpan</button>`;
+        <button id="mob-submit-btn" onclick="saveMobilization()" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy-700 text-white text-sm font-semibold">💾 Simpan</button>`;
       openModal({ title: ed ? 'Edit Mobilisasi' : 'Catat Mobilisasi Rig', body, footer, maxWidth: 'max-w-2xl' });
       if (e.unit_id) loadRigEquipment(e.unit_id, window.__mobEditEqIds || null);
       renderStressPreview();
@@ -12483,6 +12515,10 @@
       if (!(Number(f.distance) > 0)) { toast('Isi total jarak (km).', 'warn'); return; }
       const sc = calcStress(f);
       const v = (id) => (document.getElementById(id)?.value || '').trim() || null;
+      if (window.__mobSaving) return;
+      window.__mobSaving = true;
+      const mobBtn = document.getElementById('mob-submit-btn');
+      if (mobBtn) { mobBtn.disabled = true; mobBtn.textContent = 'Menyimpan…'; }
       try {
         // Upload PDF JMP (kalau ada) — graceful: gagal upload tidak membatalkan simpan
         const editId = window.__mobEditId;
@@ -12552,6 +12588,9 @@
         state.ramTab = 'reliability'; state.reliabilityTab = 'stress'; navigate('reliability');
       } catch (e) {
         toast('Gagal simpan: ' + e.message, 'error');
+      } finally {
+        window.__mobSaving = false;
+        if (mobBtn) { mobBtn.disabled = false; mobBtn.textContent = '💾 Simpan'; }
       }
     }
     window.saveMobilization = saveMobilization;
@@ -13530,7 +13569,7 @@
         </div>`;
       const footer = `
         <button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
-        <button onclick="saveFmea('${existing?.id || ''}')" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy-700 text-white text-sm font-semibold">💾 Simpan</button>`;
+        <button id="fmea-submit-btn" onclick="saveFmea('${existing?.id || ''}')" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy-700 text-white text-sm font-semibold">💾 Simpan</button>`;
       openModal({ title: existing ? 'Edit FMEA' : 'Tambah FMEA', body, footer, maxWidth: 'max-w-2xl' });
       window.__fmeaApManual = !!e.action_priority; // kalau sudah ada AP tersimpan → jangan ditimpa saran
       renderFmeaRpn();
@@ -13560,6 +13599,10 @@
         recommended_action: v('fmea-action'), pic: v('fmea-pic'),
         status: document.getElementById('fmea-status')?.value || 'open', notes: v('fmea-notes'),
       };
+      if (window.__fmeaSaving) return;
+      window.__fmeaSaving = true;
+      const fmeaBtn = document.getElementById('fmea-submit-btn');
+      if (fmeaBtn) { fmeaBtn.disabled = true; fmeaBtn.textContent = 'Menyimpan…'; }
       try {
         if (id) {
           const { error } = await state.supabase.from('fmea_entries').update(payload).eq('id', id);
@@ -13574,6 +13617,10 @@
         if (state.currentPage === 'reliability') { state.ramTab = 'reliability'; state.reliabilityTab = 'fmea'; navigate('reliability'); }
         else if (window.__currentEq) renderDetailTab(window.__currentEq);
       } catch (e) { toast('Gagal simpan: ' + e.message, 'error'); }
+      finally {
+        window.__fmeaSaving = false;
+        if (fmeaBtn) { fmeaBtn.disabled = false; fmeaBtn.textContent = '💾 Simpan'; }
+      }
     }
     window.saveFmea = saveFmea;
 
@@ -13767,6 +13814,11 @@
         created_by: state.user?.id,
       };
       if (!payload.failure_date || !payload.failure_description) { toast('Tanggal & deskripsi wajib diisi','error'); return; }
+      if (window.__rcaSaving) return;
+      window.__rcaSaving = true;
+      const rcaBtn = f.querySelector('button[type="submit"]');
+      const rcaBtnOrigText = rcaBtn?.textContent;
+      if (rcaBtn) { rcaBtn.disabled = true; rcaBtn.textContent = 'Menyimpan…'; }
       try {
         if (rcaId) {
           const { error } = await state.supabase.from('rca_records').update(payload).eq('id', rcaId);
@@ -13780,6 +13832,10 @@
         const c = document.getElementById('detail-tab-content');
         if (c && window.__currentEq) renderRcaTab(window.__currentEq, c);
       } catch (err) { toast('Gagal: ' + err.message, 'error'); }
+      finally {
+        window.__rcaSaving = false;
+        if (rcaBtn) { rcaBtn.disabled = false; rcaBtn.textContent = rcaBtnOrigText; }
+      }
     }
     window.submitRcaForm = submitRcaForm;
 
@@ -15919,7 +15975,7 @@
           </div>
         </div>`;
       const footer = `<button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
-        <button onclick="submitSnooze('${equipmentId}')" class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold">🔕 Snooze Alert</button>`;
+        <button id="snz-submit-btn" onclick="submitSnooze('${equipmentId}')" class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold">🔕 Snooze Alert</button>`;
       openModal({ title: '🔕 Snooze Alert · ' + tagDisplay, body, footer, maxWidth: 'max-w-lg' });
     }
     window.openSnoozeModal = openSnoozeModal;
@@ -15929,6 +15985,10 @@
       const days = Number(document.getElementById('snz-duration')?.value) || 7;
       const reason = (document.getElementById('snz-reason')?.value || '').trim();
       if (!reason) { toast('Alasan snooze wajib diisi.', 'warn'); return; }
+      if (window.__snoozeSaving) return;
+      window.__snoozeSaving = true;
+      const snzBtn = document.getElementById('snz-submit-btn');
+      if (snzBtn) { snzBtn.disabled = true; snzBtn.textContent = 'Menyimpan…'; }
       const snoozeUntil = new Date(Date.now() + days * 86400000).toISOString();
       // Ambil tag utk Telegram alert
       const { data: eqInfo } = await state.supabase.from('equipment').select('tag_number,nama_equipment,assigned_unit_id').eq('id', equipmentId).single();
@@ -15940,6 +16000,8 @@
         created_by: state.user.id,
         created_by_name: state.profile?.full_name || state.profile?.email || '',
       });
+      window.__snoozeSaving = false;
+      if (snzBtn) { snzBtn.disabled = false; snzBtn.textContent = '🔕 Snooze Alert'; }
       if (error) { toast('Gagal snooze: ' + error.message, 'error'); return; }
       closeModal();
       toast(`Alert ${kind} di-snooze ${days} hari.`, 'success');
@@ -17660,7 +17722,7 @@
         </div>`;
       const footer = `
         <button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
-        <button onclick="submitHMRevise('${equipmentId}','${tagDisplay.replace(/'/g,"&#39;")}',${currentHM},'${unit}')" class="px-4 py-2 rounded-lg bg-orange-600 hover:bg-orange-700 text-white text-sm font-semibold">✏ Revisi HM</button>`;
+        <button id="hm-revise-submit-btn" onclick="submitHMRevise('${equipmentId}','${tagDisplay.replace(/'/g,"&#39;")}',${currentHM},'${unit}')" class="px-4 py-2 rounded-lg bg-orange-600 hover:bg-orange-700 text-white text-sm font-semibold">✏ Revisi HM</button>`;
       openModal({ title: '✏ Revisi HM Counter · ' + tagDisplay, body, footer, maxWidth: 'max-w-lg' });
     }
     window.openHMReviseModal = openHMReviseModal;
@@ -17678,6 +17740,10 @@
         const okBig = await confirmDialog({ title: '⚠️ Perubahan Besar', message: `Perubahan ${delta > 0 ? '+' : ''}${fmtNumber(delta, ' ' + unit)} (${pctChange.toFixed(0)}%) terlalu besar. Yakin angka ini benar? Kalau salah, klik Batal dan koreksi.`, confirmText: 'Ya, Yakin', danger: true });
         if (!okBig) return;
       }
+      if (window.__hmReviseSaving) return;
+      window.__hmReviseSaving = true;
+      const hmBtn = document.getElementById('hm-revise-submit-btn');
+      if (hmBtn) { hmBtn.disabled = true; hmBtn.textContent = 'Menyimpan…'; }
       try {
         // Update equipment — CUMA running_hours. last_pm/toh/goh_hours SENGAJA TIDAK ikut digeser:
         // user eksplisit minta "Sisa ke PM" bereaksi natural mengikuti koreksi HM (HM dikoreksi lebih
@@ -17729,6 +17795,9 @@
         }
       } catch (err) {
         toast('Gagal revisi: ' + err.message, 'error');
+      } finally {
+        window.__hmReviseSaving = false;
+        if (hmBtn) { hmBtn.disabled = false; hmBtn.textContent = '✏ Revisi HM'; }
       }
     }
     window.submitHMRevise = submitHMRevise;
@@ -18639,7 +18708,7 @@
           </div>
         </div>`;
       const footer = `<button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
-        <button onclick="submitSosComponent('${equipmentId}','${componentId || ''}')" class="px-4 py-2 rounded-lg bg-safety hover:bg-safety-700 text-white text-sm font-semibold">💾 Simpan</button>`;
+        <button id="sc-submit-btn" onclick="submitSosComponent('${equipmentId}','${componentId || ''}')" class="px-4 py-2 rounded-lg bg-safety hover:bg-safety-700 text-white text-sm font-semibold">💾 Simpan</button>`;
       openModal({ title: existing ? '✏ Edit Component' : '➕ Tambah Component', body, footer, maxWidth: 'max-w-lg' });
     }
     window.openSosComponentModal = openSosComponentModal;
@@ -18660,6 +18729,10 @@
         baseline_reset_type: (document.getElementById('sc-reset-type')?.value || '') || null,
         baseline_reset_note: (document.getElementById('sc-reset-note')?.value || '').trim() || null,
       };
+      if (window.__scSaving) return;
+      window.__scSaving = true;
+      const scBtn = document.getElementById('sc-submit-btn');
+      if (scBtn) { scBtn.disabled = true; scBtn.textContent = 'Menyimpan…'; }
       try {
         if (componentId) {
           payload.updated_by = state.user.id;
@@ -18677,6 +18750,9 @@
         if (host) renderSosTab(window.__currentEq, host);
       } catch (err) {
         toast('Gagal simpan: ' + err.message, 'error');
+      } finally {
+        window.__scSaving = false;
+        if (scBtn) { scBtn.disabled = false; scBtn.textContent = '💾 Simpan'; }
       }
     }
     window.submitSosComponent = submitSosComponent;
@@ -18801,7 +18877,7 @@
           </div>
         </div>`;
       const footer = `<button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
-        <button onclick="submitSosSample('${componentId}','${componentType}','${equipmentId}','${sampleId || ''}')" class="px-4 py-2 rounded-lg bg-safety hover:bg-safety-700 text-white text-sm font-semibold">💾 Simpan Sample</button>`;
+        <button id="ss-submit-btn" onclick="submitSosSample('${componentId}','${componentType}','${equipmentId}','${sampleId || ''}')" class="px-4 py-2 rounded-lg bg-safety hover:bg-safety-700 text-white text-sm font-semibold">💾 Simpan Sample</button>`;
       openModal({ title: existing ? '✏ Edit Sample SOS' : '➕ Tambah Sample SOS · ' + componentName, body, footer, maxWidth: 'max-w-3xl' });
     }
     window.openSosSampleModal = openSosSampleModal;
@@ -18847,6 +18923,10 @@
         data,
         notes: document.getElementById('ss-notes')?.value.trim() || null,
       };
+      if (window.__ssSaving) return;
+      window.__ssSaving = true;
+      const ssBtn = document.getElementById('ss-submit-btn');
+      if (ssBtn) { ssBtn.disabled = true; ssBtn.textContent = 'Menyimpan…'; }
       try {
         let savedId = sampleId;
         if (sampleId) {
@@ -18873,6 +18953,9 @@
         if (host) renderSosTab(window.__currentEq, host);
       } catch (err) {
         toast('Gagal simpan: ' + err.message, 'error');
+      } finally {
+        window.__ssSaving = false;
+        if (ssBtn) { ssBtn.disabled = false; ssBtn.textContent = '💾 Simpan Sample'; }
       }
     }
     window.submitSosSample = submitSosSample;
@@ -19165,7 +19248,7 @@
           </div>
         </div>`;
       const footer = `<button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
-        <button onclick="submitCloseGejala('${id}')" class="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-semibold">✓ Tutup Gejala</button>`;
+        <button id="cg-submit-btn" onclick="submitCloseGejala('${id}')" class="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-semibold">✓ Tutup Gejala</button>`;
       openModal({ title: '✓ Tutup Gejala — Catat Tindakan', body, footer, maxWidth: 'max-w-lg' });
     }
     window.closeGejala = closeGejala;
@@ -19173,41 +19256,50 @@
     async function submitCloseGejala(id) {
       const tindakan = (document.getElementById('cg-tindakan')?.value || '').trim();
       if (!tindakan) { toast('Catatan tindakan wajib diisi.', 'warn'); return; }
-      // 1) update event: end_at + notes
-      const { data: row } = await state.supabase.from('downtime_events').select('notes').eq('id', id).maybeSingle();
-      const oldNotes = row?.notes || '';
-      const stamp = new Date().toLocaleString('id-ID');
-      const newNotes = [oldNotes, `[TINDAKAN ${stamp}] ${tindakan}`].filter(Boolean).join(' · ');
-      const { error } = await state.supabase.from('downtime_events').update({
-        end_at: new Date().toISOString(),
-        notes: newNotes,
-      }).eq('id', id);
-      if (error) { toast('Gagal tutup: ' + error.message, 'error'); return; }
-      // 2) upload foto (kalau ada). Phase = after; caption opsional; event_date dari form.
-      const fi = document.getElementById('cg-photo-files');
-      const files = fi ? Array.from(fi.files || []).slice(0, 5) : [];
-      const caption = (document.getElementById('cg-photo-caption')?.value || '').trim().slice(0, 200) || null;
-      const eventDate = document.getElementById('cg-photo-eventdate')?.value || new Date().toISOString().slice(0, 10);
-      let okFoto = 0;
-      for (const raw of files) {
-        try {
-          const file = (raw.type || '').startsWith('image/') ? await compressImage(raw, { maxDim: 1280, quality: 0.78 }) : raw;
-          const safeName = (file.name || 'photo').replace(/[^a-zA-Z0-9._-]/g, '_');
-          const path = `${id}/${Date.now()}-${safeName}`;
-          await uploadFile('downtime-photos', path, file);
-          const { error: pErr } = await state.supabase.from('downtime_photos').insert({
-            downtime_event_id: id, storage_path: path, phase: 'after', caption,
-            event_date: eventDate,
-            uploaded_by: state.user.id,
-            uploaded_by_name: state.profile?.full_name || state.profile?.email || null,
-          });
-          if (pErr) throw pErr;
-          okFoto++;
-        } catch (e) { console.error('foto gagal:', e); }
+      if (window.__cgSaving) return;
+      window.__cgSaving = true;
+      const cgBtn = document.getElementById('cg-submit-btn');
+      if (cgBtn) { cgBtn.disabled = true; cgBtn.textContent = 'Menyimpan…'; }
+      try {
+        // 1) update event: end_at + notes
+        const { data: row } = await state.supabase.from('downtime_events').select('notes').eq('id', id).maybeSingle();
+        const oldNotes = row?.notes || '';
+        const stamp = new Date().toLocaleString('id-ID');
+        const newNotes = [oldNotes, `[TINDAKAN ${stamp}] ${tindakan}`].filter(Boolean).join(' · ');
+        const { error } = await state.supabase.from('downtime_events').update({
+          end_at: new Date().toISOString(),
+          notes: newNotes,
+        }).eq('id', id);
+        if (error) { toast('Gagal tutup: ' + error.message, 'error'); return; }
+        // 2) upload foto (kalau ada). Phase = after; caption opsional; event_date dari form.
+        const fi = document.getElementById('cg-photo-files');
+        const files = fi ? Array.from(fi.files || []).slice(0, 5) : [];
+        const caption = (document.getElementById('cg-photo-caption')?.value || '').trim().slice(0, 200) || null;
+        const eventDate = document.getElementById('cg-photo-eventdate')?.value || new Date().toISOString().slice(0, 10);
+        let okFoto = 0;
+        for (const raw of files) {
+          try {
+            const file = (raw.type || '').startsWith('image/') ? await compressImage(raw, { maxDim: 1280, quality: 0.78 }) : raw;
+            const safeName = (file.name || 'photo').replace(/[^a-zA-Z0-9._-]/g, '_');
+            const path = `${id}/${Date.now()}-${safeName}`;
+            await uploadFile('downtime-photos', path, file);
+            const { error: pErr } = await state.supabase.from('downtime_photos').insert({
+              downtime_event_id: id, storage_path: path, phase: 'after', caption,
+              event_date: eventDate,
+              uploaded_by: state.user.id,
+              uploaded_by_name: state.profile?.full_name || state.profile?.email || null,
+            });
+            if (pErr) throw pErr;
+            okFoto++;
+          } catch (e) { console.error('foto gagal:', e); }
+        }
+        closeModal();
+        toast(okFoto ? `Gejala ditutup + ${okFoto} foto disimpan.` : 'Gejala ditutup. Tindakan dicatat.', 'success');
+        renderAvailabilityPage(document.getElementById('ram-content'));
+      } finally {
+        window.__cgSaving = false;
+        if (cgBtn) { cgBtn.disabled = false; cgBtn.textContent = '✓ Tutup Gejala'; }
       }
-      closeModal();
-      toast(okFoto ? `Gejala ditutup + ${okFoto} foto disimpan.` : 'Gejala ditutup. Tindakan dicatat.', 'success');
-      renderAvailabilityPage(document.getElementById('ram-content'));
     }
     window.submitCloseGejala = submitCloseGejala;
 
