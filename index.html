@@ -20220,7 +20220,16 @@
             ['🟡 In Progress', 'Sedang dalam proses perbaikan', 'Update progress, tunggu selesai'],
             ['✅ Verified', 'Tindakan sudah dilaksanakan & diverifikasi', 'Tutup — jadi histori permanen'],
           ])}
-          <p class="bg-slate-50 border border-slate-200 rounded p-2 text-xs"><b>Tips 5-Whys:</b> Jangan berhenti di Why 1 (gejala). Terus gali sampai ketemu penyebab yang bisa dikendalikan. Contoh: "Pompa rusak" → "Seal aus" → "Pelumasan kurang" → "PM tidak dijalankan tepat waktu" → <b>Root Cause: interval PM belum tercatat di sistem</b>.</p>`)}
+          <p class="bg-slate-50 border border-slate-200 rounded p-2 text-xs"><b>Tips 5-Whys:</b> Jangan berhenti di Why 1 (gejala). Terus gali sampai ketemu penyebab yang bisa dikendalikan — sesuatu yang bisa Sr Mekanik ubah (SOP, checklist, jadwal PM), bukan "nasib" atau "part-nya emang jelek".</p>
+          <p class="font-semibold text-slate-700 mt-3">Contoh Kasus Nyata — Spider Coupling Rusak Berulang</p>
+          ${tbl(['#', 'Pertanyaan', 'Jawaban'], [
+            ['Why 1', 'Kenapa spider coupling rusak lagi?', 'Sudah aus, retak di beberapa titik'],
+            ['Why 2', 'Kenapa bisa aus/retak secepat itu?', 'Alignment antara engine dan transmisi kurang presisi'],
+            ['Why 3', 'Kenapa alignment-nya kurang presisi?', 'Waktu ganti part sebelumnya, tidak dicek pakai dial indicator — cuma perkiraan "kira-kira lurus"'],
+            ['Why 4', 'Kenapa tidak dicek pakai dial indicator?', 'Tidak ada di checklist standar penggantian spider coupling'],
+            ['Why 5', 'Kenapa tidak ada di checklist?', 'SOP penggantian part ini belum didokumentasikan formal'],
+          ])}
+          <p class="bg-emerald-50 border border-emerald-200 rounded p-2 text-xs"><b>Root Cause:</b> SOP alignment coupling belum ada — bukan "part-nya jelek".<br><b>Corrective Action:</b> Buat SOP wajib cek alignment pakai dial indicator setiap ganti spider coupling, tambahkan ke checklist PM.</p>`)}
 
         ${sec('#7c3aed', '⚡', 'Risk Assessment — CoF, PoF & Risk Level', `
           <p>Menentukan <b>prioritas pemeliharaan</b> setiap equipment berdasarkan dua faktor sesuai Pedoman PEP.</p>
