@@ -22,7 +22,12 @@ ALTER TABLE hm_photo_reports
 
 -- Data historis (sebelum fitur approval ini ada) dianggap sudah "selesai",
 -- jangan tiba-tiba nongol di antrian pending admin.
+-- CATATAN (koreksi 14 Agu 2026): ALTER TABLE ADD COLUMN ... DEFAULT 'pending'
+-- otomatis ngisi SEMUA baris lama jadi 'pending' (bukan NULL), jadi baris
+-- di bawah ini nggak pernah ngefek. Lihat fix_hm_photo_backfill.sql buat
+-- koreksinya kalau migration ini sudah kejalan sebelum fix ini ditambahkan.
 UPDATE hm_photo_reports SET status = 'approved' WHERE status IS NULL;
+UPDATE hm_photo_reports SET status = 'approved' WHERE status = 'pending' AND created_at < NOW() - INTERVAL '1 minute';
 
 -- RLS: admin boleh UPDATE (approve/reject). Read/insert sudah ada dari fase6.
 DROP POLICY IF EXISTS hm_photo_reports_update ON hm_photo_reports;
