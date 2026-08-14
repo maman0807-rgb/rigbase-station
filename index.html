@@ -13615,7 +13615,7 @@
         const since12 = new Date(); since12.setFullYear(since12.getFullYear() - 1);
         const [rcaRes, dtRes] = await Promise.all([
           state.supabase.from('rca_records').select('*').eq('equipment_id', eq.id).order('failure_date', { ascending: false }),
-          state.supabase.from('downtime_events').select('id, start_at, category').eq('equipment_id', eq.id)
+          state.supabase.from('downtime_events').select('id, start_at, end_at, category, notes').eq('equipment_id', eq.id)
             .in('category', FAILURE_CATS).gte('start_at', since12.toISOString()),
         ]);
         const rcaList    = rcaRes.data || [];
@@ -13634,6 +13634,24 @@
             <div>
               <div class="font-bold text-red-800">RCA Trigger — ${recentFail.length}× failure dalam 12 bulan</div>
               <div class="text-sm text-red-700 mt-1">Pedoman PEP: failure berulang &gt;1× dalam 1 tahun wajib RCA. Buat RCA baru di bawah.</div>
+            </div>
+          </div>` : '';
+
+        // Riwayat kejadian mentah (bukan cuma angka) — biar kelihatan APA yg rusak tiap kali,
+        // karena tiap equipment pola kerusakannya beda-beda (butuh ini buat isi 5-Whys yg akurat).
+        const failListHtml = recentFail.length ? `
+          <div class="bg-white border border-slate-200 rounded-xl p-4">
+            <div class="font-semibold text-slate-700 text-sm mb-3">📋 Riwayat Kejadian Breakdown/Troubleshoot (12 bulan terakhir)</div>
+            <div class="space-y-2">
+              ${recentFail.slice().sort((a, b) => new Date(b.start_at) - new Date(a.start_at)).map(f => {
+                const dur = f.end_at ? fmtH((new Date(f.end_at) - new Date(f.start_at)) / 3600000) : 'ongoing';
+                return `<div class="flex items-start gap-2 text-sm border-b border-slate-100 pb-2 last:border-0 last:pb-0">
+                  <span class="text-xs font-mono text-slate-400 whitespace-nowrap pt-0.5">${fmtDate((f.start_at || '').slice(0, 10))}</span>
+                  <span class="px-1.5 py-0.5 rounded text-[10px] font-bold whitespace-nowrap ${f.category === 'breakdown' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}">${f.category === 'breakdown' ? 'Breakdown' : 'Troubleshoot'}</span>
+                  <span class="text-slate-600 flex-1">${escapeHtml((f.notes || '-').slice(0, 200))}</span>
+                  <span class="text-xs text-slate-400 whitespace-nowrap pt-0.5">${dur}</span>
+                </div>`;
+              }).join('')}
             </div>
           </div>` : '';
 
@@ -13665,6 +13683,7 @@
               ${canWrite() ? `<button onclick="openRcaForm('${eq.id}',null)" class="bg-safety hover:bg-safety/90 text-white px-4 py-2 rounded-lg text-sm font-semibold">+ Buat RCA</button>` : '<span class="text-xs text-slate-400 italic">👁 Mode lihat saja</span>'}
             </div>
             ${triggerBanner}
+            ${failListHtml}
             <div class="space-y-3">${rcaRows}</div>
           </div>`;
       } catch(e) {
