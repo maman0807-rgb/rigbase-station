@@ -3071,13 +3071,16 @@
         title: `✅ Catat ${pmType || 'PM'} Selesai`,
         body,
         footer: `<button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 text-sm">Batal</button>
-                 <button onclick="savePMDone('${equipmentId}','${escapeAttr(tagNumber)}','${escapeAttr(equipmentName)}','${pmType}','${unit}')" class="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-semibold">✅ Simpan & Reset Counter</button>`,
+                 <button id="pm-done-submit-btn" onclick="savePMDone('${equipmentId}','${escapeAttr(tagNumber)}','${escapeAttr(equipmentName)}','${pmType}','${unit}')" class="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-semibold">✅ Simpan & Reset Counter</button>`,
         maxWidth: 'max-w-lg',
       });
     }
     window.showCatatPMModal = showCatatPMModal;
 
     async function savePMDone(equipmentId, tagNumber, equipmentName, pmType = '', unit = 'HM') {
+      // Cegah submit dobel (double-tap/klik cepat) — kasus TRANS-H35KD sempat ke-insert 4x
+      // dari 1 kejadian PM asli, karena tombolnya nggak ke-disable pas lagi proses simpan.
+      if (window.__pmDoneSaving) return;
       const rhVal  = parseFloat(document.getElementById('pm-done-rh')?.value);
       const startV = document.getElementById('pm-done-start')?.value;
       const endV   = document.getElementById('pm-done-end')?.value;
@@ -3086,6 +3089,10 @@
       if (rhVal == null || isNaN(rhVal) || rhVal < 0) { toast('Isi running hours saat PM', 'warn'); return; }
       if (!startV)             { toast('Isi waktu mulai PM', 'warn'); return; }
       if (endV && new Date(endV) < new Date(startV)) { toast('Waktu selesai tidak boleh sebelum mulai', 'warn'); return; }
+
+      window.__pmDoneSaving = true;
+      const pmBtn = document.getElementById('pm-done-submit-btn');
+      if (pmBtn) { pmBtn.disabled = true; pmBtn.classList.add('opacity-50', 'cursor-not-allowed'); pmBtn.textContent = 'Menyimpan…'; }
 
       try {
         // Ambil unit info dari equipment
@@ -3169,6 +3176,9 @@
         navigate('dashboard');
       } catch (err) {
         toast('Gagal simpan: ' + err.message, 'error');
+      } finally {
+        window.__pmDoneSaving = false;
+        if (pmBtn) { pmBtn.disabled = false; pmBtn.classList.remove('opacity-50', 'cursor-not-allowed'); pmBtn.textContent = '✅ Simpan & Reset Counter'; }
       }
     }
     window.savePMDone = savePMDone;
