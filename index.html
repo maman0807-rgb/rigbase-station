@@ -15614,7 +15614,7 @@
           </div>
         </div>`;
       const footer = `<button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
-        <button onclick="saveDowntime('${existing?.id || ''}')" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy-700 text-white text-sm font-semibold">💾 Simpan</button>`;
+        <button id="dt-save-btn" onclick="saveDowntime('${existing?.id || ''}')" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy-700 text-white text-sm font-semibold">💾 Simpan</button>`;
       openModal({ title: existing ? 'Edit Downtime' : 'Catat Downtime', body, footer, maxWidth: 'max-w-lg' });
       // load foto existing kalau edit
       if (existing?.id) loadExistingDowntimePhotos(existing.id);
@@ -15635,12 +15635,18 @@
     window.openDowntimeEdit = openDowntimeEdit;
 
     async function saveDowntime(id) {
+      // Cegah submit dobel (kasus MOBENG-KB150A: 2 baris kembar ke-insert 0.16 detik
+      // berselang dari 1 klik, form "Catat Downtime" gak punya guard sama sekali)
+      if (window.__dtSaving) return;
       const eqSel = document.getElementById('dt-eq'); const eqId = eqSel?.value;
       if (!eqId) { toast('Pilih equipment dulu.', 'warn'); return; }
       const startV = document.getElementById('dt-start')?.value;
       if (!startV) { toast('Isi waktu mulai down.', 'warn'); return; }
       const endV = document.getElementById('dt-end')?.value;
       if (endV && new Date(endV) < new Date(startV)) { toast('Waktu selesai tidak boleh sebelum mulai.', 'warn'); return; }
+      window.__dtSaving = true;
+      const dtBtn = document.getElementById('dt-save-btn');
+      if (dtBtn) { dtBtn.disabled = true; dtBtn.classList.add('opacity-50', 'cursor-not-allowed'); dtBtn.textContent = 'Menyimpan…'; }
       const opt = eqSel.selectedOptions[0];
       const unitId = opt?.dataset?.unit ? Number(opt.dataset.unit) : null;
       const reporterName = (document.getElementById('dt-reporter')?.value || '').trim()
@@ -15706,6 +15712,10 @@
           }
         }
       } catch (e) { toast('Gagal simpan: ' + e.message, 'error'); }
+      finally {
+        window.__dtSaving = false;
+        if (dtBtn) { dtBtn.disabled = false; dtBtn.classList.remove('opacity-50', 'cursor-not-allowed'); dtBtn.textContent = '💾 Simpan'; }
+      }
     }
     window.saveDowntime = saveDowntime;
 
