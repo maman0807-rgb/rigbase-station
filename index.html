@@ -2175,6 +2175,18 @@
                 ? state.supabase.from('hm_photo_reports').select('*').eq('status', 'pending').order('created_at').then(r => r.data || []).catch(() => [])
                 : Promise.resolve([]),
             ]);
+            // Lampirkan HM sistem saat ini ke tiap Foto HM pending — admin perlu bandingkan
+            // sebelum approve, bukan cuma lihat angka foto doang.
+            if (pendingHmPhotos.length) {
+              const eqIds = [...new Set(pendingHmPhotos.map(r => r.equipment_id))];
+              const { data: eqRows } = await state.supabase.from('equipment').select('id, running_hours, pm_type').in('id', eqIds);
+              const hmById = Object.fromEntries((eqRows || []).map(e => [e.id, e]));
+              pendingHmPhotos.forEach(r => {
+                const e = hmById[r.equipment_id];
+                r._currentHM = e ? Number(e.running_hours) || 0 : null;
+                r._unit = e?.pm_type === 'km' ? 'km' : 'jam';
+              });
+            }
             // Stats
             $('#dash-stats').innerHTML = `
               ${statCard('Total Equipment', fmtNumber(stats.total),   ICONS.wrench,  'bg-blue-100 text-blue-700')}
@@ -17615,7 +17627,12 @@
               <div class="flex-1 min-w-0">
                 <div class="font-semibold text-slate-800 text-sm">${escapeHtml(r.equipment_name || '-')}</div>
                 <div class="text-xs text-slate-400">${escapeHtml(r.equipment_tag || '-')}</div>
-                <div class="text-sm mt-1">HM di foto: <b class="text-navy">${fmtNumber(r.hm_value)}</b></div>
+                <div class="text-sm mt-1 flex items-center gap-2 flex-wrap">
+                  ${r._currentHM != null ? `<span class="text-slate-500">Sistem: <b>${fmtNumber(r._currentHM, ' ' + (r._unit || 'jam'))}</b></span><span class="text-slate-300">→</span>` : ''}
+                  <span>Foto: <b class="text-navy">${fmtNumber(r.hm_value, ' ' + (r._unit || 'jam'))}</b></span>
+                  ${r._currentHM != null ? (() => { const d = Number(r.hm_value) - r._currentHM; const big = Math.abs(d) > Math.max(1000, r._currentHM * 0.2);
+                    return `<span class="${big ? 'text-red-600 font-bold' : 'text-slate-400'} text-xs">(Δ ${d > 0 ? '+' : ''}${fmtNumber(d)}${big ? ' ⚠️ besar' : ''})</span>`; })() : ''}
+                </div>
                 ${r.notes ? `<div class="text-xs text-slate-500 italic mt-0.5">"${escapeHtml(r.notes)}"</div>` : ''}
                 <div class="text-[11px] text-slate-400 mt-0.5">${escapeHtml(r.reported_by_name || '-')} · ${fmtDate(r.created_at)}</div>
                 <div class="flex gap-2 mt-2">
