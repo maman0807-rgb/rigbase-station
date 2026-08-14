@@ -14597,6 +14597,35 @@
       const tanggal = tanggalInput ? tanggalInput.value : (lhState.header?.tanggal || new Date().toISOString().slice(0, 10));
       if (!tanggal) { toast('Tanggal wajib diisi.', 'warn'); return; }
       if (!lhState.entries.length) { toast('Tambahkan minimal 1 unit.', 'warn'); return; }
+
+      // Sanity check RH sebelum simpan: cegah salah ketik RH turun besar dari Laporan Harian
+      // (kejadian TL-KB150A 2026-08-05: rh diketik 1415.2 padahal seharusnya ~8941, langsung
+      // kesinkron ke equipment.running_hours tanpa validasi apapun). Threshold sama dgn Revisi HM.
+      const rhAnomalies = [];
+      for (const e of lhState.entries) {
+        if (!e.equipment_id || e.rh === '' || e.rh === null) continue;
+        const eq = (lhEquipmentList || []).find(x => x.id === e.equipment_id);
+        if (!eq) continue;
+        const oldRh = Number(eq.running_hours || 0);
+        const newRh = Number(e.rh);
+        if (newRh >= oldRh) continue;
+        const dropAbs = oldRh - newRh;
+        const dropPct = oldRh > 0 ? (dropAbs / oldRh) * 100 : 0;
+        if (dropPct > 20 || dropAbs > 1000) {
+          rhAnomalies.push(`${eq.tag_number || eq.nama_equipment || '-'}: ${fmtNumber(oldRh)} → ${fmtNumber(newRh)} (turun ${fmtNumber(dropAbs)} / ${dropPct.toFixed(0)}%)`);
+        }
+      }
+      if (rhAnomalies.length) {
+        const okAnomaly = await confirmDialog({
+          title: '⚠️ RH Turun Drastis',
+          message: `Ada RH yang turun sangat besar dibanding data sistem, kemungkinan salah ketik: ${rhAnomalies.join(' | ')}. Kalau ini salah input, klik Batal lalu koreksi angkanya di form. Kalau memang benar (HM meter diganti dll), klik Lanjutkan.`,
+          confirmText: 'Ya, Lanjutkan',
+          cancelText: 'Batal, Cek Lagi',
+          danger: true
+        });
+        if (!okAnomaly) return;
+      }
+
       const isEditingFinal = lhState.header?.status === 'final';
       const ok = await confirmDialog({
         title: isEditingFinal ? 'Simpan Perubahan' : 'Konfirmasi & Simpan Final',
