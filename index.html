@@ -8214,12 +8214,14 @@
           // dipasang otomatis ikut muncul di kartu Komponen induk, bukan cuma di tab Pemasangan.
           const { error: syncErr } = await state.supabase.from('equipment')
             .update({ parent_equipment_id: indukId }).eq('id', anakEq.id);
-          if (syncErr) console.warn('Sync parent_equipment_id gagal (non-fatal):', syncErr.message);
           overlay.remove();
           // Refresh tab
           const c = document.getElementById('detail-tab-content');
           if (c) { c.innerHTML = '<div class="text-slate-400">Memuat…</div>'; renderPemasanganTab(window.__currentEq, c); }
-          toast('Anak berhasil dipasang', 'success');
+          // Jangan bilang "berhasil" polos kalau sync tab Komponen gagal — user perlu tahu
+          // supaya bisa cek manual, bukan ngira semuanya beres padahal setengah jalan.
+          if (syncErr) toast(`Anak dipasang, tapi sync ke tab Komponen gagal: ${syncErr.message}. Cek manual.`, 'warn');
+          else toast('Anak berhasil dipasang', 'success');
         } catch(err) {
           errEl.textContent = err.message; errEl.classList.remove('hidden');
           btn.textContent = 'Pasang'; btn.disabled = false;
@@ -9135,7 +9137,14 @@
 
       // Cek apakah equipment ini punya children — kalau iya, tanya cascade
       let children = [];
-      try { children = await fetchChildren(equipment_id); } catch {}
+      try { children = await fetchChildren(equipment_id); }
+      catch (e) {
+        // JANGAN lanjut seolah-olah tidak ada children — kalau fetch gagal (jaringan blip),
+        // equipment ini BISA JADI punya children yang bakal ketinggalan diam-diam kalau parent
+        // dipindah unit. Lebih aman minta user coba lagi daripada nebak "children = []".
+        toast('Gagal cek komponen anak equipment ini, coba lagi: ' + e.message, 'error');
+        return;
+      }
       let cascade = false;
       if (children.length > 0) {
         closeModal();
