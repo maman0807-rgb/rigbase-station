@@ -3090,6 +3090,24 @@
       if (!startV)             { toast('Isi waktu mulai PM', 'warn'); return; }
       if (endV && new Date(endV) < new Date(startV)) { toast('Waktu selesai tidak boleh sebelum mulai', 'warn'); return; }
 
+      // Sanity check RH sebelum simpan — savePMDone sempat jadi satu-satunya jalur tulis RH
+      // yang lolos dari validasi ini (beda dari Revisi HM & Laporan Harian). Threshold sama:
+      // >20% atau >1000 jam dianggap lompatan besar, kemungkinan salah ketik.
+      const { data: eqCheck } = await state.supabase.from('equipment').select('running_hours').eq('id', equipmentId).maybeSingle();
+      const rhSebelum = Number(eqCheck?.running_hours || 0);
+      const rhDelta = rhVal - rhSebelum;
+      const rhAbsChange = Math.abs(rhDelta);
+      const rhPctChange = rhSebelum > 0 ? (rhAbsChange / rhSebelum) * 100 : 0;
+      if (rhPctChange > 20 || rhAbsChange > 1000) {
+        const okPmRh = await confirmDialog({
+          title: '⚠️ Perubahan RH Besar',
+          message: `RH saat PM (${fmtNumber(rhVal, ' ' + unit)}) beda jauh dari data sistem (${fmtNumber(rhSebelum, ' ' + unit)}) — selisih ${rhDelta > 0 ? '+' : ''}${fmtNumber(rhDelta, ' ' + unit)} (${rhPctChange.toFixed(0)}%). Yakin angka ini benar? Kalau salah ketik, klik Batal dan koreksi.`,
+          confirmText: 'Ya, Yakin',
+          danger: true,
+        });
+        if (!okPmRh) return;
+      }
+
       window.__pmDoneSaving = true;
       const pmBtn = document.getElementById('pm-done-submit-btn');
       if (pmBtn) { pmBtn.disabled = true; pmBtn.classList.add('opacity-50', 'cursor-not-allowed'); pmBtn.textContent = 'Menyimpan…'; }
@@ -12573,9 +12591,13 @@
           const { data: kmEqs } = await state.supabase
             .from('equipment').select('id, running_hours').in('id', eqIds).eq('pm_type', 'km');
           if (kmEqs && kmEqs.length > 0) {
+            // Atomic increment di DB (fase26_atomic_km_increment.sql) — bukan baca-lalu-tulis di
+            // client, biar gak ada race condition kalau 2 mobilisasi submit berdekatan waktu.
             for (const eq of kmEqs) {
-              const newKm = (Number(eq.running_hours) || 0) + Number(payload.total_distance);
-              await state.supabase.from('equipment').update({ running_hours: newKm }).eq('id', eq.id);
+              const { error: incErr } = await state.supabase.rpc('increment_running_hours', {
+                p_equipment_id: eq.id, p_delta: Number(payload.total_distance),
+              });
+              if (incErr) console.warn('Gagal increment KM utk', eq.id, incErr.message);
             }
             kmUpdated = kmEqs.length;
           }
@@ -13056,7 +13078,7 @@
           <p class="text-[11px] text-slate-400">Begitu dimulai, semua item di master Gudang akan di-snapshot stok sistemnya saat ini — isi stock fisik dilakukan di halaman berikutnya.</p>
         </div>`;
       const footer = `<button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
-        <button onclick="mulaiAuditBaru()" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy-700 text-white text-sm font-semibold">Mulai Audit</button>`;
+        <button id="ag-start-btn" onclick="mulaiAuditBaru()" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy-700 text-white text-sm font-semibold">Mulai Audit</button>`;
       openModal({ title: 'Mulai Audit Baru', body, footer, maxWidth: 'max-w-lg' });
     }
     window.openMulaiAuditForm = openMulaiAuditForm;
@@ -13067,6 +13089,10 @@
       const catatan = (document.getElementById('ag-catatan')?.value || '').trim() || null;
       if (!tanggal) { toast('Isi tanggal audit.', 'warn'); return; }
       if (!oleh) { toast('Isi nama yang melakukan audit.', 'warn'); return; }
+      if (window.__agStartSaving) return;
+      window.__agStartSaving = true;
+      const agStartBtn = document.getElementById('ag-start-btn');
+      if (agStartBtn) { agStartBtn.disabled = true; agStartBtn.textContent = 'Memulai…'; }
       try {
         const { data: audit, error: e1 } = await state.supabase.from('audit_gudang').insert({
           tanggal_audit: tanggal, dilakukan_oleh: oleh, catatan_umum: catatan,
@@ -13091,6 +13117,10 @@
         closeModal();
         setAuditGudangView('entry', audit.id);
       } catch (e) { toast('Gagal mulai audit: ' + e.message, 'error'); }
+      finally {
+        window.__agStartSaving = false;
+        if (agStartBtn) { agStartBtn.disabled = false; agStartBtn.textContent = 'Mulai Audit'; }
+      }
     }
     window.mulaiAuditBaru = mulaiAuditBaru;
 
@@ -13125,7 +13155,7 @@
             <h2 class="text-lg font-bold text-slate-800">Entry Temuan — ${fmtDate(audit.tanggal_audit)}</h2>
             <div class="text-sm text-slate-500">${escapeHtml(audit.dilakukan_oleh || '-')} · <span id="ag-filled-count">${filledCount}</span> / ${items.length} item terisi</div>
           </div>
-          <button onclick="selesaikanAuditGudang('${audit.id}')" class="bg-safety hover:bg-safety/90 text-white px-4 py-2.5 rounded-lg text-sm font-semibold whitespace-nowrap">✅ Selesaikan Audit</button>
+          <button id="ag-finish-btn" onclick="selesaikanAuditGudang('${audit.id}')" class="bg-safety hover:bg-safety/90 text-white px-4 py-2.5 rounded-lg text-sm font-semibold whitespace-nowrap">✅ Selesaikan Audit</button>
         </div>
 
         <input id="ag-search" type="text" placeholder="🔍 Cari part number / nama item…" value="${escapeHtml(auditGudangFilterQ)}"
@@ -13221,6 +13251,10 @@
       msg += ' Lanjutkan?';
       const ok = await confirmDialog({ title: 'Selesaikan Audit', message: msg, confirmText: 'Ya, Selesaikan', danger: berubah.length > 0 });
       if (!ok) return;
+      if (window.__agFinishSaving) return;
+      window.__agFinishSaving = true;
+      const agFinBtn = document.getElementById('ag-finish-btn');
+      if (agFinBtn) { agFinBtn.disabled = true; agFinBtn.textContent = 'Menyimpan…'; }
 
       try {
         const { data: audit } = await state.supabase.from('audit_gudang').select('tanggal_audit').eq('id', auditId).maybeSingle();
@@ -13247,6 +13281,10 @@
         toast('Audit selesai, stok Gudang tersinkron.', 'success');
         setAuditGudangView('detail', auditId);
       } catch (e) { toast('Gagal selesaikan audit: ' + e.message, 'error'); }
+      finally {
+        window.__agFinishSaving = false;
+        if (agFinBtn) { agFinBtn.disabled = false; agFinBtn.textContent = '✅ Selesaikan Audit'; }
+      }
     }
     window.selesaikanAuditGudang = selesaikanAuditGudang;
 
@@ -17838,10 +17876,14 @@
     window.openHmPhotoApprovalModal = openHmPhotoApprovalModal;
 
     async function approveHmPhotoEram(reportId) {
+      // Guard per-report (bukan flag global) — biar approve report LAIN tetap bisa jalan
+      // bersamaan, cuma cegah report yg SAMA di-approve dobel dari klik cepat.
+      window.__hmPhotoApproving = window.__hmPhotoApproving || new Set();
+      if (window.__hmPhotoApproving.has(reportId)) return;
       const report = (window.__pendingHmPhotos || []).find(r => r.id === reportId);
       if (!report) return;
       const row = document.getElementById(`hmphoto-row-${reportId}`);
-      if (row) row.style.opacity = '0.5';
+      const approveBtn = row?.querySelector('button');
       try {
         const newHM = Number(report.hm_value);
         const { data: eq, error: eqErr } = await state.supabase.from('equipment')
@@ -17849,6 +17891,24 @@
         if (eqErr) throw eqErr;
         const oldHM = Number(eq.running_hours) || 0;
         const delta = newHM - oldHM;
+
+        // Sanity check: sama kayak submitHMRevise — delta besar wajib dikonfirmasi eksplisit,
+        // bukan cuma dikasih badge merah teks yang gampang kelewat pas buru-buru approve.
+        const absChange = Math.abs(delta);
+        const pctChange = oldHM > 0 ? (absChange / oldHM) * 100 : 0;
+        if (pctChange > 20 || absChange > 1000) {
+          const okBigHm = await confirmDialog({
+            title: '⚠️ Perubahan HM Besar',
+            message: `Foto HM ${eq.tag_number || eq.nama_equipment}: sistem ${fmtNumber(oldHM)} → foto ${fmtNumber(newHM)} (Δ ${delta > 0 ? '+' : ''}${fmtNumber(delta)}, ${pctChange.toFixed(0)}%). Yakin foto ini benar? Kalau meragukan, klik Batal lalu Tolak laporan ini.`,
+            confirmText: 'Ya, Setujui',
+            danger: true,
+          });
+          if (!okBigHm) return;
+        }
+
+        window.__hmPhotoApproving.add(reportId);
+        if (row) row.style.opacity = '0.5';
+        if (approveBtn) approveBtn.disabled = true;
 
         const { error: updErr } = await state.supabase.from('equipment').update({
           running_hours: newHM, updated_by: state.user.id, updated_at: new Date().toISOString(),
@@ -17884,11 +17944,14 @@
         if (repErr) throw repErr;
 
         window.__pendingHmPhotos = (window.__pendingHmPhotos || []).filter(r => r.id !== reportId);
+        window.__hmPhotoApproving.delete(reportId);
         row?.remove();
         toast(`✓ HM ${eq.tag_number || eq.nama_equipment} di-update ke ${fmtNumber(newHM)}.`, 'success');
         if (!window.__pendingHmPhotos.length) closeModal();
       } catch (err) {
+        window.__hmPhotoApproving.delete(reportId);
         if (row) row.style.opacity = '1';
+        if (approveBtn) approveBtn.disabled = false;
         toast('Gagal approve: ' + err.message, 'error');
       }
     }
