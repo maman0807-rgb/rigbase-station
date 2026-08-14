@@ -14272,6 +14272,7 @@
           nWatch: rows.filter(r => r.v === 'watch').length,
           nKeep: rows.filter(r => r.v === 'keep').length,
           tbody,
+          rows,
         };
       }
 
@@ -14302,6 +14303,7 @@
 
       const sHm = buildSection(eqHm, 'jam');
       const sKm = buildSection(eqKm, 'km');
+      window.__kelayakanData = { sHm, sKm, periodDays };
 
       host.innerHTML = `
         <div class="space-y-4">
@@ -14320,6 +14322,7 @@
                   <option value="365" ${kelayakanPeriodDays === 365 ? 'selected' : ''}>365 hari terakhir</option>
                 </select>
                 <button onclick="kelayakanToggleSortRusak()" class="px-3 py-1.5 rounded-lg text-sm font-semibold border whitespace-nowrap ${kelayakanSortRusak ? 'bg-red-600 text-white border-red-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}">🔁 Urutkan: Paling Sering Rusak</button>
+                <button onclick="cetakKelayakanReport()" class="px-3 py-1.5 rounded-lg text-sm font-semibold bg-navy hover:bg-navy-700 text-white whitespace-nowrap">🖨 Cetak PDF</button>
               </div>
             </div>
           </div>
@@ -19421,6 +19424,59 @@
       openSignDialog({ title: 'Justifikasi Pengadaan Suku Cadang', type: 'CSPP', summary, chart, intro, table, kesimpulan });
     }
     window.cetakCsppReport = cetakCsppReport;
+
+    function cetakKelayakanReport() {
+      const d = window.__kelayakanData;
+      if (!d || (!d.sHm.rows.length && !d.sKm.rows.length)) { toast('Data belum termuat, buka halaman Kelayakan Armada dulu.', 'warn'); return; }
+      const { sHm, sKm, periodDays } = d;
+      const allRows = [...sHm.rows, ...sKm.rows];
+      const nRep = sHm.nRep + sKm.nRep, nWatch = sHm.nWatch + sKm.nWatch, nKeep = sHm.nKeep + sKm.nKeep;
+      const summary = `<div class="cards">
+        <div class="card navy"><div class="num">${allRows.length}</div><div class="lbl">Unit Ditinjau</div></div>
+        <div class="card red"><div class="num">${nRep}</div><div class="lbl">Kandidat Ganti</div></div>
+        <div class="card amber"><div class="num">${nWatch}</div><div class="lbl">Perlu Pantau</div></div>
+        <div class="card green"><div class="num">${nKeep}</div><div class="lbl">Sehat</div></div>
+      </div>`;
+      const intro = `<p>Rekap kelayakan armada — gabungan <b>umur</b> (TOH/GOH/umur ekonomis) dan <b>keandalan</b> (MTBF &amp; Availability), periode <b>${periodDays} hari terakhir</b>. Kolom <b>Rusak</b> = jumlah kejadian breakdown + troubleshoot pada periode ini.</p>`;
+
+      function sectionTable(sec, unit, title) {
+        if (!sec.rows.length) return '';
+        const U = unit.toUpperCase();
+        const rows = sec.rows.map((r, i) => {
+          const lc = r.lc;
+          const umurTxt = lc && lc.eco ? `${Math.round(lc.eco.pct)}%` : '—';
+          const mtbfTxt = r.mtbf != null ? fmtNumber(Math.round(r.mtbf), ' ' + unit) : (r.d.fails === 0 ? 'blm rusak' : '—');
+          const vTxt = r.v === 'replace' ? 'Kandidat ganti' : r.v === 'watch' ? 'Pantau' : 'Sehat';
+          const vColor = r.v === 'replace' ? '#dc2626' : r.v === 'watch' ? '#d97706' : '#16a34a';
+          return `<tr>
+            <td style="text-align:center">${i + 1}</td>
+            <td><b>${escapeHtml(r.x.tag_number)}</b></td>
+            <td>${escapeHtml(getParentUnitName(r.x.assigned_unit_id))}</td>
+            <td style="text-align:right">${fmtNumber(r.rh, ' ' + unit)}</td>
+            <td style="text-align:right">${umurTxt}</td>
+            <td style="text-align:right">${r.d.fails}</td>
+            <td style="text-align:right">${mtbfTxt}</td>
+            <td style="text-align:center">${Math.round(r.avail)}%</td>
+            <td style="text-align:center;color:${vColor};font-weight:bold">${vTxt}</td>
+          </tr>`;
+        }).join('');
+        return `<h2>${title}</h2><table><thead><tr>
+          <th>No</th><th>Tag</th><th>Armada</th><th>${U}</th><th>Umur</th><th>Rusak</th><th>MTBF(${U})</th><th>Avail</th><th>Verdict</th>
+        </tr></thead><tbody>${rows}</tbody></table>`;
+      }
+
+      const table = sectionTable(sHm, 'jam', '⏱️ Berbasis Jam (Engine, Genset, Pump)') + sectionTable(sKm, 'km', '🛻 Berbasis KM (Kendaraan, Damkar, Slickline Truck)');
+
+      const topRusak = allRows.filter(r => r.d.fails > 0).sort((a, b) => b.d.fails - a.d.fails).slice(0, 5);
+      const kesimpulan = (nRep || topRusak.length)
+        ? `${nRep ? `<b style="color:#dc2626">🔴 ${nRep} unit kandidat ganti</b> — umur sudah lewat batas DAN keandalan rendah, perlu direview untuk overhaul/replacement permanen.<br>` : ''}
+           ${topRusak.length ? `<b>Unit paling sering rusak (${periodDays} hari terakhir):</b> ${topRusak.map(r => `${escapeHtml(r.x.tag_number)} (${r.d.fails}×)`).join(', ')} — kandidat kuat untuk Root Cause Analysis (RCA) kalau kejadiannya &gt;1× dalam 12 bulan.`
+           : 'Tidak ada unit dengan kejadian breakdown/troubleshoot di periode ini.'}`
+        : `✅ Tidak ada unit kandidat ganti maupun pola kerusakan berulang di periode ${periodDays} hari terakhir.`;
+
+      openSignDialog({ title: 'Laporan Kelayakan Armada', type: 'KELAYAKAN', summary, intro, table, kesimpulan });
+    }
+    window.cetakKelayakanReport = cetakKelayakanReport;
 
     function cetakFmeaReport() {
       const list = fmeaFiltered();
