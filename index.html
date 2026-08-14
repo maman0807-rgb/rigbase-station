@@ -14048,6 +14048,21 @@
     // ============================================================
     // KELAYAKAN ARMADA (Fase 2) — gabung UMUR (lifecycle) + KEANDALAN (MTBF-HM/Avail)
     // ============================================================
+    let kelayakanPeriodDays = 365;
+    let kelayakanSortRusak = false;
+    function kelayakanSetPeriod(days) {
+      kelayakanPeriodDays = Number(days);
+      const host = document.getElementById('ram-content');
+      if (host) renderKelayakanPage(host);
+    }
+    window.kelayakanSetPeriod = kelayakanSetPeriod;
+    function kelayakanToggleSortRusak() {
+      kelayakanSortRusak = !kelayakanSortRusak;
+      const host = document.getElementById('ram-content');
+      if (host) renderKelayakanPage(host);
+    }
+    window.kelayakanToggleSortRusak = kelayakanToggleSortRusak;
+
     async function renderKelayakanPage(host) {
       let eqHm = [], eqKm = [], dtAll = [];
       try {
@@ -14195,7 +14210,7 @@
         <div class="bg-green-50 border border-green-200 rounded-xl p-4 text-sm text-green-800">
           ✅ Tidak ada equipment yg overdue maintenance atau mendekati threshold. Semua aman.
         </div>`;
-      const periodDays = 365, now = Date.now(), start = now - periodDays * 86400000;
+      const periodDays = kelayakanPeriodDays, now = Date.now(), start = now - periodDays * 86400000;
       const dAgg = {};
       dtAll.forEach(d => {
         if (d.category === GEJALA_CAT) return;
@@ -14232,7 +14247,7 @@
           if (umur === 'replace' && (rel === 'red' || rel === 'amber')) v = 'replace';
           else if (umur === 'replace' || rel === 'red' || umur === 'watch') v = 'watch';
           return { x, lc, d, rh, mtbf, avail, cycle, rel, umur, v };
-        }).sort((a, b) => VW[a.v] - VW[b.v] || a.avail - b.avail);
+        }).sort((a, b) => kelayakanSortRusak ? (b.d.fails - a.d.fails) : (VW[a.v] - VW[b.v] || a.avail - b.avail));
 
         const tbody = rows.map((r, i) => {
           const lc = r.lc;
@@ -14292,8 +14307,21 @@
         <div class="space-y-4">
           ${dueSoonPanel}
           <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-            <h3 class="text-lg font-bold text-slate-900">📋 Kelayakan Armada — Layak Maintain vs Ganti</h3>
-            <p class="text-sm text-slate-500 mt-1">Gabungan <b>umur</b> (TOH/GOH/umur ekonomis) + <b>keandalan</b> (MTBF &amp; Availability). Klik baris → detail unit.</p>
+            <div class="flex items-center justify-between flex-wrap gap-3">
+              <div>
+                <h3 class="text-lg font-bold text-slate-900">📋 Kelayakan Armada — Layak Maintain vs Ganti</h3>
+                <p class="text-sm text-slate-500 mt-1">Gabungan <b>umur</b> (TOH/GOH/umur ekonomis) + <b>keandalan</b> (MTBF &amp; Availability). Klik baris → detail unit.</p>
+              </div>
+              <div class="flex items-center gap-2">
+                <select onchange="kelayakanSetPeriod(this.value)" class="border border-slate-300 rounded-lg px-2 py-1.5 text-sm">
+                  <option value="30" ${kelayakanPeriodDays === 30 ? 'selected' : ''}>30 hari terakhir</option>
+                  <option value="90" ${kelayakanPeriodDays === 90 ? 'selected' : ''}>90 hari terakhir</option>
+                  <option value="180" ${kelayakanPeriodDays === 180 ? 'selected' : ''}>180 hari terakhir</option>
+                  <option value="365" ${kelayakanPeriodDays === 365 ? 'selected' : ''}>365 hari terakhir</option>
+                </select>
+                <button onclick="kelayakanToggleSortRusak()" class="px-3 py-1.5 rounded-lg text-sm font-semibold border whitespace-nowrap ${kelayakanSortRusak ? 'bg-red-600 text-white border-red-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}">🔁 Urutkan: Paling Sering Rusak</button>
+              </div>
+            </div>
           </div>
           ${renderSection(sHm, 'jam', '⏱️ Berbasis JAM (engine, genset, pump)', 'Belum ada unit ber-HM dengan interval terisi. Isi interval TOH/GOH di data equipment.')}
           ${renderSection(sKm, 'km', '🛻 Berbasis KM (Kendaraan, Damkar, Slickline truck)', 'Belum ada kendaraan ber-KM dengan interval terisi. Isi economic_life_hours / toh_interval_hours sbg batas KM di data equipment.')}
