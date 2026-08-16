@@ -13167,8 +13167,12 @@
           <button id="ag-finish-btn" onclick="selesaikanAuditGudang('${audit.id}')" class="bg-safety hover:bg-safety/90 text-white px-4 py-2.5 rounded-lg text-sm font-semibold whitespace-nowrap">✅ Selesaikan Audit</button>
         </div>
 
-        <input id="ag-search" type="text" placeholder="🔍 Cari part number / nama item…" value="${escapeHtml(auditGudangFilterQ)}"
-          oninput="setAuditGudangFilterQ(this.value)" class="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy">
+        <div class="flex items-center gap-2">
+          <input id="ag-search" type="text" placeholder="🔍 Cari part number / nama item…" value="${escapeHtml(auditGudangFilterQ)}"
+            oninput="setAuditGudangFilterQ(this.value)" class="flex-1 px-3 py-2.5 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy">
+          <button onclick="openAuditTambahPartModal('${audit.id}')" class="px-3 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold whitespace-nowrap">+ Part Baru</button>
+        </div>
+        <p class="text-xs text-slate-400 -mt-1">Ketemu part fisik yang belum ada di daftar? Klik <b>+ Part Baru</b> — otomatis masuk master data Gudang &amp; tercatat sebagai temuan audit.</p>
 
         <div class="bg-white rounded-xl border border-slate-200 overflow-x-auto">
           <table class="w-full text-sm">
@@ -13213,6 +13217,98 @@
           </td>
         </tr>`;
     }
+
+    // ============================================================
+    // AUDIT GUDANG — Tambah Part Baru yang ketemu fisik tapi belum ada
+    // di master data Gudang (materials). Bikin master data-nya SEKALIGUS
+    // catat sbg temuan audit (stock_sistem=0, stock_fisik=hasil hitung),
+    // biar pas "Selesaikan Audit" stok sistemnya otomatis ter-set benar
+    // + tercatat di stock_transactions, sama seperti item lain.
+    // ============================================================
+    function openAuditTambahPartModal(auditId) {
+      const body = `
+        <div class="space-y-3">
+          <div>
+            <label class="text-xs font-semibold text-slate-500 uppercase">Part Number *</label>
+            <input id="agnew-pn" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy" placeholder="mis. BRG-6205-2RS">
+          </div>
+          <div>
+            <label class="text-xs font-semibold text-slate-500 uppercase">Deskripsi *</label>
+            <input id="agnew-desc" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy" placeholder="mis. Bearing 6205 2RS">
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="text-xs font-semibold text-slate-500 uppercase">Kategori</label>
+              <select id="agnew-kat" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-navy">
+                ${['Fast Moving', 'Consumable', 'Critical', 'Lubricant', 'Slow Moving'].map(k => `<option value="${k}">${k}</option>`).join('')}
+              </select>
+            </div>
+            <div>
+              <label class="text-xs font-semibold text-slate-500 uppercase">Satuan</label>
+              <input id="agnew-satuan" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy" placeholder="mis. Pcs, Liter, Set">
+            </div>
+          </div>
+          <div>
+            <label class="text-xs font-semibold text-slate-500 uppercase">Jumlah Fisik Ditemukan *</label>
+            <input id="agnew-qty" type="number" min="0" step="0.01" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy" placeholder="0">
+          </div>
+          <p class="text-[11px] text-slate-400">Part ini otomatis masuk master data Gudang (stok sistem dianggap 0, karena memang belum pernah tercatat) dan langsung tercatat sebagai temuan audit dengan selisih +jumlah fisik. Stok sistem baru benar-benar ter-update setelah klik "✅ Selesaikan Audit".</p>
+        </div>`;
+      const footer = `<button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
+        <button id="agnew-submit-btn" onclick="submitAuditTambahPart('${auditId}')" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy-700 text-white text-sm font-semibold">+ Tambah &amp; Catat</button>`;
+      openModal({ title: '📦 Part Baru (Belum Ada di Gudang)', body, footer, maxWidth: 'max-w-md' });
+    }
+    window.openAuditTambahPartModal = openAuditTambahPartModal;
+
+    async function submitAuditTambahPart(auditId) {
+      const pn = (document.getElementById('agnew-pn')?.value || '').trim();
+      const desc = (document.getElementById('agnew-desc')?.value || '').trim();
+      const kat = document.getElementById('agnew-kat')?.value || 'Fast Moving';
+      const satuan = (document.getElementById('agnew-satuan')?.value || '').trim();
+      const qty = Number(document.getElementById('agnew-qty')?.value);
+      if (!pn) { toast('Part Number wajib diisi.', 'warn'); return; }
+      if (!desc) { toast('Deskripsi wajib diisi.', 'warn'); return; }
+      if (isNaN(qty) || qty < 0) { toast('Isi jumlah fisik yang ditemukan (angka ≥ 0).', 'warn'); return; }
+
+      if (window.__agNewPartSaving) return;
+      window.__agNewPartSaving = true;
+      const btn = document.getElementById('agnew-submit-btn');
+      if (btn) { btn.disabled = true; btn.textContent = 'Menyimpan…'; }
+
+      try {
+        // Cek duplikat part_number dulu — jangan sampai bikin master data kembar
+        // (kadang part-nya sebenarnya sudah ada tapi belum ketemu di pencarian).
+        const { data: existing } = await state.supabase.from('materials')
+          .select('id, part_number').ilike('part_number', pn).limit(1);
+        if (existing && existing.length) {
+          toast(`Part Number "${pn}" sudah ada di master Gudang. Coba cari lagi di kolom pencarian — mungkin sudah ada di daftar.`, 'warn');
+          return;
+        }
+
+        const { data: mat, error: matErr } = await state.supabase.from('materials').insert({
+          part_number: pn, description: desc, category: kat, satuan: satuan || null,
+          stok: 0, created_by: state.user.id,
+          notes: `Ditemukan saat Audit Gudang ${fmtDate(new Date().toISOString().slice(0, 10))}`,
+        }).select('id').single();
+        if (matErr) throw matErr;
+
+        const { error: temuanErr } = await state.supabase.from('audit_temuan').insert({
+          audit_id: auditId, material_id: mat.id, stock_sistem: 0, stock_fisik: qty,
+          keterangan: 'Part baru ditemukan saat audit fisik (belum tercatat di master Gudang)',
+        });
+        if (temuanErr) throw temuanErr;
+
+        toast(`Part "${pn}" ditambahkan ke master Gudang & dicatat sebagai temuan audit.`, 'success');
+        closeModal();
+        renderAuditGudangRoot(document.getElementById('audit-gudang-root'));
+      } catch (e) {
+        toast('Gagal tambah part: ' + e.message, 'error');
+      } finally {
+        window.__agNewPartSaving = false;
+        if (btn) { btn.disabled = false; btn.textContent = '+ Tambah & Catat'; }
+      }
+    }
+    window.submitAuditTambahPart = submitAuditTambahPart;
 
     let _agFilterDeb;
     function setAuditGudangFilterQ(v) {
