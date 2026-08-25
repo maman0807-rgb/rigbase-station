@@ -3492,9 +3492,22 @@
       const input = list?._inputRef;
       if (!input) return;
       const wrap = input.closest('.pmp-mat-wrap');
-      wrap.querySelector('.pmp-mat').value = li.dataset.id || '';
+      const matId = li.dataset.id || '';
+      wrap.querySelector('.pmp-mat').value = matId;
       input.value = li.dataset.label || '';
       list.classList.add('hidden');
+
+      // Pindahkan hasil pencarian ke kolom Nama Part & Part No agar baris bisa disimpan
+      if (matId) {
+        const row = wrap.closest('tr');
+        const mat = (window._pmpMaterials || []).find(m => m.id === matId);
+        if (row && mat) {
+          const nameInput = row.querySelector('.pmp-name');
+          const pnInput   = row.querySelector('.pmp-pn');
+          if (nameInput) nameInput.value = mat.description  || '';
+          if (pnInput)   pnInput.value   = mat.part_number  || '';
+        }
+      }
     }
     window.pmpMatSelect = pmpMatSelect;
 

@@ -233,7 +233,7 @@
           <input type="text" class="part-number w-full border rounded px-2 py-1 text-xs" value="${esc(p.part_number || '')}" placeholder="Part No.">
         </td>
         <td class="p-1.5">
-          <select class="material-id w-full border rounded px-2 py-1 text-xs">
+          <select class="material-id w-full border rounded px-2 py-1 text-xs" onchange="onMaterialSelect(this)">
             <option value="">-- Tidak ada --</option>
             ${matOptions}
           </select>
@@ -259,6 +259,19 @@
 
     function addRow() {
       appendRow({});
+    }
+
+    // Pindahkan nama & part number material yang dipilih ke kolom Nama Part & Part No agar baris bisa disimpan
+    function onMaterialSelect(sel) {
+      const matId = sel.value;
+      if (!matId) return;
+      const mat = allMaterials.find(m => m.id === matId);
+      if (!mat) return;
+      const row = sel.closest('tr');
+      const nameInput = row.querySelector('.part-name');
+      const pnInput   = row.querySelector('.part-number');
+      if (nameInput) nameInput.value = mat.description  || '';
+      if (pnInput)   pnInput.value   = mat.part_number  || '';
     }
 
     async function deleteRow(id, rowId) {
