@@ -2099,8 +2099,63 @@
     // ============================================================
     // 9b2. PEKA (near-miss/incident/accident) — log dari app Logbook
     // ============================================================
-    let pekaFilter = { category: '' };
+    let pekaFilter = { category: '', status: '' };
     let pekaPeriod = 'month';
+
+    function renderPekaStatusButtons() {
+      document.querySelectorAll('.peka-status-btn').forEach(btn => {
+        const active = btn.dataset.pekaStatus === pekaFilter.status;
+        btn.className = 'peka-status-btn px-3 py-1.5 rounded-lg text-xs font-semibold border ' +
+          (active ? 'bg-safety text-white border-safety' : 'bg-white text-slate-600 border-slate-200');
+        btn.onclick = () => { pekaFilter.status = btn.dataset.pekaStatus; renderPekaStatusButtons(); loadPekaReports(); };
+      });
+    }
+
+    function showPekaFollowupModal(id) {
+      const r = (window._pekaRows || []).find(x => x.id === id);
+      if (!r) return;
+      const body = `
+        <div class="space-y-4">
+          <div>
+            <label class="block text-sm font-semibold text-slate-700 mb-1">Status</label>
+            <select id="peka-fu-status" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+              ${['Baru', 'Ditindaklanjuti', 'Selesai'].map(s => `<option value="${s}" ${(r.status || 'Baru') === s ? 'selected' : ''}>${s}</option>`).join('')}
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm font-semibold text-slate-700 mb-1">Catatan Tindak Lanjut</label>
+            <textarea id="peka-fu-catatan" rows="4" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" placeholder="Apa yang sudah/akan dilakukan...">${escapeHtml(r.catatan_tindak_lanjut || '')}</textarea>
+          </div>
+          ${r.tindak_lanjut_oleh ? `<p class="text-xs text-slate-400">Terakhir diupdate oleh ${escapeHtml(r.tindak_lanjut_oleh)} — ${r.tindak_lanjut_at ? fmtDate(r.tindak_lanjut_at) : ''}</p>` : ''}
+        </div>
+      `;
+      const footer = `
+        <button onclick="closeModal()" class="px-4 py-2 rounded-lg text-sm font-semibold text-slate-600 hover:bg-slate-100">Batal</button>
+        <button onclick="savePekaFollowup('${id}')" class="px-4 py-2 rounded-lg text-sm font-semibold bg-safety text-white hover:bg-safety-700">Simpan</button>
+      `;
+      openModal({ title: `Tindak Lanjut — ${escapeHtml(r.equipment_name || r.lokasi || 'PEKA')}`, body, footer });
+    }
+    window.showPekaFollowupModal = showPekaFollowupModal;
+
+    async function savePekaFollowup(id) {
+      const status  = document.getElementById('peka-fu-status')?.value;
+      const catatan = document.getElementById('peka-fu-catatan')?.value?.trim();
+      try {
+        const { error } = await state.supabase.from('peka_reports').update({
+          status,
+          catatan_tindak_lanjut: catatan || null,
+          tindak_lanjut_oleh: state.profile?.full_name || state.profile?.email || null,
+          tindak_lanjut_at: new Date().toISOString(),
+        }).eq('id', id);
+        if (error) throw error;
+        toast('Tindak lanjut tersimpan ✅', 'success');
+        closeModal();
+        loadPekaReports();
+      } catch (err) {
+        toast('Gagal simpan: ' + err.message, 'error');
+      }
+    }
+    window.savePekaFollowup = savePekaFollowup;
 
     function renderPekaPeriodButtons() {
       document.querySelectorAll('.peka-period-btn').forEach(btn => {
@@ -2171,9 +2226,11 @@
       try {
         let q = state.supabase.from('peka_reports').select('*').order('created_at', { ascending: false }).limit(300);
         if (pekaFilter.category) q = q.eq('category', pekaFilter.category);
+        if (pekaFilter.status)   q = q.eq('status', pekaFilter.status);
         const { data, error } = await q;
         if (error) throw error;
         const rows = data || [];
+        window._pekaRows = rows;
 
         if (statsEl) {
           const count = (cat) => rows.filter(r => r.category === cat).length;
@@ -2198,6 +2255,10 @@
           const label = { nearmiss: 'Near Miss', incident: 'Incident', accident: 'Accident' };
           return `<span class="px-2 py-0.5 ${map[c] || 'bg-slate-100 text-slate-700'} text-xs font-medium rounded">${label[c] || c}</span>`;
         };
+        const statusBadge = (s) => {
+          const map = { Baru: 'bg-slate-100 text-slate-700', Ditindaklanjuti: 'bg-blue-100 text-blue-800', Selesai: 'bg-green-100 text-green-800' };
+          return `<span class="px-2 py-0.5 ${map[s] || map.Baru} text-xs font-medium rounded">${s || 'Baru'}</span>`;
+        };
 
         listEl.innerHTML = rows.map(r => `
           <div class="p-4 border-b border-slate-100 last:border-b-0">
@@ -2205,11 +2266,17 @@
               <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-2 mb-1 flex-wrap">
                   ${catBadge(r.category)}
+                  ${statusBadge(r.status)}
                   <span class="text-sm font-semibold text-slate-800">${escapeHtml(r.equipment_name || r.lokasi || 'Lokasi tidak dicatat')}</span>
                 </div>
+                <p class="text-xs text-slate-400 mb-1">Kejadian: ${fmtDate(r.tanggal_kejadian || r.created_at)}</p>
                 <p class="text-sm text-slate-600 leading-relaxed">${escapeHtml(r.deskripsi || '')}</p>
                 ${r.tindakan_sementara ? `<p class="text-xs text-slate-500 mt-1"><span class="font-semibold">Tindakan sementara:</span> ${escapeHtml(r.tindakan_sementara)}</p>` : ''}
-                <div class="text-xs text-slate-400 mt-2">${escapeHtml(r.reported_by_name || '-')} · ${fmtDate(r.created_at)} ${new Date(r.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</div>
+                ${r.catatan_tindak_lanjut ? `<p class="text-xs text-blue-700 mt-1 bg-blue-50 rounded px-2 py-1"><span class="font-semibold">Tindak lanjut:</span> ${escapeHtml(r.catatan_tindak_lanjut)}</p>` : ''}
+                <div class="flex items-center justify-between mt-2 flex-wrap gap-2">
+                  <div class="text-xs text-slate-400">Dilaporkan ${escapeHtml(r.reported_by_name || '-')} · ${fmtDate(r.created_at)} ${new Date(r.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</div>
+                  <button onclick="showPekaFollowupModal('${r.id}')" class="text-xs font-semibold text-safety hover:underline">✏️ Tindak Lanjut</button>
+                </div>
               </div>
               ${r.photo_url ? `<img src="${r.photo_url}" onclick="viewPhotoFullsize('${r.photo_url}','')" class="w-16 h-16 rounded-lg object-cover shrink-0 border border-slate-200 cursor-pointer">` : ''}
             </div>
@@ -2732,14 +2799,22 @@
             <div id="peka-leaderboard" class="space-y-1.5">Memuat…</div>
           </div>
           <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex flex-wrap items-center gap-2">
+            <span class="text-xs font-semibold text-slate-400 mr-1">Kategori:</span>
             <button type="button" data-peka-cat="" class="peka-cat-btn px-3 py-1.5 rounded-lg text-xs font-semibold border">Semua</button>
             <button type="button" data-peka-cat="nearmiss" class="peka-cat-btn px-3 py-1.5 rounded-lg text-xs font-semibold border">Near Miss</button>
             <button type="button" data-peka-cat="incident" class="peka-cat-btn px-3 py-1.5 rounded-lg text-xs font-semibold border">Incident</button>
             <button type="button" data-peka-cat="accident" class="peka-cat-btn px-3 py-1.5 rounded-lg text-xs font-semibold border">Accident</button>
           </div>
+          <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex flex-wrap items-center gap-2">
+            <span class="text-xs font-semibold text-slate-400 mr-1">Status:</span>
+            <button type="button" data-peka-status="" class="peka-status-btn px-3 py-1.5 rounded-lg text-xs font-semibold border">Semua</button>
+            <button type="button" data-peka-status="Baru" class="peka-status-btn px-3 py-1.5 rounded-lg text-xs font-semibold border">Baru</button>
+            <button type="button" data-peka-status="Ditindaklanjuti" class="peka-status-btn px-3 py-1.5 rounded-lg text-xs font-semibold border">Ditindaklanjuti</button>
+            <button type="button" data-peka-status="Selesai" class="peka-status-btn px-3 py-1.5 rounded-lg text-xs font-semibold border">Selesai</button>
+          </div>
           <div id="peka-list" class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">Memuat…</div>
         `;
-        setTimeout(() => { renderPekaCatButtons(); renderPekaPeriodButtons(); loadPekaReports(); loadPekaLeaderboard(); }, 0);
+        setTimeout(() => { renderPekaCatButtons(); renderPekaStatusButtons(); renderPekaPeriodButtons(); loadPekaReports(); loadPekaLeaderboard(); }, 0);
         return div;
       },
 
