@@ -339,6 +339,7 @@
       { id: 'recurring',   label: 'Temuan Berulang', icon: '🔁', group: 'Inspeksi', srOnly: true },
       { id: 'reliability', label: 'RAM',          icon: '📈', group: 'Analisa',      srOnly: true, bottomNav: true },
       { id: 'calendar',    label: 'Kalender',    icon: '📅', group: 'Analisa',      srOnly: true },
+      { id: 'peka',        label: 'PEKA',         icon: '⚠️', group: 'Analisa',      srOnly: true },
       { id: 'pm-parts',    label: 'PM Parts',     icon: '📦', group: 'Pemeliharaan', adminOnly: true },
       { id: 'audit-gudang', label: 'Audit Gudang', icon: '📋', group: 'Pemeliharaan', gudangOnly: true },
       { id: 'categories',  label: 'Kategori',     icon: '🏷️', group: 'Administrasi', adminOnly: true },
@@ -2096,6 +2097,78 @@
     }
 
     // ============================================================
+    // 9b2. PEKA (near-miss/incident/accident) — log dari app Logbook
+    // ============================================================
+    let pekaFilter = { category: '' };
+
+    function renderPekaCatButtons() {
+      document.querySelectorAll('.peka-cat-btn').forEach(btn => {
+        const active = btn.dataset.pekaCat === pekaFilter.category;
+        btn.className = 'peka-cat-btn px-3 py-1.5 rounded-lg text-xs font-semibold border ' +
+          (active ? 'bg-safety text-white border-safety' : 'bg-white text-slate-600 border-slate-200');
+        btn.onclick = () => { pekaFilter.category = btn.dataset.pekaCat; renderPekaCatButtons(); loadPekaReports(); };
+      });
+    }
+
+    async function loadPekaReports() {
+      const listEl  = document.getElementById('peka-list');
+      const statsEl = document.getElementById('peka-stats');
+      if (!listEl) return;
+      listEl.innerHTML = 'Memuat…';
+      try {
+        let q = state.supabase.from('peka_reports').select('*').order('created_at', { ascending: false }).limit(300);
+        if (pekaFilter.category) q = q.eq('category', pekaFilter.category);
+        const { data, error } = await q;
+        if (error) throw error;
+        const rows = data || [];
+
+        if (statsEl) {
+          const count = (cat) => rows.filter(r => r.category === cat).length;
+          const catCard = (label, val, colorClass) => `
+            <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+              <div class="text-xs font-semibold text-slate-500 mb-1">${label}</div>
+              <div class="text-2xl font-extrabold ${colorClass}">${val}</div>
+            </div>`;
+          statsEl.innerHTML =
+            catCard('Near Miss', count('nearmiss'), 'text-yellow-600') +
+            catCard('Incident',  count('incident'), 'text-orange-600') +
+            catCard('Accident',  count('accident'), 'text-red-600');
+        }
+
+        if (rows.length === 0) {
+          listEl.innerHTML = '<div class="p-8 text-center text-slate-500">Belum ada laporan PEKA.</div>';
+          return;
+        }
+
+        const catBadge = (c) => {
+          const map   = { nearmiss: 'bg-yellow-100 text-yellow-800', incident: 'bg-orange-100 text-orange-800', accident: 'bg-red-100 text-red-800' };
+          const label = { nearmiss: 'Near Miss', incident: 'Incident', accident: 'Accident' };
+          return `<span class="px-2 py-0.5 ${map[c] || 'bg-slate-100 text-slate-700'} text-xs font-medium rounded">${label[c] || c}</span>`;
+        };
+
+        listEl.innerHTML = rows.map(r => `
+          <div class="p-4 border-b border-slate-100 last:border-b-0">
+            <div class="flex items-start justify-between gap-3">
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 mb-1 flex-wrap">
+                  ${catBadge(r.category)}
+                  <span class="text-sm font-semibold text-slate-800">${escapeHtml(r.equipment_name || r.lokasi || 'Lokasi tidak dicatat')}</span>
+                </div>
+                <p class="text-sm text-slate-600 leading-relaxed">${escapeHtml(r.deskripsi || '')}</p>
+                ${r.tindakan_sementara ? `<p class="text-xs text-slate-500 mt-1"><span class="font-semibold">Tindakan sementara:</span> ${escapeHtml(r.tindakan_sementara)}</p>` : ''}
+                <div class="text-xs text-slate-400 mt-2">${escapeHtml(r.reported_by_name || '-')} · ${fmtDate(r.created_at)} ${new Date(r.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</div>
+              </div>
+              ${r.photo_url ? `<img src="${r.photo_url}" onclick="viewPhotoFullsize('${r.photo_url}','')" class="w-16 h-16 rounded-lg object-cover shrink-0 border border-slate-200 cursor-pointer">` : ''}
+            </div>
+          </div>
+        `).join('');
+      } catch (err) {
+        listEl.innerHTML = `<div class="p-4 bg-red-50 text-red-700 text-sm">Gagal load: ${escapeHtml(err.message)}</div>`;
+      }
+    }
+    window.loadPekaReports = loadPekaReports;
+
+    // ============================================================
     // 9c. ALL PAGE RENDERERS
     // ============================================================
     const PAGES = {
@@ -2579,6 +2652,31 @@
             $('#alert-list').innerHTML = `<div class="p-4 bg-red-50 text-red-700 text-sm">Gagal load: ${escapeHtml(err.message)}</div>`;
           }
         })();
+        return div;
+      },
+
+      // -----------------------------------------------------
+      // PEKA (near-miss / incident / accident) — dilaporkan dari app Logbook,
+      // dibaca di sini (log + visibilitas, tanpa alur investigasi formal).
+      // -----------------------------------------------------
+      peka: () => {
+        const div = document.createElement('div');
+        div.className = 'page space-y-4';
+        div.innerHTML = `
+          <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+            <h3 class="text-xl font-bold text-slate-900 mb-1">⚠️ Laporan PEKA</h3>
+            <p class="text-sm text-slate-500">Near miss, incident & accident yang dilaporkan operator lapangan lewat app Logbook.</p>
+          </div>
+          <div id="peka-stats" class="grid grid-cols-3 gap-3"></div>
+          <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex flex-wrap items-center gap-2">
+            <button type="button" data-peka-cat="" class="peka-cat-btn px-3 py-1.5 rounded-lg text-xs font-semibold border">Semua</button>
+            <button type="button" data-peka-cat="nearmiss" class="peka-cat-btn px-3 py-1.5 rounded-lg text-xs font-semibold border">Near Miss</button>
+            <button type="button" data-peka-cat="incident" class="peka-cat-btn px-3 py-1.5 rounded-lg text-xs font-semibold border">Incident</button>
+            <button type="button" data-peka-cat="accident" class="peka-cat-btn px-3 py-1.5 rounded-lg text-xs font-semibold border">Accident</button>
+          </div>
+          <div id="peka-list" class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">Memuat…</div>
+        `;
+        setTimeout(() => { renderPekaCatButtons(); loadPekaReports(); }, 0);
         return div;
       },
 
