@@ -2100,6 +2100,59 @@
     // 9b2. PEKA (near-miss/incident/accident) — log dari app Logbook
     // ============================================================
     let pekaFilter = { category: '' };
+    let pekaPeriod = 'month';
+
+    function renderPekaPeriodButtons() {
+      document.querySelectorAll('.peka-period-btn').forEach(btn => {
+        const active = btn.dataset.pekaPeriod === pekaPeriod;
+        btn.className = 'peka-period-btn px-3 py-1.5 rounded-lg text-xs font-semibold border ' +
+          (active ? 'bg-safety text-white border-safety' : 'bg-white text-slate-600 border-slate-200');
+        btn.onclick = () => { pekaPeriod = btn.dataset.pekaPeriod; renderPekaPeriodButtons(); loadPekaLeaderboard(); };
+      });
+    }
+
+    async function loadPekaLeaderboard() {
+      const el = document.getElementById('peka-leaderboard');
+      if (!el) return;
+      el.innerHTML = 'Memuat…';
+      try {
+        let q = state.supabase.from('peka_reports').select('reported_by_name, created_at').limit(2000);
+        if (pekaPeriod === 'month') {
+          const now = new Date();
+          const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+          q = q.gte('created_at', startOfMonth);
+        }
+        const { data, error } = await q;
+        if (error) throw error;
+        const rows = data || [];
+
+        const counts = {};
+        rows.forEach(r => {
+          const name = r.reported_by_name || 'Tanpa nama';
+          counts[name] = (counts[name] || 0) + 1;
+        });
+        const ranked = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 10);
+
+        if (ranked.length === 0) {
+          el.innerHTML = '<div class="text-sm text-slate-400 py-2">Belum ada laporan pada periode ini.</div>';
+          return;
+        }
+
+        const medal = ['🥇', '🥈', '🥉'];
+        el.innerHTML = ranked.map(([name, count], i) => `
+          <div class="flex items-center justify-between px-3 py-2 rounded-lg ${i < 3 ? 'bg-amber-50' : 'bg-slate-50'}">
+            <div class="flex items-center gap-2 min-w-0">
+              <span class="text-sm font-bold w-6 text-center shrink-0">${medal[i] || (i + 1)}</span>
+              <span class="text-sm font-semibold text-slate-800 truncate">${escapeHtml(name)}</span>
+            </div>
+            <span class="text-sm font-bold text-safety shrink-0">${count} laporan</span>
+          </div>
+        `).join('');
+      } catch (err) {
+        el.innerHTML = `<div class="p-3 bg-red-50 text-red-700 text-sm rounded-lg">Gagal load: ${escapeHtml(err.message)}</div>`;
+      }
+    }
+    window.loadPekaLeaderboard = loadPekaLeaderboard;
 
     function renderPekaCatButtons() {
       document.querySelectorAll('.peka-cat-btn').forEach(btn => {
@@ -2668,6 +2721,16 @@
             <p class="text-sm text-slate-500">Near miss, incident & accident yang dilaporkan operator lapangan lewat app Logbook.</p>
           </div>
           <div id="peka-stats" class="grid grid-cols-3 gap-3"></div>
+          <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+            <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+              <h4 class="text-base font-bold text-slate-800">🏆 Top Pelapor</h4>
+              <div class="flex items-center gap-2">
+                <button type="button" data-peka-period="month" class="peka-period-btn px-3 py-1.5 rounded-lg text-xs font-semibold border">Bulan Ini</button>
+                <button type="button" data-peka-period="all" class="peka-period-btn px-3 py-1.5 rounded-lg text-xs font-semibold border">Semua</button>
+              </div>
+            </div>
+            <div id="peka-leaderboard" class="space-y-1.5">Memuat…</div>
+          </div>
           <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex flex-wrap items-center gap-2">
             <button type="button" data-peka-cat="" class="peka-cat-btn px-3 py-1.5 rounded-lg text-xs font-semibold border">Semua</button>
             <button type="button" data-peka-cat="nearmiss" class="peka-cat-btn px-3 py-1.5 rounded-lg text-xs font-semibold border">Near Miss</button>
@@ -2676,7 +2739,7 @@
           </div>
           <div id="peka-list" class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">Memuat…</div>
         `;
-        setTimeout(() => { renderPekaCatButtons(); loadPekaReports(); }, 0);
+        setTimeout(() => { renderPekaCatButtons(); renderPekaPeriodButtons(); loadPekaReports(); loadPekaLeaderboard(); }, 0);
         return div;
       },
 
