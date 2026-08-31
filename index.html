@@ -950,6 +950,66 @@
       if (idx === -1) return [];
       return PM_TIER_ORDER.slice(0, idx + 1).flatMap(t => PM_CHECKLIST_INCREMENTAL[t]);
     }
+
+    // ============================================================
+    // JADWAL PM KHUSUS MESIN CATERPILLAR C7.1 — hanya GS-KB150A-CAT / GS-KB150B-CAT
+    // ============================================================
+    // Jadwal resmi pabrikan (Cat SEBU9241-10, Prime Power Schedule), dikonfirmasi Maman.
+    // SENGAJA struktur data TERPISAH dari PM_CHECKLIST_INCREMENTAL/getPMTypeByCycle di
+    // atas — rasio interval manual Cat ini (1:5:10:20:60:120 dari basis 50 jam) TIDAK
+    // bisa direpresentasikan lewat rasio tetap getPMTypeByCycle (1:2:4:8:40), jadi TIDAK
+    // menyentuh pm_interval_hours/pm_cycle_count/tier PM3-PM6 generik sama sekali —
+    // equipment lain (dan checklist SOP_PM3_PM4_PM5_PM6.md yang sudah disahkan) tidak
+    // terpengaruh. Berjenjang sama seperti PM_CHECKLIST_INCREMENTAL: level N = level
+    // (N-1) + tambahan.
+    const CAT_C71_PM_TAGS = ['GS-KB150A-CAT', 'GS-KB150B-CAT'];
+    const CAT_C71_PM_LADDER = {
+      PM1: { intervalHm: 50, items: [
+        'Kuras air & endapan tangki BBM (Fuel Tank Water and Sediment - Drain)',
+      ] },
+      PM2: { intervalHm: 250, items: [
+        'Ambil sampel coolant Level 1 (Cooling System Coolant Sample - Obtain)',
+      ] },
+      PM3: { intervalHm: 500, items: [
+        'Cek/setel/ganti belt alternator (Alternator Belt - Inspect/Adjust/Replace)',
+        'Ganti filter BBM sekunder (Fuel System Secondary Filter - Replace)',
+        'Cek elektrolit aki (Battery Electrolyte Level - Check)',
+        'Ganti elemen air cleaner mesin (Engine Air Cleaner Element - Replace)',
+        'Ganti breather crankcase (Engine Crankcase Breather - Replace)',
+        'Ganti oli mesin & filter oli (Engine Oil and Filter - Change)',
+        'Ambil sampel oli mesin (Engine Oil Sample - Obtain)',
+        'Ganti elemen filter BBM primer / water separator (Fuel System Primary Filter Element - Replace)',
+        'Cek/ganti selang & klem (Hoses and Clamps - Inspect/Replace)',
+      ] },
+      PM4: { intervalHm: 1000, items: [
+        'Cek/setel celah klep mesin (Engine Valve Lash - Inspect/Adjust)',
+        'Cek rotating rectifier (Rotating Rectifier - Check)',
+      ] },
+      PM5: { intervalHm: 3000, items: [
+        'Tes/ganti nozzle injeksi BBM (Fuel Injection Nozzles - Test/Exchange)',
+        'Cek water pump (Water Pump - Inspect)',
+        'Ganti thermostat / water temperature regulator (Cooling System Water Temperature Regulator - Replace)',
+      ] },
+      PM6: { intervalHm: 6000, items: [
+        'Tambah coolant extender / ELC (Cooling System Coolant Extender (ELC) - Add)',
+      ] },
+    };
+    const CAT_C71_PM_ORDER = ['PM1', 'PM2', 'PM3', 'PM4', 'PM5', 'PM6'];
+    // Checklist kumulatif s/d 1 level (PM4 = item PM1+PM2+PM3+PM4).
+    function getCatC71ChecklistForLevel(level) {
+      const idx = CAT_C71_PM_ORDER.indexOf(level);
+      if (idx === -1) return [];
+      return CAT_C71_PM_ORDER.slice(0, idx + 1).flatMap(l => CAT_C71_PM_LADDER[l].items);
+    }
+    // Item standalone (2000h, 12000h) — TIDAK berjenjang/cascade ke ladder di atas, belum
+    // ada tombol cetak UI khusus (data dulu, tracking due-date menyusul — lihat Prioritas 2).
+    // Insulation Test (4500 ATAU 8000 jam) SENGAJA belum dimasukkan — Maman belum memilih
+    // salah satu interval-nya.
+    const CAT_C71_STANDALONE_EXTRAS = {
+      2000:  ['Cek alternator (Alternator - Inspect)', 'Cek dudukan mesin (Engine Mounts - Inspect)', 'Cek starting motor (Starting Motor - Inspect)', 'Cek turbocharger (Turbocharger - Inspect)'],
+      12000: ['Ganti total coolant / ELC (Cooling System Coolant (ELC) - Change)'],
+    };
+
     // PM berbasis JAM (HM): pakai running_hours (diisi mekanik via Logbook) vs last_pm_hours + pm_interval_hours.
     // Hanya unit ber-HM (running_hours > 0) yang dihitung. Tampilkan yang mendekati / sudah lewat jam PM.
     // ratio: 0.2 = warning (threshold flat 100 jam), 0.1 = critical (threshold flat 50 jam) — lihat _threshold di bawah.
@@ -3593,6 +3653,114 @@
       }
     }
     window.printPMForm = printPMForm;
+
+    // Form kerja PM khusus mesin Caterpillar C7.1 (GS-KB150A-CAT / GS-KB150B-CAT) — sama
+    // persis pola/letterhead printPMForm() di atas, tapi checklist-nya dari
+    // CAT_C71_PM_LADDER (jadwal manual Cat SEBU9241-10), BUKAN dari pm_type/tierIntervalHm
+    // generik. "level" di sini = 'PM1'..'PM6' sesuai CAT_C71_PM_ORDER.
+    async function printCatC71PMForm(equipmentId, tagNumber, equipmentName, currentRunningHours, level) {
+      try {
+        const ladder = CAT_C71_PM_LADDER[level];
+        if (!ladder) { toast('Level PM Cat C7.1 tidak dikenal: ' + level, 'error'); return; }
+
+        const { data: eq, error } = await state.supabase.from('equipment').select('*').eq('id', equipmentId).single();
+        if (error) throw error;
+
+        const checklist = getCatC71ChecklistForLevel(level);
+        const rows = checklist.map(item => `
+              <tr>
+                <td style="width:26px;text-align:center;font-size:15px">☐</td>
+                <td>${escapeHtml(item)}</td>
+                <td></td>
+              </tr>`).join('');
+
+        const now = new Date();
+        const tgl = now.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+        const who = escapeHtml(state.profile?.full_name || state.profile?.email || '');
+        const html = `<!DOCTYPE html><html><head>
+          <meta charset="UTF-8">
+          <title>Form Kerja PM Cat C7.1 ${level} — ${tagNumber}</title>
+          <style>
+            *{box-sizing:border-box} body{font-family:Arial,Helvetica,sans-serif;color:#1f2937;padding:24px;font-size:12px;line-height:1.5;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+            @page{size:A4;margin:14mm}
+            .kop{display:flex;align-items:center;gap:14px;border-bottom:3px solid #11335d;padding-bottom:12px;margin-bottom:3px;position:relative}
+            .kop::after{content:"";position:absolute;left:0;right:0;bottom:-3px;height:2px;background:#f97316}
+            .kop .logo{flex:0 0 auto;width:46px;height:46px;color:#11335d}
+            .kop .brand{font-size:21px;font-weight:800;color:#11335d;letter-spacing:.3px;line-height:1.05}
+            .kop .brand .ram{color:#f97316}
+            .kop .t{font-size:12px;font-weight:bold;color:#11335d;margin-top:2px} .kop .s{font-size:10px;color:#6b7280;margin-top:1px}
+            h1{font-size:15px;text-align:center;margin:14px 0 2px;text-transform:uppercase;color:#1f2937}
+            .meta{text-align:center;font-size:11px;color:#374151;margin-bottom:14px}
+            table.ident{width:100%;border-collapse:collapse;margin-bottom:16px}
+            table.ident td{padding:6px 10px;border-bottom:1px solid #e5e7eb;font-size:11px}
+            table.ident td.label{background:#eff6ff;font-weight:600;width:30%;color:#11335d}
+            table.checklist{width:100%;border-collapse:collapse;margin-top:8px}
+            table.checklist th{background:#11335d;color:#fff;padding:8px 10px;text-align:left;font-size:11px}
+            table.checklist td{padding:8px 10px;border-bottom:1px solid #e5e7eb;font-size:11.5px;vertical-align:top}
+            table.checklist tr:nth-child(even) td{background:#f9fafb}
+            .signblock{display:flex;justify-content:space-between;margin-top:32px;text-align:center}
+            .signbox{width:31%;font-size:11px}
+            .signline{margin-top:44px;border-top:1px solid #1f2937;padding-top:4px;color:#6b7280}
+            .openblock{margin-top:18px}
+            .openblock .label{font-weight:600;font-size:11.5px;margin-bottom:6px;color:#11335d}
+            .openblock .sublabel{font-size:10px;color:#888;font-weight:400}
+            .openblock .rule{border:1px solid #cbd5e1;border-top:none;padding:0 10px}
+            .openblock .rule div{border-bottom:1px solid #d9dee5;height:22px}
+            .openblock .rule div:last-child{border-bottom:none}
+            .foot{margin-top:22px;border-top:1px solid #e2e8f0;padding-top:6px;font-size:9px;color:#94a3b8;display:flex;justify-content:space-between;align-items:center;gap:10px}
+            .foot b{color:#11335d} .foot .ram{color:#f97316}
+            @media print{body{padding:0} button{display:none}}
+          </style>
+        </head><body>
+          <div class="kop">
+            <svg class="logo" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="26" y="6" width="12" height="4" fill="currentColor" stroke="none"/><line x1="32" y1="10" x2="32" y2="20"/><circle cx="32" cy="22" r="2" fill="currentColor" stroke="none"/><line x1="28" y1="10" x2="14" y2="50"/><line x1="36" y1="10" x2="50" y2="50"/><line x1="26" y1="18" x2="38" y2="18"/><line x1="23" y1="28" x2="41" y2="28"/><line x1="20" y1="38" x2="44" y2="38"/><line x1="17" y1="48" x2="47" y2="48"/><line x1="26" y1="18" x2="41" y2="28"/><line x1="38" y1="18" x2="23" y2="28"/><line x1="23" y1="28" x2="44" y2="38"/><line x1="41" y1="28" x2="20" y2="38"/><line x1="20" y1="38" x2="47" y2="48"/><line x1="44" y1="38" x2="17" y2="48"/><rect x="10" y="50" width="44" height="4" fill="currentColor" stroke="none"/><line x1="4" y1="58" x2="60" y2="58" stroke-width="3"/></svg>
+            <div>
+              <div class="brand">e<span class="ram">RAM</span>Hoist</div>
+              <div class="t">PT PERTAMINA HULU ROKAN — Hoist &amp; Heavy Equipment</div>
+              <div class="s">Asset Reliability Management · Reliability · Availability · Maintainability</div>
+            </div>
+          </div>
+          <h1>Form Kerja Preventive Maintenance — ${level} (Mesin Caterpillar C7.1)</h1>
+          <div class="meta">Interval ${ladder.intervalHm} HM (kumulatif s/d ${level}) &nbsp;·&nbsp; Tanggal cetak: ${tgl}</div>
+          <table class="ident">
+            <tr><td class="label">Tag Number</td><td><b>${escapeHtml(eq.tag_number || tagNumber || '-')}</b></td></tr>
+            <tr><td class="label">Nama Equipment</td><td>${escapeHtml(eq.nama_equipment || equipmentName || '-')}</td></tr>
+            <tr><td class="label">Lokasi (home unit)</td><td>${escapeHtml(getParentUnitName(eq.assigned_unit_id))}</td></tr>
+            <tr><td class="label">Lokasi Pekerjaan</td><td>&nbsp;____________________________</td></tr>
+            <tr><td class="label">Brand / Model</td><td>${escapeHtml(eq.brand || '-')} / ${escapeHtml(eq.model || '-')}</td></tr>
+            <tr><td class="label">Running Hours saat cetak</td><td>${fmtNumber(Number(currentRunningHours) || 0, ' HM')} <span style="color:#999">(referensi, bukan bacaan aktual)</span></td></tr>
+            <tr><td class="label">HM saat PM dilakukan</td><td>&nbsp;____________________________</td></tr>
+          </table>
+          <table class="checklist">
+            <thead><tr><th style="width:26px"></th><th>Item Pekerjaan</th><th>Catatan</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+          <div class="openblock">
+            <div class="label">Temuan / Pekerjaan Tambahan <span class="sublabel">(di luar checklist di atas — isi kalau ada)</span></div>
+            <div class="rule"><div></div><div></div><div></div><div></div></div>
+          </div>
+          <div class="signblock">
+            <div class="signbox">Nama Mekanik: ______________<div class="signline">Tanda tangan &amp; tanggal</div></div>
+            <div class="signbox">Diperiksa oleh: ______________<div class="signline">Tanda tangan &amp; tanggal</div></div>
+            <div class="signbox">Ketahui oleh: ______________<div class="signline">Pengawas Lapangan — tanda tangan &amp; tanggal</div></div>
+          </div>
+          <div class="foot">
+            <div>Ref: Caterpillar SEBU9241-10 (Prime Power Schedule) — jadwal khusus mesin Cat C7.1, terpisah dari SOP_PM3_PM4_PM5_PM6.md generik · Dokumen dihasilkan otomatis oleh <b>e<span class="ram">RAM</span>Hoist</b></div>
+            <div>Dicetak: ${tgl} · oleh ${who}</div>
+          </div>
+        </body></html>`;
+
+        const win = window.open('', '_blank');
+        if (!win) { toast('Pop-up diblokir browser. Izinkan pop-up untuk cetak form.', 'error'); return; }
+        win.document.write(html);
+        win.document.close();
+        win.focus();
+        setTimeout(() => win.print(), 500);
+      } catch (err) {
+        toast('Gagal cetak form: ' + err.message, 'error');
+      }
+    }
+    window.printCatC71PMForm = printCatC71PMForm;
 
     // ============================================================
     // PM PARTS TEMPLATE — page functions
@@ -7803,6 +7971,18 @@
               ${isSrMekanikOrAbove() ? `<button onclick="openHMReviseModal('${eq.id}','${escapeHtml(eq.tag_number).replace(/'/g,"&#39;")}',${Number(eq.running_hours) || 0},'${u}')" class="bg-orange-100 hover:bg-orange-200 text-orange-700 px-3 py-1.5 rounded-lg text-sm font-medium" title="Revisi HM kalau counter di unit beda dgn sistem">✏ Revisi HM</button>` : ''}
               ${isSrMekanikOrAbove() && eq.pm_type !== 'plo' && eq.pm_type !== 'time' ? `<button onclick="showCatatPMModal('${eq.id}','${escapeHtml(eq.tag_number).replace(/'/g,"&#39;")}','${escapeHtml(eq.nama_equipment || '').replace(/'/g,"&#39;")}',${_currentHM},${_eqInterval},'${_nextPmType || ''}','${_pmUnit}')" class="bg-green-100 hover:bg-green-200 text-green-700 px-3 py-1.5 rounded-lg text-sm font-medium" title="Catat PM selesai — bisa diakses kapan saja, tidak perlu nunggu status due di Dashboard">✅ Catat PM Selesai</button>` : ''}
               ${eq.pm_type !== 'plo' && eq.pm_type !== 'time' ? `<button onclick="printPMForm('${eq.id}','${escapeHtml(eq.tag_number).replace(/'/g,"&#39;")}','${escapeHtml(eq.nama_equipment || '').replace(/'/g,"&#39;")}',${_currentHM},${pmTierIntervalHm(_nextPmType, _eqInterval)},'${_nextPmType || ''}','${_pmUnit}')" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg text-sm font-medium" title="Cetak form kerja kosong buat dibawa mekanik ke lapangan">🖨 Cetak Form PM</button>` : ''}
+              ${CAT_C71_PM_TAGS.includes(eq.tag_number) ? `
+                <span class="inline-flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1">
+                  <select id="cat-c71-lvl-${eq.id}" class="border border-amber-300 rounded-lg text-sm px-2 py-1 bg-white text-amber-900">
+                    <option value="PM1">PM1 — 50 jam</option>
+                    <option value="PM2">PM2 — 250 jam</option>
+                    <option value="PM3">PM3 — 500 jam</option>
+                    <option value="PM4" selected>PM4 — 1000 jam</option>
+                    <option value="PM5">PM5 — 3000 jam</option>
+                    <option value="PM6">PM6 — 6000 jam</option>
+                  </select>
+                  <button onclick="printCatC71PMForm('${eq.id}','${escapeHtml(eq.tag_number).replace(/'/g,"&#39;")}','${escapeHtml(eq.nama_equipment || '').replace(/'/g,"&#39;")}',${_currentHM},document.getElementById('cat-c71-lvl-${eq.id}').value)" class="bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium" title="Form kerja PM khusus mesin Caterpillar C7.1 (jadwal manual resmi Cat SEBU9241-10, beda dari checklist generik PM3-PM6)">🖨 Form PM Cat C7.1</button>
+                </span>` : ''}
               <button onclick="generateWorkOrderPDF('${eq.id}')" class="bg-purple-100 hover:bg-purple-200 text-purple-700 px-3 py-1.5 rounded-lg text-sm font-medium" title="Generate Work Order PDF utk dibawa ke lapangan">📋 Work Order PDF</button>
               ${isSrMekanikOrAbove() ? `<button onclick="openSnoozeModal('${eq.id}','${escapeHtml(eq.tag_number).replace(/'/g,"&#39;")}')" class="bg-blue-100 hover:bg-blue-200 text-blue-700 px-3 py-1.5 rounded-lg text-sm font-medium" title="Snooze alert sampai action selesai">🔕 Snooze Alert</button>` : ''}
               <button onclick="openMaintenanceModal('${eq.id}')" class="bg-safety hover:bg-safety-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium">+ Tambah</button>
