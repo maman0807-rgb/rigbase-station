@@ -1021,7 +1021,7 @@
         .neq('pm_type', 'km')
         .neq('pm_type', 'plo');  // exclude PLO dari analisa PM-jam
       if (error) throw error;
-      return (data || [])
+      const generic = (data || [])
         .map(e => {
           const interval  = Number(e.pm_interval_hours) || 250;
           const currentHM = Number(e.running_hours || 0);
@@ -1058,11 +1058,66 @@
           const _urgency = Math.min(_hmUrgency, _timeUrgency);
           return { ...e, _interval: interval, _actualInterval: interval, _pmType, _nextPmAt: nextPmAt, _used: usedHM, _remaining: remaining, _threshold, _daysRemaining, _dayThreshold, _dueByHM, _dueByTime, _urgency };
         })
-        // GS-KB150A-CAT/GS-KB150B-CAT pindah total ke jadwal Cat C7.1 (CAT_C71_PM_LADDER +
-        // cat_c71_pm_log) — dikecualikan dari widget generik ini (dipakai bareng oleh
-        // "Mendekati Maintenance PM" DAN "PM Berbasis Jam" di Dashboard, keduanya panggil
-        // fungsi ini) supaya tidak ada lagi tombol yang nulis ke tracker lama utk 2 unit ini.
-        .filter(e => !CAT_C71_PM_TAGS.includes(e.tag_number))
+        // GS-KB150A-CAT/GS-KB150B-CAT pindah total ke jadwal Cat C7.1 — dikeluarkan dari
+        // perhitungan generik di atas (rasio interval-nya beda, lihat CAT_C71_PM_LADDER),
+        // tapi TIDAK hilang dari widget: digabung balik di bawah pakai perhitungan Cat
+        // sendiri, supaya tetap kelihatan di "Mendekati Maintenance PM"/"PM Berbasis Jam"
+        // (dipakai bareng oleh fungsi ini) — cuma datanya yang beda, bukan widget-nya.
+        .filter(e => !CAT_C71_PM_TAGS.includes(e.tag_number));
+
+      // Baris Cat C7.1 (GS-KB150A-CAT/GS-KB150B-CAT) — reuse baris mentah dari query di atas
+      // (masih ada di `data`, cuma tersaring keluar di atas), hitung "due" pakai
+      // CAT_C71_PM_LADDER + cat_c71_pm_log, BUKAN pm_interval_hours/pm_cycle_count. Pola
+      // hitung MAX(done_at_hm) per level & next_due_hm sama persis dgn catC71Info di
+      // renderMaintenanceTab (equipment detail) — supaya angka yg Maman lihat di Dashboard
+      // konsisten dgn yg dia lihat pas buka detail equipment-nya.
+      const catEquip = (data || []).filter(e => CAT_C71_PM_TAGS.includes(e.tag_number));
+      const catRows = [];
+      if (catEquip.length) {
+        let catLogs = [];
+        try {
+          const { data: logs } = await state.supabase
+            .from('cat_c71_pm_log').select('equipment_id, level, done_at_hm')
+            .in('equipment_id', catEquip.map(e => e.id));
+          catLogs = logs || [];
+        } catch (e) { /* tabel cat_c71_pm_log mungkin belum dibuat — anggap belum pernah dicatat */ }
+
+        // Threshold generik SEKARANG flat (50/100 jam, bukan proporsional interval lagi —
+        // lihat komentar _threshold di atas, diubah 2026-08-04). Dipakai sama persis di sini
+        // (bukan intervalHm*ratio) supaya baris Cat & baris generik di widget yang sama
+        // benar-benar konsisten kriteria "due"-nya, bukan dua standar berbeda berdampingan.
+        const catThreshold = ratio <= 0.1 ? 50 : 100;
+        catEquip.forEach(e => {
+          const lastDoneByLevel = {};
+          catLogs.filter(l => l.equipment_id === e.id).forEach(l => {
+            const h = Number(l.done_at_hm) || 0;
+            if (!(l.level in lastDoneByLevel) || h > lastDoneByLevel[l.level]) lastDoneByLevel[l.level] = h;
+          });
+          const currentHM = Number(e.running_hours || 0);
+          const levels = CAT_C71_PM_ORDER.map(level => {
+            const lastDone  = lastDoneByLevel[level] || 0;
+            const nextDue   = lastDone + CAT_C71_PM_LADDER[level].intervalHm;
+            return { level, lastDone, nextDue, remaining: nextDue - currentHM };
+          });
+          const nextLevel = levels.reduce((a, b) => (b.nextDue < a.nextDue ? b : a));
+          catRows.push({
+            ...e,
+            _interval: CAT_C71_PM_LADDER[nextLevel.level].intervalHm,
+            _actualInterval: CAT_C71_PM_LADDER[nextLevel.level].intervalHm,
+            _pmType: nextLevel.level,
+            _nextPmAt: nextLevel.nextDue,
+            _used: currentHM - nextLevel.lastDone,
+            _remaining: nextLevel.remaining,
+            _threshold: catThreshold,
+            _daysRemaining: null, _dayThreshold: null,
+            _dueByHM: nextLevel.remaining <= catThreshold,
+            _dueByTime: false,
+            _urgency: catThreshold ? nextLevel.remaining / catThreshold : Infinity,
+          });
+        });
+      }
+
+      return [...generic, ...catRows]
         .filter(e => e._dueByHM || e._dueByTime)
         .sort((a, b) => a._urgency - b._urgency)
         .slice(0, 15);
@@ -2505,6 +2560,18 @@
                     : '';
                   const _pmColors = { GOH:'bg-red-600', PM6:'bg-orange-500', PM5:'bg-purple-600', PM4:'bg-blue-600', PM3:'bg-slate-500' };
                   const pmBadge = `<span class="inline-flex items-center text-xs ${_pmColors[e._pmType]||'bg-slate-500'} text-white px-2 py-0.5 rounded-full font-bold">${e._pmType}</span>`;
+                  // GS-KB150A-CAT/GS-KB150B-CAT: tombol aksi HARUS ke jalur Cat C7.1 (printCatC71PMForm/
+                  // showCatC71PMDoneModal), bukan tombol generik (printPMForm/showCatatPMModal) yang
+                  // nulis ke tracker lama. "Siapkan Part" generik sengaja DIHILANGKAN utk baris ini —
+                  // belum ada fitur siapkan-part per-level khusus ladder Cat, daripada nampilin tombol
+                  // yang keliru/nggak nyambung, mending nggak ditampilkan dulu.
+                  const isCatC71Row = CAT_C71_PM_TAGS.includes(e.tag_number);
+                  const actionButtons = isCatC71Row ? `
+                        <button onclick="printCatC71PMForm('${e.id}', '${escapeAttr(e.tag_number)}', '${escapeAttr(e.nama_equipment)}', ${Number(e.running_hours)||0}, '${e._pmType}')" class="inline-flex items-center gap-1 text-xs bg-amber-600 text-white px-2.5 py-0.5 rounded-full font-bold shadow-sm hover:opacity-80 transition" title="Form kerja PM khusus mesin Caterpillar C7.1 (jadwal manual Cat SEBU9241-10)">🖨 Form PM Cat C7.1</button>
+                        <button onclick="showCatC71PMDoneModal('${e.id}', '${escapeAttr(e.tag_number)}', '${escapeAttr(e.nama_equipment)}', ${Number(e.running_hours)||0}, '${e._pmType}')" class="inline-flex items-center gap-1 text-xs bg-amber-700 text-white px-2.5 py-0.5 rounded-full font-bold shadow-sm hover:opacity-80 transition">✅ Catat ${e._pmType} Cat C7.1 Selesai</button>` : `
+                        <button onclick="showPMPartsModal('${e.id}', ${pmTierIntervalHm(e._pmType, e._actualInterval)}, ${Math.round(e._remaining)}, '${escapeAttr(e.tag_number)}', '${escapeAttr(e.nama_equipment)}')" class="inline-flex items-center gap-1 text-xs bg-navy text-white px-2.5 py-0.5 rounded-full font-bold shadow-sm hover:opacity-80 transition">📦 Siapkan Part — ${e._pmType} (${pmTierIntervalHm(e._pmType, e._actualInterval)} HM)</button>
+                        <button onclick="printPMForm('${e.id}', '${escapeAttr(e.tag_number)}', '${escapeAttr(e.nama_equipment)}', ${Number(e.running_hours)||0}, ${pmTierIntervalHm(e._pmType, e._actualInterval)}, '${e._pmType}')" class="inline-flex items-center gap-1 text-xs bg-slate-700 text-white px-2.5 py-0.5 rounded-full font-bold shadow-sm hover:opacity-80 transition" title="Cetak form kerja kosong buat dibawa mekanik ke lapangan">🖨 Cetak Form PM</button>
+                        <button onclick="showCatatPMModal('${e.id}', '${escapeAttr(e.tag_number)}', '${escapeAttr(e.nama_equipment)}', ${Number(e.running_hours)||0}, ${e._actualInterval}, '${e._pmType}')" class="inline-flex items-center gap-1 text-xs bg-green-600 text-white px-2.5 py-0.5 rounded-full font-bold shadow-sm hover:opacity-80 transition">✅ Catat ${e._pmType} Selesai</button>`;
                   return `<div class="w-full text-left flex items-center justify-between border ${borderCls} rounded-lg px-3 py-2">
                     <div class="min-w-0 flex-1">
                       <div class="cursor-pointer hover:opacity-75 transition" onclick="setEquipmentView('detail','${e.id}'); navigate('equipment')">
@@ -2514,9 +2581,7 @@
                       <div class="flex flex-wrap items-center gap-1.5 mt-1.5">
                         ${pmBadge}
                         ${urgBadge}
-                        <button onclick="showPMPartsModal('${e.id}', ${pmTierIntervalHm(e._pmType, e._actualInterval)}, ${Math.round(e._remaining)}, '${escapeAttr(e.tag_number)}', '${escapeAttr(e.nama_equipment)}')" class="inline-flex items-center gap-1 text-xs bg-navy text-white px-2.5 py-0.5 rounded-full font-bold shadow-sm hover:opacity-80 transition">📦 Siapkan Part — ${e._pmType} (${pmTierIntervalHm(e._pmType, e._actualInterval)} HM)</button>
-                        <button onclick="printPMForm('${e.id}', '${escapeAttr(e.tag_number)}', '${escapeAttr(e.nama_equipment)}', ${Number(e.running_hours)||0}, ${pmTierIntervalHm(e._pmType, e._actualInterval)}, '${e._pmType}')" class="inline-flex items-center gap-1 text-xs bg-slate-700 text-white px-2.5 py-0.5 rounded-full font-bold shadow-sm hover:opacity-80 transition" title="Cetak form kerja kosong buat dibawa mekanik ke lapangan">🖨 Cetak Form PM</button>
-                        <button onclick="showCatatPMModal('${e.id}', '${escapeAttr(e.tag_number)}', '${escapeAttr(e.nama_equipment)}', ${Number(e.running_hours)||0}, ${e._actualInterval}, '${e._pmType}')" class="inline-flex items-center gap-1 text-xs bg-green-600 text-white px-2.5 py-0.5 rounded-full font-bold shadow-sm hover:opacity-80 transition">✅ Catat ${e._pmType} Selesai</button>
+                        ${actionButtons}
                       </div>
                     </div>
                     <div class="text-right flex-shrink-0 ml-3">
