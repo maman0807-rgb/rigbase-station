@@ -3762,6 +3762,102 @@
     }
     window.printCatC71PMForm = printCatC71PMForm;
 
+    // Modal "Catat PM Cat C7.1 Selesai" — sama pola dgn showCatatPMModal(), tapi nulis ke
+    // cat_c71_pm_log (bukan equipment.last_pm_hours/pm_cycle_count generik). suggestedLevel
+    // = level dgn next_due_hm terkecil saat modal dibuka (dihitung di renderMaintenanceTab).
+    async function showCatC71PMDoneModal(equipmentId, tagNumber, equipmentName, currentRunningHours, suggestedLevel = 'PM1') {
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const levelOptions = CAT_C71_PM_ORDER.map(l =>
+        `<option value="${l}" ${l === suggestedLevel ? 'selected' : ''}>${l} — ${CAT_C71_PM_LADDER[l].intervalHm} jam (kumulatif s/d level ini)</option>`
+      ).join('');
+      const body = `
+        <div class="space-y-4">
+          <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
+            <div class="font-semibold text-amber-900 text-sm">${escapeHtml(tagNumber)} — ${escapeHtml(equipmentName)}</div>
+            <div class="text-xs text-amber-700 mt-0.5">Jadwal Caterpillar C7.1 (SEBU9241-10) · Running Hours saat ini: <b>${fmtNumber(currentRunningHours, ' HM')}</b></div>
+          </div>
+          <div>
+            <label class="text-xs font-semibold text-slate-500 uppercase">Level PM yang selesai dikerjakan *</label>
+            <select id="cat-c71-done-level" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-amber-500 mt-1 bg-white">
+              ${levelOptions}
+            </select>
+            <p class="text-[11px] text-slate-400 mt-1">Checklist kumulatif — mencatat level ini selesai otomatis ikut menandai SEMUA level di bawahnya selesai juga (mis. PM4 selesai → PM1+PM2+PM3 ikut ter-update ke HM yang sama), TIDAK menandai level di atasnya.</p>
+          </div>
+          <div>
+            <label class="text-xs font-semibold text-slate-500 uppercase">Running Hours saat PM dilakukan *</label>
+            <input id="cat-c71-done-hm" type="number" value="${currentRunningHours}" min="0" step="0.1"
+              class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-amber-500 mt-1">
+          </div>
+          <div>
+            <label class="text-xs text-slate-500">Tanggal *</label>
+            <input id="cat-c71-done-date" type="date" value="${todayStr}"
+              class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-amber-500 mt-1">
+          </div>
+          <div>
+            <label class="text-xs text-slate-500">Catatan (optional)</label>
+            <input id="cat-c71-done-notes" type="text" placeholder="mis. ganti oli mesin, filter udara, cek valve…"
+              class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-amber-500 mt-1">
+          </div>
+        </div>`;
+      openModal({
+        title: `✅ Catat PM Cat C7.1 Selesai`,
+        body,
+        footer: `<button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 text-sm">Batal</button>
+                 <button id="cat-c71-done-submit-btn" onclick="saveCatC71PMDone('${equipmentId}','${escapeAttr(tagNumber)}','${escapeAttr(equipmentName)}')" class="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold">✅ Simpan</button>`,
+        maxWidth: 'max-w-lg',
+      });
+    }
+    window.showCatC71PMDoneModal = showCatC71PMDoneModal;
+
+    async function saveCatC71PMDone(equipmentId, tagNumber, equipmentName) {
+      // Cegah submit dobel — pola sama dgn savePMDone() (window.__pmDoneSaving).
+      if (window.__catC71PmSaving) return;
+      const level    = document.getElementById('cat-c71-done-level')?.value;
+      const hmVal    = parseFloat(document.getElementById('cat-c71-done-hm')?.value);
+      const dateVal  = document.getElementById('cat-c71-done-date')?.value;
+      const notesVal = (document.getElementById('cat-c71-done-notes')?.value || '').trim();
+
+      if (!CAT_C71_PM_ORDER.includes(level))         { toast('Pilih level PM', 'warn'); return; }
+      if (hmVal == null || isNaN(hmVal) || hmVal < 0) { toast('Isi Running Hours saat PM', 'warn'); return; }
+      if (!dateVal)                                   { toast('Isi tanggal PM', 'warn'); return; }
+
+      window.__catC71PmSaving = true;
+      const btn = document.getElementById('cat-c71-done-submit-btn');
+      if (btn) { btn.disabled = true; btn.classList.add('opacity-50', 'cursor-not-allowed'); btn.textContent = 'Menyimpan…'; }
+
+      try {
+        // Cascade: level X selesai (checklist kumulatif) = semua level di bawahnya ikut
+        // selesai di HM yang sama — insert 1 baris per level dari PM1 s/d X. Append-only,
+        // "terakhir dikerjakan" per level dihitung sbg MAX(done_at_hm) saat render.
+        const idx = CAT_C71_PM_ORDER.indexOf(level);
+        const cascadeLevels = CAT_C71_PM_ORDER.slice(0, idx + 1);
+        const rows = cascadeLevels.map(l => ({
+          equipment_id: equipmentId,
+          level: l,
+          done_at_hm: hmVal,
+          done_at_date: dateVal,
+          done_by: state.user?.id || null,
+          done_by_name: state.profile?.full_name || state.profile?.email || '',
+          notes: l === level ? (notesVal || null) : `(auto-cascade — bagian dari ${level} selesai)`,
+        }));
+        const { error } = await state.supabase.from('cat_c71_pm_log').insert(rows);
+        if (error) throw error;
+
+        toast(`${level} ${tagNumber} selesai dicatat (${cascadeLevels.join('+')} ikut ter-update ke ${fmtNumber(hmVal, ' HM')}).`, 'success');
+        closeModal();
+        // Sama seperti savePMDone() — balik ke Dashboard, bukan refresh in-place, biar
+        // konsisten dgn pola cetak/simpan lain di halaman ini. Buka lagi detail equipment
+        // ini utk lihat tabel status Cat C7.1 yang sudah ter-update.
+        navigate('dashboard');
+      } catch (err) {
+        toast('Gagal simpan: ' + err.message, 'error');
+      } finally {
+        window.__catC71PmSaving = false;
+        if (btn) { btn.disabled = false; btn.classList.remove('opacity-50', 'cursor-not-allowed'); btn.textContent = '✅ Simpan'; }
+      }
+    }
+    window.saveCatC71PMDone = saveCatC71PMDone;
+
     // ============================================================
     // PM PARTS TEMPLATE — page functions
     // ============================================================
@@ -7815,6 +7911,38 @@
         const _nextPmType = (eq.pm_type !== 'plo' && eq.pm_type !== 'time' && eq.pm_interval_hours)
           ? (() => { const t = getPMTypeByCycle(_nextCycle); return (t === 'GOH' && eq.goh_interval_hours) ? 'PM3' : t; })()
           : null;
+
+        // ============================================================
+        // CAT C7.1 khusus (GS-KB150A-CAT / GS-KB150B-CAT) — tracking TERPISAH dari sistem
+        // generik di atas (pm_interval_hours/pm_cycle_count/getPMTypeByCycle sama sekali
+        // tidak dipakai/disentuh di sini). "Terakhir dikerjakan" per level = MAX(done_at_hm)
+        // dari cat_c71_pm_log (cat_c71_pm_log_migration.sql), default 0 kalau belum pernah
+        // dicatat (dihitung dari commissioning). next_due_hm = last_done + interval level itu.
+        // ============================================================
+        const isCatC71 = CAT_C71_PM_TAGS.includes(eq.tag_number);
+        let catC71Info = null;
+        if (isCatC71) {
+          const lastDoneByLevel = {};
+          try {
+            const { data: catLogs } = await state.supabase
+              .from('cat_c71_pm_log').select('level, done_at_hm').eq('equipment_id', eq.id);
+            (catLogs || []).forEach(r => {
+              const h = Number(r.done_at_hm) || 0;
+              if (!(r.level in lastDoneByLevel) || h > lastDoneByLevel[r.level]) lastDoneByLevel[r.level] = h;
+            });
+          } catch (e) { /* tabel cat_c71_pm_log mungkin belum dibuat — anggap belum pernah dicatat */ }
+
+          const levels = CAT_C71_PM_ORDER.map(level => {
+            const lastDone  = lastDoneByLevel[level] || 0;
+            const nextDue   = lastDone + CAT_C71_PM_LADDER[level].intervalHm;
+            const remaining = nextDue - _currentHM;
+            return { level, lastDone, nextDue, remaining };
+          });
+          // "Due berikutnya" keseluruhan = level dengan next_due_hm TERKECIL (paling awal jatuh tempo)
+          const nextLevel = levels.reduce((a, b) => (b.nextDue < a.nextDue ? b : a));
+          catC71Info = { levels, nextLevel };
+        }
+
         // Fallback time-based (opsional) — buat equipment yang jarang jalan, PM wajib walau HM belum tercapai
         let sisaHariPM = null;
         if (eq.pm_max_interval_days && eq.last_pm_date) {
@@ -7824,15 +7952,27 @@
             ? `<span class="text-red-700 font-bold">⚠️ lewat ${Math.abs(daysRem)} hari</span>`
             : `${daysRem} hari (maks ${eq.pm_max_interval_days} hari sejak PM terakhir)`;
         }
+        // Untuk GS-KB150A-CAT/GS-KB150B-CAT: ganti 3 baris "Interval PM/Sisa/Tipe PM Berikutnya"
+        // generik di atas (yang sumbernya pm_interval_hours/pm_cycle_count — jadwal yang SALAH
+        // buat 2 unit ini) dengan angka dari catC71Info. Equipment lain tidak berubah sama sekali.
+        const _maintPmRows = (isCatC71 && catC71Info) ? [
+          ['Jadwal PM', '<span class="font-semibold text-amber-700">Caterpillar C7.1 (Cat SEBU9241-10)</span> — khusus unit ini, terpisah dari sistem PM3-PM6 generik'],
+          ['PM Berikutnya', `<span class="font-bold text-navy">${catC71Info.nextLevel.level}</span> @ ${fmtNumber(catC71Info.nextLevel.nextDue, ' HM')}`],
+          ['Sisa HM ke PM Berikutnya', catC71Info.nextLevel.remaining <= 0
+            ? `<span class="text-red-700 font-bold">⚠️ lewat ${fmtNumber(-catC71Info.nextLevel.remaining, ' HM')}</span>`
+            : fmtNumber(catC71Info.nextLevel.remaining, ' HM')],
+        ] : [
+          [`Interval PM (${u})`, eq.pm_type === 'plo' ? 'PLO — min 3 thn, maks 4 thn' : (eq.pm_interval_hours != null ? fmtNumber(eq.pm_interval_hours, ' ' + u) : null)],
+          [`Sisa ${U} ke PM`, eq.pm_type === 'plo' ? null : sisaPM],
+          ['Tipe PM Berikutnya', _nextPmType ? `<span class="font-bold text-navy">${_nextPmType}</span> @ ${fmtNumber(_nextPmHm, ' HM')}` : null],
+        ];
         const mtSections = [
           ['Maintenance', [
             ['Last Maintenance', fmtDate(eq.last_maintenance_date)],
             ['Last Type', eq.last_maintenance_type ? escapeHtml(eq.last_maintenance_type) : null],
             ['Next Maintenance', fmtDate(eq.next_maintenance_date)],
             ['Tgl PM Terakhir', eq.last_pm_date ? fmtDate(eq.last_pm_date) : null],
-            [`Interval PM (${u})`, eq.pm_type === 'plo' ? 'PLO — min 3 thn, maks 4 thn' : (eq.pm_interval_hours != null ? fmtNumber(eq.pm_interval_hours, ' ' + u) : null)],
-            [`Sisa ${U} ke PM`, eq.pm_type === 'plo' ? null : sisaPM],
-            ['Tipe PM Berikutnya', _nextPmType ? `<span class="font-bold text-navy">${_nextPmType}</span> @ ${fmtNumber(_nextPmHm, ' HM')}` : null],
+            ..._maintPmRows,
             ['Sisa Hari ke PM (time-based)', sisaHariPM],
             ['PLO Jadwal Min', ploInfo ? fmtDate(ploInfo.minDue.toISOString().slice(0,10)) : null],
             ['PLO Batas Maks', ploInfo ? fmtDate(ploInfo.maxDue.toISOString().slice(0,10)) : null],
@@ -7959,9 +8099,52 @@
           }
         } catch (e) { /* tabel cspp_equipment_mapping mungkin belum ada — skip */ }
 
+        // Panel rincian 6 level Cat C7.1 (last done + due berikutnya per level) — hanya
+        // GS-KB150A-CAT/GS-KB150B-CAT. Threshold "due soon" 20% dari interval level itu
+        // sendiri, pola sama dgn ratio due-soon yg dipakai fetchPMDueByHours() di tempat lain.
+        let catC71Html = '';
+        if (isCatC71 && catC71Info) {
+          const rowsHtml = catC71Info.levels.map(l => {
+            const interval = CAT_C71_PM_LADDER[l.level].intervalHm;
+            const isNext = l.level === catC71Info.nextLevel.level;
+            const statusHtml = l.remaining <= 0
+              ? `<span class="text-red-700 font-bold">⚠️ Lewat ${fmtNumber(-l.remaining, ' HM')}</span>`
+              : l.remaining <= interval * 0.2
+                ? `<span class="text-amber-600 font-semibold">🟡 Sisa ${fmtNumber(l.remaining, ' HM')}</span>`
+                : `<span class="text-slate-500">Sisa ${fmtNumber(l.remaining, ' HM')}</span>`;
+            return `<tr class="border-b border-slate-50 last:border-0 ${isNext ? 'bg-amber-50' : ''}">
+              <td class="py-1.5 pr-2 font-semibold ${isNext ? 'text-amber-800' : 'text-slate-700'}">${l.level}${isNext ? ' 👈' : ''}</td>
+              <td class="py-1.5 pr-2 text-slate-500">${fmtNumber(interval, ' HM')}</td>
+              <td class="py-1.5 pr-2 text-slate-500">${l.lastDone > 0 ? fmtNumber(l.lastDone, ' HM') : '— (belum pernah dicatat)'}</td>
+              <td class="py-1.5 pr-2 text-slate-700">${fmtNumber(l.nextDue, ' HM')}</td>
+              <td class="py-1.5">${statusHtml}</td>
+            </tr>`;
+          }).join('');
+          catC71Html = `
+            <div class="mb-4">
+              <h4 class="font-bold text-navy text-base uppercase tracking-wider mb-2">🔧 Jadwal PM Caterpillar C7.1 — per level</h4>
+              <div class="bg-white border border-slate-200 rounded-lg p-4">
+                <p class="text-xs text-slate-400 mb-2">Jadwal resmi pabrikan (Cat SEBU9241-10) — 6 level dilacak independen, terpisah dari sistem PM3-PM6 generik. Kalau semua "Terakhir Dikerjakan" masih "belum pernah dicatat", nilai "Lewat" di bawah dihitung dari 0 jam (commissioning) — bukan berarti unit ini belum pernah dirawat, cuma belum ada catatan di sistem tracking baru ini.</p>
+                <div class="overflow-x-auto">
+                  <table class="w-full text-sm">
+                    <thead><tr class="text-xs text-slate-500 border-b border-slate-100">
+                      <th class="text-left py-1 pr-2 font-semibold">Level</th>
+                      <th class="text-left py-1 pr-2 font-semibold">Interval</th>
+                      <th class="text-left py-1 pr-2 font-semibold">Terakhir Dikerjakan</th>
+                      <th class="text-left py-1 pr-2 font-semibold">Due Berikutnya</th>
+                      <th class="text-left py-1 font-semibold">Status</th>
+                    </tr></thead>
+                    <tbody>${rowsHtml}</tbody>
+                  </table>
+                </div>
+              </div>
+            </div>`;
+        }
+
         container.innerHTML = `
           ${cascadeBadge}
           ${summaryHtml}
+          ${catC71Html}
           ${csppRelevantHtml}
           ${prepHtml}
           ${snoozeBadge}
@@ -7969,19 +8152,20 @@
             <h4 class="font-bold text-slate-800">🛠️ Riwayat Maintenance (${logs.length})</h4>
             <div class="flex gap-2 flex-wrap">
               ${isSrMekanikOrAbove() ? `<button onclick="openHMReviseModal('${eq.id}','${escapeHtml(eq.tag_number).replace(/'/g,"&#39;")}',${Number(eq.running_hours) || 0},'${u}')" class="bg-orange-100 hover:bg-orange-200 text-orange-700 px-3 py-1.5 rounded-lg text-sm font-medium" title="Revisi HM kalau counter di unit beda dgn sistem">✏ Revisi HM</button>` : ''}
-              ${isSrMekanikOrAbove() && eq.pm_type !== 'plo' && eq.pm_type !== 'time' ? `<button onclick="showCatatPMModal('${eq.id}','${escapeHtml(eq.tag_number).replace(/'/g,"&#39;")}','${escapeHtml(eq.nama_equipment || '').replace(/'/g,"&#39;")}',${_currentHM},${_eqInterval},'${_nextPmType || ''}','${_pmUnit}')" class="bg-green-100 hover:bg-green-200 text-green-700 px-3 py-1.5 rounded-lg text-sm font-medium" title="Catat PM selesai — bisa diakses kapan saja, tidak perlu nunggu status due di Dashboard">✅ Catat PM Selesai</button>` : ''}
-              ${eq.pm_type !== 'plo' && eq.pm_type !== 'time' ? `<button onclick="printPMForm('${eq.id}','${escapeHtml(eq.tag_number).replace(/'/g,"&#39;")}','${escapeHtml(eq.nama_equipment || '').replace(/'/g,"&#39;")}',${_currentHM},${pmTierIntervalHm(_nextPmType, _eqInterval)},'${_nextPmType || ''}','${_pmUnit}')" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg text-sm font-medium" title="Cetak form kerja kosong buat dibawa mekanik ke lapangan">🖨 Cetak Form PM</button>` : ''}
-              ${CAT_C71_PM_TAGS.includes(eq.tag_number) ? `
+              ${isSrMekanikOrAbove() && eq.pm_type !== 'plo' && eq.pm_type !== 'time' && !isCatC71 ? `<button onclick="showCatatPMModal('${eq.id}','${escapeHtml(eq.tag_number).replace(/'/g,"&#39;")}','${escapeHtml(eq.nama_equipment || '').replace(/'/g,"&#39;")}',${_currentHM},${_eqInterval},'${_nextPmType || ''}','${_pmUnit}')" class="bg-green-100 hover:bg-green-200 text-green-700 px-3 py-1.5 rounded-lg text-sm font-medium" title="Catat PM selesai — bisa diakses kapan saja, tidak perlu nunggu status due di Dashboard">✅ Catat PM Selesai</button>` : ''}
+              ${eq.pm_type !== 'plo' && eq.pm_type !== 'time' && !isCatC71 ? `<button onclick="printPMForm('${eq.id}','${escapeHtml(eq.tag_number).replace(/'/g,"&#39;")}','${escapeHtml(eq.nama_equipment || '').replace(/'/g,"&#39;")}',${_currentHM},${pmTierIntervalHm(_nextPmType, _eqInterval)},'${_nextPmType || ''}','${_pmUnit}')" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg text-sm font-medium" title="Cetak form kerja kosong buat dibawa mekanik ke lapangan">🖨 Cetak Form PM</button>` : ''}
+              ${isCatC71 ? `
                 <span class="inline-flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1">
                   <select id="cat-c71-lvl-${eq.id}" class="border border-amber-300 rounded-lg text-sm px-2 py-1 bg-white text-amber-900">
-                    <option value="PM1">PM1 — 50 jam</option>
-                    <option value="PM2">PM2 — 250 jam</option>
-                    <option value="PM3">PM3 — 500 jam</option>
-                    <option value="PM4" selected>PM4 — 1000 jam</option>
-                    <option value="PM5">PM5 — 3000 jam</option>
-                    <option value="PM6">PM6 — 6000 jam</option>
+                    <option value="PM1" ${catC71Info.nextLevel.level === 'PM1' ? 'selected' : ''}>PM1 — 50 jam</option>
+                    <option value="PM2" ${catC71Info.nextLevel.level === 'PM2' ? 'selected' : ''}>PM2 — 250 jam</option>
+                    <option value="PM3" ${catC71Info.nextLevel.level === 'PM3' ? 'selected' : ''}>PM3 — 500 jam</option>
+                    <option value="PM4" ${catC71Info.nextLevel.level === 'PM4' ? 'selected' : ''}>PM4 — 1000 jam</option>
+                    <option value="PM5" ${catC71Info.nextLevel.level === 'PM5' ? 'selected' : ''}>PM5 — 3000 jam</option>
+                    <option value="PM6" ${catC71Info.nextLevel.level === 'PM6' ? 'selected' : ''}>PM6 — 6000 jam</option>
                   </select>
                   <button onclick="printCatC71PMForm('${eq.id}','${escapeHtml(eq.tag_number).replace(/'/g,"&#39;")}','${escapeHtml(eq.nama_equipment || '').replace(/'/g,"&#39;")}',${_currentHM},document.getElementById('cat-c71-lvl-${eq.id}').value)" class="bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium" title="Form kerja PM khusus mesin Caterpillar C7.1 (jadwal manual resmi Cat SEBU9241-10, beda dari checklist generik PM3-PM6)">🖨 Form PM Cat C7.1</button>
+                  ${isSrMekanikOrAbove() ? `<button onclick="showCatC71PMDoneModal('${eq.id}','${escapeHtml(eq.tag_number).replace(/'/g,"&#39;")}','${escapeHtml(eq.nama_equipment || '').replace(/'/g,"&#39;")}',${_currentHM},'${catC71Info.nextLevel.level}')" class="bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium" title="Catat level PM Cat C7.1 selesai — cascade otomatis ke level di bawahnya (checklist kumulatif)">✅ Catat PM Cat C7.1 Selesai</button>` : ''}
                 </span>` : ''}
               <button onclick="generateWorkOrderPDF('${eq.id}')" class="bg-purple-100 hover:bg-purple-200 text-purple-700 px-3 py-1.5 rounded-lg text-sm font-medium" title="Generate Work Order PDF utk dibawa ke lapangan">📋 Work Order PDF</button>
               ${isSrMekanikOrAbove() ? `<button onclick="openSnoozeModal('${eq.id}','${escapeHtml(eq.tag_number).replace(/'/g,"&#39;")}')" class="bg-blue-100 hover:bg-blue-200 text-blue-700 px-3 py-1.5 rounded-lg text-sm font-medium" title="Snooze alert sampai action selesai">🔕 Snooze Alert</button>` : ''}
