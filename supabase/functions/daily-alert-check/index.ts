@@ -13,6 +13,13 @@ const SB_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.get
 
 const corsHeaders = { "Access-Control-Allow-Origin": "*" };
 
+// GS-KB150A-CAT/GS-KB150B-CAT pindah ke jadwal Caterpillar C7.1 (index.html
+// CAT_C71_PM_LADDER + tabel cat_c71_pm_log) -- dikecualikan dari due-check
+// pm_interval_hours generik di bawah, sama seperti fix di Dashboard app
+// (fetchPMDueByHours()). Edge function ini terpisah dari index.html (deploy
+// & runtime beda), jadi tag di-hardcode ulang di sini, bukan di-share.
+const CAT_C71_PM_TAGS = ["GS-KB150A-CAT", "GS-KB150B-CAT"];
+
 function fmtDate(d: string | null): string {
   if (!d) return "—";
   return new Date(d).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" });
@@ -89,7 +96,7 @@ serve(async (_req) => {
     (hmEq || []).forEach((e) => {
       const rh = Number(e.running_hours) || 0;
       const pmInt = Number(e.pm_interval_hours) || 0;
-      if (pmInt > 0) {
+      if (pmInt > 0 && !CAT_C71_PM_TAGS.includes(e.tag_number)) {
         const rem = pmInt - (rh - (Number(e.last_pm_hours) || 0));
         // Threshold flat 100 jam — samakan dgn kartu "Mendekati Maintenance PM" di dashboard app
         // (disepakati 2026-08-04, lihat commit 9ac53c5), biar alert & tampilan app konsisten.

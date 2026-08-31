@@ -14,6 +14,13 @@ const SB_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.get
 
 const corsHeaders = { "Access-Control-Allow-Origin": "*" };
 
+// GS-KB150A-CAT/GS-KB150B-CAT pindah ke jadwal Caterpillar C7.1 (index.html
+// CAT_C71_PM_LADDER + tabel cat_c71_pm_log) -- dikecualikan dari due-check
+// pm_interval_hours generik di bawah, sama seperti fix di Dashboard app
+// (fetchPMDueByHours()). Edge function ini terpisah dari index.html (deploy
+// & runtime beda), jadi tag di-hardcode ulang di sini, bukan di-share.
+const CAT_C71_PM_TAGS = ["GS-KB150A-CAT", "GS-KB150B-CAT"];
+
 async function sendTelegram(message: string): Promise<void> {
   await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
     method: "POST",
@@ -62,7 +69,7 @@ serve(async (_req) => {
       const rh = Number(e.running_hours) || 0;
       // PM overdue (threshold: lewat >50 jam)
       const pmInt = Number(e.pm_interval_hours) || 0;
-      if (pmInt > 0 && !isSnoozed(e.id, "PM")) {
+      if (pmInt > 0 && !isSnoozed(e.id, "PM") && !CAT_C71_PM_TAGS.includes(e.tag_number)) {
         const rem = pmInt - (rh - (Number(e.last_pm_hours) || 0));
         if (rem < -50) overdue.push({ ...e, _kind: "PM", _rem: rem });
       }
