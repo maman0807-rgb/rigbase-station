@@ -1058,6 +1058,11 @@
           const _urgency = Math.min(_hmUrgency, _timeUrgency);
           return { ...e, _interval: interval, _actualInterval: interval, _pmType, _nextPmAt: nextPmAt, _used: usedHM, _remaining: remaining, _threshold, _daysRemaining, _dayThreshold, _dueByHM, _dueByTime, _urgency };
         })
+        // GS-KB150A-CAT/GS-KB150B-CAT pindah total ke jadwal Cat C7.1 (CAT_C71_PM_LADDER +
+        // cat_c71_pm_log) — dikecualikan dari widget generik ini (dipakai bareng oleh
+        // "Mendekati Maintenance PM" DAN "PM Berbasis Jam" di Dashboard, keduanya panggil
+        // fungsi ini) supaya tidak ada lagi tombol yang nulis ke tracker lama utk 2 unit ini.
+        .filter(e => !CAT_C71_PM_TAGS.includes(e.tag_number))
         .filter(e => e._dueByHM || e._dueByTime)
         .sort((a, b) => a._urgency - b._urgency)
         .slice(0, 15);
