@@ -15342,12 +15342,35 @@
       if (error) { host.innerHTML = `<div class="text-red-500 text-sm p-4">Gagal memuat: ${escapeHtml(error.message)}</div>`; return; }
       const ids = (laporanRows || []).map(r => r.id);
       const entriesByLaporan = {};
+      // Sumber downtime_events buat badge "CM/TS tanpa Downtime" di list — 1 query batch utk
+      // semua equipment yg muncul di 60 laporan ini, dipakai ulang per-baris di bawah (bukan
+      // query per-laporan). Cek yg sama persis dgn lhSaveFinal(), tapi read-only (list view,
+      // tidak ada confirmDialog di sini).
+      let dtByEquip = {};
       if (ids.length) {
         const { data: allEntries } = await state.supabase
           .from('laporan_harian_entries')
-          .select('laporan_id, status_kerja, progress_pct, follow_up_items')
+          .select('laporan_id, equipment_id, status_kerja, progress_pct, follow_up_items')
           .in('laporan_id', ids);
         (allEntries || []).forEach(e => { (entriesByLaporan[e.laporan_id] = entriesByLaporan[e.laporan_id] || []).push(e); });
+        const cmTsEqIds = [...new Set((allEntries || [])
+          .filter(e => e.equipment_id && (e.status_kerja === 'CM' || e.status_kerja === 'TS'))
+          .map(e => e.equipment_id))];
+        if (cmTsEqIds.length) {
+          const { data: dtRows } = await state.supabase.from('downtime_events')
+            .select('equipment_id, start_at, end_at').in('equipment_id', cmTsEqIds);
+          (dtRows || []).forEach(d => { (dtByEquip[d.equipment_id] = dtByEquip[d.equipment_id] || []).push(d); });
+        }
+      }
+      // ±1 hari dari tanggal laporan, sama toleransi dgn lhSaveFinal().
+      function lhHasDowntimeMatch(equipmentId, tanggal) {
+        const rows = dtByEquip[equipmentId]; if (!rows) return false;
+        const reportDateMs = new Date(tanggal).getTime(), dayMs = 86400000;
+        return rows.some(d => {
+          const s = new Date(d.start_at).getTime();
+          const en = d.end_at ? new Date(d.end_at).getTime() : Date.now();
+          return s <= reportDateMs + dayMs && en >= reportDateMs - dayMs;
+        });
       }
       const draftCount = (laporanRows || []).filter(r => r.status === 'draft').length;
       host.innerHTML = `
@@ -15372,6 +15395,8 @@
         const progs = entries.map(e => Number(e.progress_pct)).filter(n => !isNaN(n));
         const avgProg = progs.length ? Math.round(progs.reduce((a, b) => a + b, 0) / progs.length) : null;
         const followCount = entries.reduce((a, e) => a + ((e.follow_up_items || []).length), 0);
+        const cmTsGapCount = entries.filter(e => e.equipment_id && (e.status_kerja === 'CM' || e.status_kerja === 'TS')
+          && !lhHasDowntimeMatch(e.equipment_id, r.tanggal)).length;
         return `<div onclick="lhOpenDetail('${r.id}')" class="bg-white rounded-xl border border-slate-200 p-4 cursor-pointer hover:border-navy/40 hover:shadow-sm transition flex items-center justify-between gap-3">
           <div>
             <div class="flex items-center gap-2 flex-wrap">
@@ -15381,6 +15406,7 @@
             </div>
             <div class="text-xs text-slate-400 mt-1">${entries.length} unit${cmCount ? ` · ${cmCount} CM/TS aktif` : ''}${avgProg !== null ? ` · rata-rata progress ${avgProg}%` : ''}${followCount ? ` · <span class="text-red-500 font-semibold">${followCount} follow-up</span>` : ''}</div>
             ${r.verified_by_name ? `<div class="text-[11px] text-emerald-600 mt-0.5">✅ Diverifikasi oleh ${escapeHtml(r.verified_by_name)}</div>` : (r.status === 'draft' ? `<div class="text-[11px] text-amber-600 mt-0.5">⏳ Menunggu verifikasi</div>` : '')}
+            ${cmTsGapCount ? `<div class="text-[11px] text-red-600 mt-0.5">⚠️ ${cmTsGapCount} CM/TS tanpa event Downtime</div>` : ''}
           </div>
           <span class="text-slate-300">›</span>
         </div>`;
@@ -15410,6 +15436,26 @@
       if (e1 || e2) { host.innerHTML = `<div class="text-red-500 text-sm p-4">Gagal memuat: ${escapeHtml((e1 || e2).message)}</div>`; return; }
       lhState.header = header;
       lhState.entries = (entries || []).map(e => ({ ...e, rh: e.rh ?? '', progress_pct: e.progress_pct ?? '', checklist: e.checklist || [], follow_up_items: e.follow_up_items || [] }));
+
+      // Badge "CM/TS tanpa Downtime" di detail — cek sama persis dgn lhSaveFinal()/lhRenderList(),
+      // read-only (tidak ada confirmDialog di sini, cuma tampilan).
+      lhState.cmTsGap = [];
+      const cmTsEqIds = [...new Set(lhState.entries
+        .filter(e => e.equipment_id && (e.status_kerja === 'CM' || e.status_kerja === 'TS'))
+        .map(e => e.equipment_id))];
+      if (cmTsEqIds.length && header?.tanggal) {
+        const { data: dtRows } = await state.supabase.from('downtime_events')
+          .select('equipment_id, start_at, end_at').in('equipment_id', cmTsEqIds);
+        const reportDateMs = new Date(header.tanggal).getTime(), dayMs = 86400000;
+        const hasMatch = (equipmentId) => (dtRows || []).some(d => {
+          if (d.equipment_id !== equipmentId) return false;
+          const s = new Date(d.start_at).getTime();
+          const en = d.end_at ? new Date(d.end_at).getTime() : Date.now();
+          return s <= reportDateMs + dayMs && en >= reportDateMs - dayMs;
+        });
+        lhState.cmTsGap = lhState.entries.filter(e =>
+          e.equipment_id && (e.status_kerja === 'CM' || e.status_kerja === 'TS') && !hasMatch(e.equipment_id));
+      }
       lhRenderEditor(host);
     }
 
@@ -15429,6 +15475,12 @@
             ${header?.status ? `<div class="text-xs text-slate-400">Sumber: ${header.sumber === 'bot_telegram' ? '🤖 Telegram' : header.sumber === 'bot_whatsapp' ? '🤖 WhatsApp' : '✍️ Manual'} · ${header.status === 'draft' ? 'Draft' : 'Final'}${header.verified_by_name ? ` · ✅ Diverifikasi oleh <b>${escapeHtml(header.verified_by_name)}</b> (${fmtDate(header.verified_at)})` : ''}</div>` : ''}
             ${lhState.forceEdit ? `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">MODE EDIT</span>` : ''}
           </div>
+          ${(lhState.cmTsGap && lhState.cmTsGap.length) ? `<div class="bg-red-50 border border-red-200 rounded-lg px-4 py-2.5 text-xs text-red-700">
+            ⚠️ <b>${lhState.cmTsGap.length} unit CM/TS tanpa event Downtime</b> (±1 hari dari tanggal laporan ini): ${lhState.cmTsGap.map(e => {
+              const eq = (lhEquipmentList || []).find(x => x.id === e.equipment_id);
+              return `${escapeHtml(eq?.tag_number || eq?.nama_equipment || '-')} (${e.status_kerja})`;
+            }).join(', ')}. Downtime yang tidak dibuka di menu Downtime tidak ikut mengurangi Availability.
+          </div>` : ''}
           ${header?.raw_text ? `<details class="bg-slate-50 rounded-xl border border-slate-200 p-3 text-xs text-slate-500">
             <summary class="cursor-pointer font-semibold">📄 Teks asli laporan</summary>
             <pre class="whitespace-pre-wrap mt-2 text-slate-600">${escapeHtml(header.raw_text)}</pre>
