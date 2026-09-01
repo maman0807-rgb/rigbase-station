@@ -15642,6 +15642,46 @@
         if (!okAnomaly) return;
       }
 
+      // Pengingat CM/TS tanpa event Downtime — Availability (renderAvailabilityPage) dihitung
+      // MURNI dari tabel downtime_events, TIDAK PERNAH baca status_kerja Laporan Harian sama
+      // sekali. Cross-check historis 2026-09-01 nemu 45/241 (~19%) entri CM/TS final tanpa
+      // downtime_events yang overlap tanggalnya, 25 equipment terdampak -- Availability equipment
+      // itu jadi kelihatan lebih baik dari kenyataan. Ini SENGAJA reminder, BUKAN blocker/auto-
+      // create: SPV kadang memang baru/sudah buka Downtime event terpisah (alur normal, menu
+      // Downtime beda dari Laporan Harian), auto-create otomatis berisiko downtime kehitung
+      // dobel. Window toleransi ±1 hari dari tanggal laporan, sama dengan analisa historis yang
+      // dipakai memutuskan fitur ini perlu dibangun -- lihat project_laporan_harian_verifikasi memory.
+      const cmTsEntries = lhState.entries.filter(e => e.equipment_id && (e.status_kerja === 'CM' || e.status_kerja === 'TS'));
+      if (cmTsEntries.length) {
+        const eqIds = [...new Set(cmTsEntries.map(e => e.equipment_id))];
+        const { data: dtRows } = await state.supabase.from('downtime_events')
+          .select('equipment_id, start_at, end_at').in('equipment_id', eqIds);
+        const reportDateMs = new Date(tanggal).getTime();
+        const dayMs = 86400000;
+        const cmTsNoDowntime = cmTsEntries.filter(e => {
+          const hasDt = (dtRows || []).some(d => {
+            if (d.equipment_id !== e.equipment_id) return false;
+            const s = new Date(d.start_at).getTime();
+            const en = d.end_at ? new Date(d.end_at).getTime() : Date.now();
+            return s <= reportDateMs + dayMs && en >= reportDateMs - dayMs;
+          });
+          return !hasDt;
+        });
+        if (cmTsNoDowntime.length) {
+          const list = cmTsNoDowntime.map(e => {
+            const eq = (lhEquipmentList || []).find(x => x.id === e.equipment_id);
+            return `${eq?.tag_number || eq?.nama_equipment || '-'} (${e.status_kerja})`;
+          }).join(', ');
+          const okCmTs = await confirmDialog({
+            title: '⚠️ CM/TS Tanpa Event Downtime',
+            message: `${cmTsNoDowntime.length} unit dilaporkan CM/TS tapi belum ada event Downtime yang tercatat (±1 hari dari tanggal laporan): ${list}. Downtime yang tidak dibuka di menu Downtime TIDAK ikut mengurangi Availability. Kalau memang ada downtime riil, buka event-nya terpisah di menu Downtime. Kalau cuma pekerjaan ringan tanpa alat berhenti, aman dilanjutkan.`,
+            confirmText: 'Lanjutkan',
+            cancelText: 'Batal, Cek Dulu',
+          });
+          if (!okCmTs) return;
+        }
+      }
+
       const isEditingFinal = lhState.header?.status === 'final';
       const ok = await confirmDialog({
         title: isEditingFinal ? 'Simpan Perubahan' : 'Konfirmasi & Simpan Final',
