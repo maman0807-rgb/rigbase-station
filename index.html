@@ -15288,7 +15288,7 @@
     async function lhRenderList(host) {
       const { data: laporanRows, error } = await state.supabase
         .from('laporan_harian')
-        .select('id, tanggal, tim, status, sumber, created_at')
+        .select('id, tanggal, tim, status, sumber, created_at, verified_by_name, verified_at')
         .order('tanggal', { ascending: false })
         .limit(60);
       if (error) { host.innerHTML = `<div class="text-red-500 text-sm p-4">Gagal memuat: ${escapeHtml(error.message)}</div>`; return; }
@@ -15332,6 +15332,7 @@
               <span class="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">${r.sumber === 'bot_telegram' ? '🤖 Telegram' : r.sumber === 'bot_whatsapp' ? '🤖 WhatsApp' : '✍️ Manual'}</span>
             </div>
             <div class="text-xs text-slate-400 mt-1">${entries.length} unit${cmCount ? ` · ${cmCount} CM/TS aktif` : ''}${avgProg !== null ? ` · rata-rata progress ${avgProg}%` : ''}${followCount ? ` · <span class="text-red-500 font-semibold">${followCount} follow-up</span>` : ''}</div>
+            ${r.verified_by_name ? `<div class="text-[11px] text-emerald-600 mt-0.5">✅ Diverifikasi oleh ${escapeHtml(r.verified_by_name)}</div>` : (r.status === 'draft' ? `<div class="text-[11px] text-amber-600 mt-0.5">⏳ Menunggu verifikasi</div>` : '')}
           </div>
           <span class="text-slate-300">›</span>
         </div>`;
@@ -15377,7 +15378,7 @@
               <label class="block text-xs font-semibold text-slate-500 uppercase mb-1">Tanggal</label>
               <input type="date" id="lh-tanggal" value="${header?.tanggal || new Date().toISOString().slice(0, 10)}" ${isCreate ? '' : 'disabled'} class="border border-slate-300 rounded-lg px-3 py-1.5 text-sm">
             </div>
-            ${header?.status ? `<div class="text-xs text-slate-400">Sumber: ${header.sumber === 'bot_telegram' ? '🤖 Telegram' : header.sumber === 'bot_whatsapp' ? '🤖 WhatsApp' : '✍️ Manual'} · ${header.status === 'draft' ? 'Draft' : 'Final'}</div>` : ''}
+            ${header?.status ? `<div class="text-xs text-slate-400">Sumber: ${header.sumber === 'bot_telegram' ? '🤖 Telegram' : header.sumber === 'bot_whatsapp' ? '🤖 WhatsApp' : '✍️ Manual'} · ${header.status === 'draft' ? 'Draft' : 'Final'}${header.verified_by_name ? ` · ✅ Diverifikasi oleh <b>${escapeHtml(header.verified_by_name)}</b> (${fmtDate(header.verified_at)})` : ''}</div>` : ''}
             ${lhState.forceEdit ? `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">MODE EDIT</span>` : ''}
           </div>
           ${header?.raw_text ? `<details class="bg-slate-50 rounded-xl border border-slate-200 p-3 text-xs text-slate-500">
@@ -15603,15 +15604,24 @@
       });
       if (!ok) return;
       try {
+        // Siapa yang klik "Konfirmasi & Simpan Final"/"Simpan Perubahan" = pihak yang
+        // memverifikasi laporan ini cocok dgn kondisi lapangan (SPV/admin sesuai pembagian
+        // peran) — dicatat tiap kali disimpan final, termasuk saat re-edit laporan yg sudah
+        // final, bukan cuma sekali di awal. Lihat laporan_harian_verifikasi_migration.sql.
+        const verifierFields = {
+          verified_by: state.user.id,
+          verified_by_name: state.profile?.full_name || state.profile?.email || '',
+          verified_at: new Date().toISOString(),
+        };
         let laporanId = lhState.laporanId;
         if (lhState.mode === 'create') {
           const { data: newHeader, error: eh } = await state.supabase.from('laporan_harian')
-            .insert({ tanggal, tim: 'RAM Hoist & Heavy Equipment', status: 'final', sumber: 'manual_app', created_by: state.user.id })
+            .insert({ tanggal, tim: 'RAM Hoist & Heavy Equipment', status: 'final', sumber: 'manual_app', created_by: state.user.id, ...verifierFields })
             .select().single();
           if (eh) throw eh;
           laporanId = newHeader.id;
         } else {
-          const { error: eh } = await state.supabase.from('laporan_harian').update({ status: 'final' }).eq('id', laporanId);
+          const { error: eh } = await state.supabase.from('laporan_harian').update({ status: 'final', ...verifierFields }).eq('id', laporanId);
           if (eh) throw eh;
           const { error: ed } = await state.supabase.from('laporan_harian_entries').delete().eq('laporan_id', laporanId);
           if (ed) throw ed;
