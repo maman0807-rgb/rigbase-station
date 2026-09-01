@@ -1001,12 +1001,13 @@
       if (idx === -1) return [];
       return CAT_C71_PM_ORDER.slice(0, idx + 1).flatMap(l => CAT_C71_PM_LADDER[l].items);
     }
-    // Item standalone (2000h, 12000h) — TIDAK berjenjang/cascade ke ladder di atas, belum
-    // ada tombol cetak UI khusus (data dulu, tracking due-date menyusul — lihat Prioritas 2).
-    // Insulation Test (4500 ATAU 8000 jam) SENGAJA belum dimasukkan — Maman belum memilih
-    // salah satu interval-nya.
+    // Item standalone (2000h, 4500h, 12000h) — TIDAK berjenjang/cascade ke ladder di atas,
+    // belum ada tombol cetak UI khusus (data dulu, tracking due-date menyusul — lihat Prioritas 2).
+    // Insulation Test: interval 4500 jam dipilih Maman 2026-09-01 (manual Cat SEBU9241-10
+    // menawarkan 4500 ATAU 8000 jam tergantung kondisi unit — 8000 tidak dipakai).
     const CAT_C71_STANDALONE_EXTRAS = {
       2000:  ['Cek alternator (Alternator - Inspect)', 'Cek dudukan mesin (Engine Mounts - Inspect)', 'Cek starting motor (Starting Motor - Inspect)', 'Cek turbocharger (Turbocharger - Inspect)'],
+      4500:  ['Insulation Test (Generator Insulation Resistance - Test)'],
       12000: ['Ganti total coolant / ELC (Cooling System Coolant (ELC) - Change)'],
     };
 
