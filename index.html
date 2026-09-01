@@ -9001,7 +9001,7 @@
         const childIds = children.map(c => c.id);
         const childById = Object.fromEntries(children.map(c => [c.id, c]));
 
-        const [muts, loans, dt, mlog, lhPmEntries, childMuts] = await Promise.all([
+        const [muts, loans, dt, mlog, lhPmEntries, childMuts, catC71Logs] = await Promise.all([
           fetchMutationLog(eq.id),
           fetchLoanHistory(eq.id).catch(() => []),
           state.supabase.from('downtime_events').select('*').eq('equipment_id', eq.id)
@@ -9020,6 +9020,13 @@
           // Mutasi children — sekali query semua sekaligus
           childIds.length
             ? state.supabase.from('mutation_log').select('*').in('equipment_id', childIds)
+                .then(r => r.data || []).catch(() => [])
+            : Promise.resolve([]),
+          // Sumber ke-4: PM Cat C7.1 (GS-KB150A-CAT/GS-KB150B-CAT saja, tabel cat_c71_pm_log
+          // baru ada sejak 2026-08-31). History tab sebelumnya cuma tahu 3 sumber PM di atas,
+          // jadi PM Cat C7.1 tidak pernah muncul di sini sampai ditemukan Maman 2026-09-01.
+          CAT_C71_PM_TAGS.includes(eq.tag_number)
+            ? state.supabase.from('cat_c71_pm_log').select('*').eq('equipment_id', eq.id)
                 .then(r => r.data || []).catch(() => [])
             : Promise.resolve([]),
         ]);
@@ -9131,6 +9138,36 @@
             color: 'bg-emerald-500',
           });
         });
+        // Entry PM Cat C7.1 (sumber ke-4, GS-KB150A-CAT/GS-KB150B-CAT saja) — 1 aksi user
+        // (showCatC71PMDoneModal → Simpan) insert banyak baris cascade sekaligus (semua level
+        // s/d yg dipilih, di done_at_hm yg sama, lihat saveCatC71PMDone()). Group per done_at_hm
+        // supaya 1 aksi = 1 baris timeline, diwakili level TERTINGGI dlm grup (= level yg
+        // benar2 dipilih user; level di bawahnya cuma "ikutan" cascade, bukan aksi terpisah).
+        if (catC71Logs.length) {
+          const catGroups = {};
+          catC71Logs.forEach(r => {
+            const key = `${r.done_at_hm}_${r.done_at_date}`;
+            (catGroups[key] = catGroups[key] || []).push(r);
+          });
+          Object.values(catGroups).forEach(rows => {
+            const primary = rows.reduce((a, b) =>
+              CAT_C71_PM_ORDER.indexOf(b.level) > CAT_C71_PM_ORDER.indexOf(a.level) ? b : a);
+            const cascaded = rows.map(r => r.level).sort((a, b) => CAT_C71_PM_ORDER.indexOf(a) - CAT_C71_PM_ORDER.indexOf(b));
+            const catDetail = [];
+            if (primary.done_by_name) catDetail.push(`👷 Oleh: <b>${escapeHtml(primary.done_by_name)}</b>`);
+            if (primary.notes) catDetail.push(`📝 ${escapeHtml(primary.notes)}`);
+            if (cascaded.length > 1) catDetail.push(`🔗 Cascade: ${cascaded.join('+')} ikut ter-update ke HM yang sama`);
+            events.push({
+              group: 'pm_cat71', kind: 'pm_cat71',
+              date: primary.done_at_date,
+              title: `✅ ${primary.level} Cat C7.1 Selesai @ ${fmtNumber(primary.done_at_hm, ' HM')}`,
+              detail: catDetail.join('<br>') || null,
+              detailIsHtml: true,
+              color: 'bg-amber-600',
+            });
+          });
+        }
+
         // Downtime & Perbaikan — pecah per milestone (DOWN → part datang/dipasang → SELESAI)
         dt.forEach(d => {
           const cat = (typeof DT_CAT !== 'undefined' && DT_CAT[d.category]) || d.category || 'Lainnya';
@@ -9294,7 +9331,7 @@
       const h = window.__hist, container = window.__histHost;
       if (!h || !container) return;
       const all = h.events;
-      const cnt = { all: all.length, mutasi: 0, pinjam: 0, downtime: 0, pm: 0, maintenance_manual: 0, pm_lh: 0 };
+      const cnt = { all: all.length, mutasi: 0, pinjam: 0, downtime: 0, pm: 0, maintenance_manual: 0, pm_lh: 0, pm_cat71: 0 };
       all.forEach(e => { cnt[e.group] = (cnt[e.group] || 0) + 1; });
       const ev = historyFilter === 'all' ? all : all.filter(e => e.group === historyFilter);
 
@@ -9306,6 +9343,7 @@
           <div class="flex items-center gap-1.5 flex-wrap">
             ${chip('all', 'Semua')}
             ${chip('pm', 'PM')}
+            ${cnt.pm_cat71 ? chip('pm_cat71', 'PM Cat C7.1') : ''}
             ${chip('pm_lh', 'PM (Laporan Harian)')}
             ${chip('maintenance_manual', 'Maintenance Log (manual)')}
             ${chip('mutasi', 'Mutasi')}
@@ -9359,7 +9397,7 @@
       const all = h.events;
       const ev = historyFilter === 'all' ? all : all.filter(e => e.group === historyFilter);
       // Pisahkan downtime real vs gejala (early warning) — bukan kelas yg sama
-      const cnt = { mutasi: 0, pinjam: 0, downtime: 0, gejala: 0, pm: 0, maintenance_manual: 0, pm_lh: 0 };
+      const cnt = { mutasi: 0, pinjam: 0, downtime: 0, gejala: 0, pm: 0, maintenance_manual: 0, pm_lh: 0, pm_cat71: 0 };
       all.forEach(e => {
         if (e.group === 'downtime') {
           if (e.subgroup === 'gejala') cnt.gejala++;
@@ -9368,12 +9406,13 @@
           cnt[e.group] = (cnt[e.group] || 0) + 1;
         }
       });
-      const grpLabel = { mutasi: 'Mutasi', pinjam: 'Pinjaman', downtime: 'Downtime', gejala: 'Gejala', pm: 'PM', maintenance_manual: 'Maintenance Log (manual)', pm_lh: 'PM (Laporan Harian)' };
+      const grpLabel = { mutasi: 'Mutasi', pinjam: 'Pinjaman', downtime: 'Downtime', gejala: 'Gejala', pm: 'PM', maintenance_manual: 'Maintenance Log (manual)', pm_lh: 'PM (Laporan Harian)', pm_cat71: 'PM Cat C7.1' };
       const filterLabel = historyFilter === 'all' ? 'Semua Kejadian' : grpLabel[historyFilter];
 
       const summary = `<div class="cards">
         <div class="card navy"><div class="num">${ev.length}</div><div class="lbl">Total Kejadian</div></div>
         <div class="card green"><div class="num">${cnt.pm}</div><div class="lbl">PM Selesai</div></div>
+        ${cnt.pm_cat71 ? `<div class="card green"><div class="num">${cnt.pm_cat71}</div><div class="lbl">PM Cat C7.1</div></div>` : ''}
         <div class="card green"><div class="num">${cnt.pm_lh}</div><div class="lbl">PM (Laporan Harian)</div></div>
         <div class="card navy"><div class="num">${cnt.maintenance_manual}</div><div class="lbl">Maintenance Log (manual)</div></div>
         <div class="card navy"><div class="num">${cnt.mutasi}</div><div class="lbl">Mutasi</div></div>
