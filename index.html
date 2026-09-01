@@ -7994,12 +7994,19 @@
         let catC71Info = null;
         if (isCatC71) {
           const lastDoneByLevel = {};
+          let lastDoneDate = null;
           try {
             const { data: catLogs } = await state.supabase
-              .from('cat_c71_pm_log').select('level, done_at_hm').eq('equipment_id', eq.id);
+              .from('cat_c71_pm_log').select('level, done_at_hm, done_at_date').eq('equipment_id', eq.id);
             (catLogs || []).forEach(r => {
               const h = Number(r.done_at_hm) || 0;
               if (!(r.level in lastDoneByLevel) || h > lastDoneByLevel[r.level]) lastDoneByLevel[r.level] = h;
+              // "Tgl PM Terakhir" utk unit ini HARUS dari log Cat C7.1 (tanggal PM nyata terakhir
+              // dicatat), BUKAN eq.last_pm_date generik — saveCatC71PMDone() tidak pernah
+              // menyentuh kolom itu, jadi kalau dibiarkan baca eq.last_pm_date, tanggalnya
+              // beku di histori generik lama (ditemukan Maman 2026-09-01, GS-KB150B-CAT
+              // masih nunjukkin 04 Agu meski PM4 sudah dicatat 01 Sep).
+              if (r.done_at_date && (!lastDoneDate || r.done_at_date > lastDoneDate)) lastDoneDate = r.done_at_date;
             });
           } catch (e) { /* tabel cat_c71_pm_log mungkin belum dibuat — anggap belum pernah dicatat */ }
 
@@ -8011,7 +8018,7 @@
           });
           // "Due berikutnya" keseluruhan = level dengan next_due_hm TERKECIL (paling awal jatuh tempo)
           const nextLevel = levels.reduce((a, b) => (b.nextDue < a.nextDue ? b : a));
-          catC71Info = { levels, nextLevel };
+          catC71Info = { levels, nextLevel, lastDoneDate };
         }
 
         // Fallback time-based (opsional) — buat equipment yang jarang jalan, PM wajib walau HM belum tercapai
@@ -8042,7 +8049,9 @@
             ['Last Maintenance', fmtDate(eq.last_maintenance_date)],
             ['Last Type', eq.last_maintenance_type ? escapeHtml(eq.last_maintenance_type) : null],
             ['Next Maintenance', fmtDate(eq.next_maintenance_date)],
-            ['Tgl PM Terakhir', eq.last_pm_date ? fmtDate(eq.last_pm_date) : null],
+            ['Tgl PM Terakhir', isCatC71
+              ? (catC71Info?.lastDoneDate ? fmtDate(catC71Info.lastDoneDate) : null)
+              : (eq.last_pm_date ? fmtDate(eq.last_pm_date) : null)],
             ..._maintPmRows,
             ['Sisa Hari ke PM (time-based)', sisaHariPM],
             ['PLO Jadwal Min', ploInfo ? fmtDate(ploInfo.minDue.toISOString().slice(0,10)) : null],
