@@ -956,7 +956,7 @@
     // ============================================================
     // Jadwal resmi pabrikan (Cat SEBU9241-10, Prime Power Schedule), dikonfirmasi Maman.
     // SENGAJA struktur data TERPISAH dari PM_CHECKLIST_INCREMENTAL/getPMTypeByCycle di
-    // atas — rasio interval manual Cat ini (1:5:10:20:60:120 dari basis 50 jam) TIDAK
+    // atas — rasio interval manual Cat ini (1:5:10:20:40:60 dari basis 50 jam) TIDAK
     // bisa direpresentasikan lewat rasio tetap getPMTypeByCycle (1:2:4:8:40), jadi TIDAK
     // menyentuh pm_interval_hours/pm_cycle_count/tier PM3-PM6 generik sama sekali —
     // equipment lain (dan checklist SOP_PM3_PM4_PM5_PM6.md yang sudah disahkan) tidak
@@ -985,12 +985,12 @@
         'Cek/setel celah klep mesin (Engine Valve Lash - Inspect/Adjust)',
         'Cek rotating rectifier (Rotating Rectifier - Check)',
       ] },
-      PM5: { intervalHm: 3000, items: [
+      PM5: { intervalHm: 2000, items: [
         'Tes/ganti nozzle injeksi BBM (Fuel Injection Nozzles - Test/Exchange)',
         'Cek water pump (Water Pump - Inspect)',
         'Ganti thermostat / water temperature regulator (Cooling System Water Temperature Regulator - Replace)',
       ] },
-      PM6: { intervalHm: 6000, items: [
+      PM6: { intervalHm: 3000, items: [
         'Tambah coolant extender / ELC (Cooling System Coolant Extender (ELC) - Add)',
       ] },
     };
@@ -8241,8 +8241,8 @@
                     <option value="PM2" ${catC71Info.nextLevel.level === 'PM2' ? 'selected' : ''}>PM2 — 250 jam</option>
                     <option value="PM3" ${catC71Info.nextLevel.level === 'PM3' ? 'selected' : ''}>PM3 — 500 jam</option>
                     <option value="PM4" ${catC71Info.nextLevel.level === 'PM4' ? 'selected' : ''}>PM4 — 1000 jam</option>
-                    <option value="PM5" ${catC71Info.nextLevel.level === 'PM5' ? 'selected' : ''}>PM5 — 3000 jam</option>
-                    <option value="PM6" ${catC71Info.nextLevel.level === 'PM6' ? 'selected' : ''}>PM6 — 6000 jam</option>
+                    <option value="PM5" ${catC71Info.nextLevel.level === 'PM5' ? 'selected' : ''}>PM5 — 2000 jam</option>
+                    <option value="PM6" ${catC71Info.nextLevel.level === 'PM6' ? 'selected' : ''}>PM6 — 3000 jam</option>
                   </select>
                   <button onclick="printCatC71PMForm('${eq.id}','${escapeHtml(eq.tag_number).replace(/'/g,"&#39;")}','${escapeHtml(eq.nama_equipment || '').replace(/'/g,"&#39;")}',${_currentHM},document.getElementById('cat-c71-lvl-${eq.id}').value)" class="bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium" title="Form kerja PM khusus mesin Caterpillar C7.1 (jadwal manual resmi Cat SEBU9241-10, beda dari checklist generik PM3-PM6)">🖨 Form PM Cat C7.1</button>
                   ${isSrMekanikOrAbove() ? `<button onclick="showCatC71PMDoneModal('${eq.id}','${escapeHtml(eq.tag_number).replace(/'/g,"&#39;")}','${escapeHtml(eq.nama_equipment || '').replace(/'/g,"&#39;")}',${_currentHM},'${catC71Info.nextLevel.level}')" class="bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium" title="Catat level PM Cat C7.1 selesai — cascade otomatis ke level di bawahnya (checklist kumulatif)">✅ Catat PM Cat C7.1 Selesai</button>` : ''}
@@ -14737,7 +14737,7 @@
       const div = document.createElement('div');
       div.className = 'page space-y-4';
       const pillars = [['reliability', '🛡️ Reliability'], ['availability', '🟢 Availability'], ['trend', '📈 Trend RAM'], ['maintenance', '🛠️ Maintenance'], ['kelayakan', '📋 Kelayakan']];
-      if (state.profile?.role === 'admin') pillars.push(['laporan', '📝 Laporan Harian'], ['analisa', '📊 Analisa Laporan']);
+      if (state.profile?.role === 'admin') pillars.push(['laporan', '📝 Laporan Harian'], ['analisa', '📊 Analisa Laporan'], ['plo', '📄 Laporan PLO']);
       div.innerHTML = `
         <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           <div class="flex border-b border-slate-200 overflow-x-auto" id="ram-tabs">
@@ -14759,6 +14759,7 @@
       if (t === 'kelayakan') { host.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat…</div>'; renderKelayakanPage(host); return; }
       if (t === 'laporan') { host.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat…</div>'; renderLaporanHarianPage(host); return; }
       if (t === 'analisa') { host.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat…</div>'; renderAnalisaLaporanPage(host); return; }
+      if (t === 'plo') { renderPloReportPage(host); return; }
       // Pilar Reliability → sub-tab Overview / Stress / FMEA / CSPP
       const sub = [['overview', '📊 Overview'], ['stress', '🚛 Stress'], ['fmea', '⚠️ FMEA'], ['cspp', '📦 CSPP']];
       host.innerHTML = `
@@ -16014,6 +16015,237 @@
       lhOpenDetail(laporanId);
     }
     window.analisaOpenDetail = analisaOpenDetail;
+
+    // ============================================================
+    // LAPORAN PLO — kompilasi daily maintenance per rig utk syarat
+    // Persetujuan Layak Operasi. Digabung dari 3 sumber histori yang
+    // sudah ada (bukan tabel baru): laporan_harian_entries (PM/CM/TS
+    // final), maintenance_log (manual), downtime_events (perbaikan
+    // riil). Kolom mengikuti template MOM existing tim RAM: Lokasi,
+    // Information/Decision/Follow Up, Start, Finish, Responsible,
+    // Status, Remarks/Next Action — kolom RACI/RKAP/No WO di template
+    // asli sengaja di-drop krn belum ada padanan datanya di sistem.
+    // ============================================================
+    let ploState = { unitId: '', start: '', end: '', rows: null, unitName: '' };
+
+    async function renderPloReportPage(host) {
+      host = host || document.getElementById('ram-content');
+      if (!host) return;
+      const rigs = (state.parentUnits || []).filter(u => u.type === 'Rig');
+      if (!ploState.start) {
+        const d = new Date(); d.setMonth(d.getMonth() - 1);
+        ploState.start = d.toISOString().slice(0, 10);
+        ploState.end = new Date().toISOString().slice(0, 10);
+      }
+      host.innerHTML = `
+        <div class="space-y-4">
+          <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+            <h3 class="text-base font-bold text-navy mb-1">📄 Laporan Daily Maintenance (PLO)</h3>
+            <p class="text-xs text-slate-500 mb-3">Kompilasi riwayat maintenance (PM/CM/TS dari Laporan Harian, Maintenance Log, dan Downtime) per rig — untuk lampiran syarat Persetujuan Layak Operasi.</p>
+            <div class="flex flex-wrap items-end gap-3">
+              <div>
+                <label class="block text-xs font-semibold text-slate-600 mb-1">Rig</label>
+                <select id="plo-rig" class="border border-slate-300 rounded-lg text-sm px-3 py-2 bg-white min-w-[220px]">
+                  <option value="">— Pilih Rig —</option>
+                  ${rigs.map(u => `<option value="${u.id}" ${String(ploState.unitId) === String(u.id) ? 'selected' : ''}>${escapeHtml(u.name)}</option>`).join('')}
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-600 mb-1">Dari Tanggal</label>
+                <input id="plo-start" type="date" value="${ploState.start}" class="border border-slate-300 rounded-lg text-sm px-3 py-2">
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-600 mb-1">Sampai Tanggal</label>
+                <input id="plo-end" type="date" value="${ploState.end}" class="border border-slate-300 rounded-lg text-sm px-3 py-2">
+              </div>
+              <button onclick="ploGenerate()" class="bg-navy hover:opacity-90 text-white px-4 py-2 rounded-lg text-sm font-semibold">🔍 Generate</button>
+              ${ploState.rows ? `<button onclick="ploPrint()" class="bg-safety hover:opacity-90 text-white px-4 py-2 rounded-lg text-sm font-semibold">🖨 Cetak / PDF</button>` : ''}
+            </div>
+          </div>
+          <div id="plo-result">${ploState.rows ? ploRenderTable() : ''}</div>
+        </div>`;
+    }
+    window.renderPloReportPage = renderPloReportPage;
+
+    async function ploGenerate() {
+      const unitId = document.getElementById('plo-rig')?.value;
+      const start = document.getElementById('plo-start')?.value;
+      const end = document.getElementById('plo-end')?.value;
+      if (!unitId) { toast('Pilih rig dulu', 'warn'); return; }
+      if (!start || !end || start > end) { toast('Rentang tanggal tidak valid', 'warn'); return; }
+      ploState.unitId = unitId; ploState.start = start; ploState.end = end;
+      ploState.unitName = (state.parentUnits || []).find(u => String(u.id) === String(unitId))?.name || '';
+      const resultEl = document.getElementById('plo-result');
+      resultEl.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat data…</div>';
+      try {
+        const endExclusive = new Date(new Date(end).getTime() + 86400000).toISOString().slice(0, 10);
+        const { data: eqList, error: eErr } = await state.supabase
+          .from('equipment').select('id, tag_number, nama_equipment')
+          .eq('assigned_unit_id', unitId);
+        if (eErr) throw eErr;
+        const eqIds = (eqList || []).map(e => e.id);
+        const eqById = {}; (eqList || []).forEach(e => { eqById[e.id] = e; });
+        if (!eqIds.length) {
+          resultEl.innerHTML = '<div class="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-400 text-sm">Tidak ada equipment terdaftar di rig ini.</div>';
+          ploState.rows = null;
+          return;
+        }
+
+        const [lhRes, mlRes, dtRes] = await Promise.all([
+          state.supabase.from('laporan_harian').select('id, tanggal, verified_by_name').eq('status', 'final').gte('tanggal', start).lt('tanggal', endExclusive),
+          state.supabase.from('maintenance_log').select('equipment_id, maintenance_date, maintenance_type, pic_mechanic, notes').in('equipment_id', eqIds).gte('maintenance_date', start).lt('maintenance_date', endExclusive),
+          state.supabase.from('downtime_events').select('equipment_id, category, start_at, end_at, notes, created_by_name').in('equipment_id', eqIds).gte('start_at', start).lt('start_at', endExclusive),
+        ]);
+        if (lhRes.error) throw lhRes.error; if (mlRes.error) throw mlRes.error; if (dtRes.error) throw dtRes.error;
+
+        const lhIds = (lhRes.data || []).map(r => r.id);
+        const lhById = {}; (lhRes.data || []).forEach(r => { lhById[r.id] = r; });
+        let lhEntries = [];
+        if (lhIds.length) {
+          const { data, error } = await state.supabase.from('laporan_harian_entries')
+            .select('laporan_id, equipment_id, job_desc, status_kerja, notes, progress_pct')
+            .in('laporan_id', lhIds).in('equipment_id', eqIds).in('status_kerja', ['PM', 'CM', 'TS']);
+          if (error) throw error;
+          lhEntries = data || [];
+        }
+
+        const rows = [];
+        lhEntries.forEach(e => {
+          const lh = lhById[e.laporan_id]; if (!lh) return;
+          const eq = eqById[e.equipment_id];
+          rows.push({
+            tglStart: lh.tanggal, tglFinish: lh.tanggal,
+            lokasi: eq ? `${eq.tag_number} — ${eq.nama_equipment}` : '-',
+            info: e.job_desc || '-',
+            responsible: lh.verified_by_name || '-',
+            status: (e.progress_pct == null || Number(e.progress_pct) >= 100) ? 'Selesai' : 'In Progress',
+            remarks: [e.notes, e.progress_pct != null ? `Progress ${e.progress_pct}%` : ''].filter(Boolean).join(' — ') || '-',
+          });
+        });
+        (mlRes.data || []).forEach(m => {
+          const eq = eqById[m.equipment_id];
+          rows.push({
+            tglStart: m.maintenance_date, tglFinish: m.maintenance_date,
+            lokasi: eq ? `${eq.tag_number} — ${eq.nama_equipment}` : '-',
+            info: m.maintenance_type || '-',
+            responsible: m.pic_mechanic || '-',
+            status: 'Selesai',
+            remarks: m.notes || '-',
+          });
+        });
+        (dtRes.data || []).forEach(d => {
+          const eq = eqById[d.equipment_id];
+          rows.push({
+            tglStart: (d.start_at || '').slice(0, 10), tglFinish: d.end_at ? d.end_at.slice(0, 10) : '',
+            lokasi: eq ? `${eq.tag_number} — ${eq.nama_equipment}` : '-',
+            info: `[${(d.category || '-').toUpperCase()}] ${d.notes || '-'}`,
+            responsible: d.created_by_name || '-',
+            status: d.end_at ? 'Selesai' : 'In Progress',
+            remarks: d.end_at ? '-' : 'Masih berjalan saat laporan digenerate',
+          });
+        });
+        rows.sort((a, b) => (a.tglStart || '').localeCompare(b.tglStart || ''));
+        ploState.rows = rows;
+        renderPloReportPage();
+      } catch (err) {
+        resultEl.innerHTML = `<div class="bg-red-50 text-red-700 p-4 rounded-xl text-sm">Gagal memuat: ${escapeHtml(err.message)}</div>`;
+      }
+    }
+    window.ploGenerate = ploGenerate;
+
+    function ploRenderTable() {
+      const rows = ploState.rows || [];
+      if (!rows.length) return '<div class="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-400 text-sm">Tidak ada aktivitas maintenance tercatat di periode ini.</div>';
+      return `
+        <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div class="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
+            <h4 class="font-bold text-navy text-sm">${escapeHtml(ploState.unitName)} — ${fmtDate(ploState.start)} s/d ${fmtDate(ploState.end)}</h4>
+            <span class="text-xs text-slate-500">${rows.length} entri</span>
+          </div>
+          <div class="overflow-x-auto"><table class="w-full">
+            <thead><tr class="bg-slate-50 text-left text-xs font-bold text-slate-600">
+              <th class="px-3 py-2">No</th><th class="px-3 py-2">Lokasi</th>
+              <th class="px-3 py-2">Information / Decision / Follow Up</th>
+              <th class="px-3 py-2">Start</th><th class="px-3 py-2">Finish</th>
+              <th class="px-3 py-2">Responsible</th><th class="px-3 py-2">Status</th>
+              <th class="px-3 py-2">Remarks / Next Action</th>
+            </tr></thead>
+            <tbody>${rows.map((r, i) => `
+              <tr class="border-b border-slate-100 hover:bg-slate-50">
+                <td class="px-3 py-2 text-sm text-slate-500">${i + 1}</td>
+                <td class="px-3 py-2 text-sm font-semibold text-navy whitespace-nowrap">${escapeHtml(r.lokasi)}</td>
+                <td class="px-3 py-2 text-sm text-slate-700">${escapeHtml(r.info)}</td>
+                <td class="px-3 py-2 text-sm text-slate-500 whitespace-nowrap">${r.tglStart ? fmtDate(r.tglStart) : '-'}</td>
+                <td class="px-3 py-2 text-sm text-slate-500 whitespace-nowrap">${r.tglFinish ? fmtDate(r.tglFinish) : '-'}</td>
+                <td class="px-3 py-2 text-sm text-slate-600 whitespace-nowrap">${escapeHtml(r.responsible)}</td>
+                <td class="px-3 py-2 text-sm whitespace-nowrap">${r.status === 'Selesai' ? '<span class="text-green-700 font-semibold">Selesai</span>' : '<span class="text-amber-600 font-semibold">In Progress</span>'}</td>
+                <td class="px-3 py-2 text-sm text-slate-600">${escapeHtml(r.remarks)}</td>
+              </tr>`).join('')}
+            </tbody>
+          </table></div>
+        </div>`;
+    }
+
+    function ploPrint() {
+      const rows = ploState.rows || [];
+      const tgl = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+      const who = escapeHtml(state.profile?.full_name || state.profile?.email || '');
+      const body = rows.map((r, i) => `
+        <tr>
+          <td style="text-align:center">${i + 1}</td>
+          <td>${escapeHtml(r.lokasi)}</td>
+          <td>${escapeHtml(r.info)}</td>
+          <td style="white-space:nowrap">${r.tglStart ? fmtDate(r.tglStart) : '-'}</td>
+          <td style="white-space:nowrap">${r.tglFinish ? fmtDate(r.tglFinish) : '-'}</td>
+          <td>${escapeHtml(r.responsible)}</td>
+          <td>${r.status}</td>
+          <td>${escapeHtml(r.remarks)}</td>
+        </tr>`).join('');
+      const html = `<!DOCTYPE html><html><head>
+        <meta charset="UTF-8">
+        <title>Laporan Daily Maintenance — ${escapeHtml(ploState.unitName)}</title>
+        <style>
+          *{box-sizing:border-box} body{font-family:Arial,Helvetica,sans-serif;color:#1f2937;padding:20px;font-size:10.5px;line-height:1.4;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+          @page{size:A4 landscape;margin:12mm}
+          .kop{border-bottom:3px solid #11335d;padding-bottom:10px;margin-bottom:10px;position:relative}
+          .kop::after{content:"";position:absolute;left:0;right:0;bottom:-3px;height:2px;background:#f97316}
+          .kop .brand{font-size:19px;font-weight:800;color:#11335d} .kop .brand .ram{color:#f97316}
+          .kop .t{font-size:11px;font-weight:bold;color:#11335d;margin-top:2px} .kop .s{font-size:9px;color:#6b7280}
+          h1{font-size:13px;text-align:center;margin:10px 0 2px;text-transform:uppercase}
+          .meta{text-align:center;font-size:10px;color:#374151;margin-bottom:12px}
+          table{width:100%;border-collapse:collapse}
+          th{background:#11335d;color:#fff;padding:6px 6px;text-align:left;font-size:9.5px}
+          td{padding:5px 6px;border-bottom:1px solid #e5e7eb;font-size:9.5px;vertical-align:top}
+          tr:nth-child(even) td{background:#f9fafb}
+          .foot{margin-top:16px;border-top:1px solid #e2e8f0;padding-top:6px;font-size:8.5px;color:#94a3b8;display:flex;justify-content:space-between}
+          .foot b{color:#11335d} .foot .ram{color:#f97316}
+          @media print{body{padding:0} button{display:none}}
+        </style>
+      </head><body>
+        <div class="kop">
+          <div class="brand">e<span class="ram">RAM</span>Hoist</div>
+          <div class="t">PT PERTAMINA HULU ROKAN — Hoist &amp; Heavy Equipment</div>
+          <div class="s">Asset Reliability Management</div>
+        </div>
+        <h1>Laporan Daily Maintenance — ${escapeHtml(ploState.unitName)}</h1>
+        <div class="meta">Periode ${fmtDate(ploState.start)} s/d ${fmtDate(ploState.end)} &nbsp;·&nbsp; Syarat lampiran Persetujuan Layak Operasi (PLO)</div>
+        <table>
+          <thead><tr><th style="width:26px">No</th><th>Lokasi</th><th>Information / Decision / Follow Up</th><th>Start</th><th>Finish</th><th>Responsible</th><th>Status</th><th>Remarks / Next Action</th></tr></thead>
+          <tbody>${body}</tbody>
+        </table>
+        <div class="foot">
+          <div>Dihasilkan otomatis dari data Laporan Harian, Maintenance Log, dan Downtime tercatat di <b>e<span class="ram">RAM</span>Hoist</b></div>
+          <div>Dicetak: ${tgl} · oleh ${who}</div>
+        </div>
+      </body></html>`;
+      const win = window.open('', '_blank');
+      if (!win) { toast('Pop-up diblokir browser. Izinkan pop-up untuk cetak laporan.', 'error'); return; }
+      win.document.write(html);
+      win.document.close();
+      win.focus();
+      setTimeout(() => win.print(), 500);
+    }
+    window.ploPrint = ploPrint;
 
     // ============================================================
     // RAM TREND — SVG line chart Ao & Ai per bulan (12 bulan)

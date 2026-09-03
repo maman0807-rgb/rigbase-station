@@ -6,7 +6,7 @@
 --
 -- LATAR BELAKANG: kedua unit ini pindah total ke jadwal manual pabrikan
 -- Caterpillar (SEBU9241-10, Prime Power) yang rasio interval-nya
--- (1:5:10:20:60:120 dari basis 50 jam, lihat CAT_C71_PM_LADDER di
+-- (1:5:10:20:40:60 dari basis 50 jam, lihat CAT_C71_PM_LADDER di
 -- index.html) TIDAK bisa direpresentasikan lewat mekanisme tier generik
 -- getPMTypeByCycle() (rasio tetap 1:2:4:8:40 dari pm_interval_hours).
 -- Tabel ini TERPISAH TOTAL dari equipment.pm_interval_hours/
