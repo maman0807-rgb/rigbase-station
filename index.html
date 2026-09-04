@@ -995,6 +995,13 @@
       ] },
     };
     const CAT_C71_PM_ORDER = ['PM1', 'PM2', 'PM3', 'PM4', 'PM5', 'PM6'];
+    // PM1 (kuras air tangki BBM, 50 jam) & PM2 (sampel coolant, 250 jam) adalah kerjaan rutin
+    // yang di lapangan TIDAK dicatat formal "PM Selesai" tiap siklus (konfirmasi Maman,
+    // 2026-09-04, kasus GS-KB150A-CAT: PM Berikutnya salah nunjuk PM1 "lewat 276 jam" padahal
+    // PM3 terakhir baru 28 Jul). Widget "PM Berikutnya"/"due next" HARUS hitung dari level yang
+    // beneran dicatat (PM3+) saja, biar gak ke-drown sama level kecil yg emang gak per-siklus
+    // di-log — PM1/PM2 tetap tampil di tabel ladder lengkap, cuma diskip dari perhitungan due-next.
+    const CAT_C71_TRACKED_LEVELS = CAT_C71_PM_ORDER.slice(2); // ['PM3','PM4','PM5','PM6']
     // Checklist kumulatif s/d 1 level (PM4 = item PM1+PM2+PM3+PM4).
     function getCatC71ChecklistForLevel(level) {
       const idx = CAT_C71_PM_ORDER.indexOf(level);
@@ -1100,7 +1107,8 @@
             const nextDue   = lastDone + CAT_C71_PM_LADDER[level].intervalHm;
             return { level, lastDone, nextDue, remaining: nextDue - currentHM };
           });
-          const nextLevel = levels.reduce((a, b) => (b.nextDue < a.nextDue ? b : a));
+          const nextLevel = levels.filter(l => CAT_C71_TRACKED_LEVELS.includes(l.level))
+            .reduce((a, b) => (b.nextDue < a.nextDue ? b : a));
           catRows.push({
             ...e,
             _interval: CAT_C71_PM_LADDER[nextLevel.level].intervalHm,
@@ -8016,8 +8024,10 @@
             const remaining = nextDue - _currentHM;
             return { level, lastDone, nextDue, remaining };
           });
-          // "Due berikutnya" keseluruhan = level dengan next_due_hm TERKECIL (paling awal jatuh tempo)
-          const nextLevel = levels.reduce((a, b) => (b.nextDue < a.nextDue ? b : a));
+          // "Due berikutnya" keseluruhan = level dengan next_due_hm TERKECIL (paling awal jatuh tempo),
+          // dibatasi ke level yang beneran dicatat formal (PM3+) — lihat CAT_C71_TRACKED_LEVELS.
+          const nextLevel = levels.filter(l => CAT_C71_TRACKED_LEVELS.includes(l.level))
+            .reduce((a, b) => (b.nextDue < a.nextDue ? b : a));
           catC71Info = { levels, nextLevel, lastDoneDate };
         }
 
