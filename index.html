@@ -16243,9 +16243,31 @@
           tr:nth-child(even) td{background:#f9fafb}
           .foot{margin-top:16px;border-top:1px solid #e2e8f0;padding-top:6px;font-size:8.5px;color:#94a3b8;display:flex;justify-content:space-between}
           .foot b{color:#11335d} .foot .ram{color:#f97316}
+          .cover{page-break-after:always;min-height:calc(100vh - 40px);display:flex;flex-direction:column}
+          .cover .kop{margin-bottom:0}
+          .cover-mid{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
+          .cover-mid h1{font-size:26px;margin:0 0 10px;letter-spacing:.5px}
+          .cover-mid .sub{font-size:15px;color:#374151;margin-bottom:4px}
+          .cover-mid .year{font-size:20px;font-weight:800;color:#11335d;margin-top:18px}
+          .signblock{display:flex;justify-content:space-around;margin-top:36px;text-align:center}
+          .signbox{width:260px;font-size:10.5px}
+          .signbox .lbl{margin-bottom:52px}
+          .signbox .line{border-top:1px solid #1f2937;padding-top:5px;font-weight:600;color:#1f2937}
           @media print{body{padding:0} button{display:none}}
         </style>
       </head><body>
+        <div class="cover">
+          <div class="kop">
+            <div class="brand">e<span class="ram">RAM</span>Hoist</div>
+            <div class="t">PT PERTAMINA HULU ROKAN — Hoist &amp; Heavy Equipment</div>
+            <div class="s">Asset Reliability Management</div>
+          </div>
+          <div class="cover-mid">
+            <h1>LAPORAN DAILY MAINTENANCE</h1>
+            <div class="sub">${escapeHtml(ploState.unitName)}</div>
+            <div class="year">Tahun ${escapeHtml(ploState.year)}</div>
+          </div>
+        </div>
         <div class="kop">
           <div class="brand">e<span class="ram">RAM</span>Hoist</div>
           <div class="t">PT PERTAMINA HULU ROKAN — Hoist &amp; Heavy Equipment</div>
@@ -16257,6 +16279,16 @@
           <thead><tr><th style="width:26px">No</th><th>Lokasi</th><th>Information / Decision / Follow Up</th><th>Start</th><th>Finish</th><th>Penggantian Part</th><th>Status</th><th>Remarks / Next Action</th></tr></thead>
           <tbody>${body}</tbody>
         </table>
+        <div class="signblock">
+          <div class="signbox">
+            <div class="lbl">Diketahui oleh,</div>
+            <div class="line">Spv Hoist &amp; Heavy Equipment</div>
+          </div>
+          <div class="signbox">
+            <div class="lbl">Diketahui oleh,</div>
+            <div class="line">Senior Spv Mechanical</div>
+          </div>
+        </div>
         <div class="foot">
           <div>Dihasilkan otomatis dari data Laporan Harian, Maintenance Log, Downtime, dan Input Harian tercatat di <b>e<span class="ram">RAM</span>Hoist</b></div>
           <div>Dicetak: ${tgl} · oleh ${who}</div>
