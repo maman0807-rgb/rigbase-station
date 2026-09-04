@@ -15622,8 +15622,8 @@
           </div>
         </div>
         <div>
-          <label class="block text-[11px] font-semibold text-slate-500 uppercase mb-1">Job Desc</label>
-          <input ${dis} value="${escapeHtml(e.job_desc || '')}" oninput="lhUpdateEntry(${i},'job_desc',this.value)" class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm">
+          <label class="block text-[11px] font-semibold text-slate-500 uppercase mb-1">Job Desc <span class="normal-case font-normal text-slate-400">(1 baris = 1 pekerjaan)</span></label>
+          <textarea ${dis} rows="3" oninput="lhUpdateJobDesc(${i},this.value)" class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm">${escapeHtml(jobDescToLines(e.job_desc))}</textarea>
         </div>
         <div>
           <label class="block text-[11px] font-semibold text-slate-500 uppercase mb-1">Checklist</label>
@@ -15669,6 +15669,22 @@
       if (el) el.innerHTML = lhRhDeltaHtml(lhState.entries[i]);
     }
     window.lhUpdateRhDelta = lhUpdateRhDelta;
+
+    // job_desc disimpan sebagai 1 string comma-joined (biar History/PLO/Analisa/print yang
+    // udah baca e.job_desc apa adanya tetap jalan tanpa perlu ubah) — cuma cara EDIT/BACA-nya
+    // di form yang diubah jadi per-baris (1 baris = 1 pekerjaan), biar gak "memanjang" jadi
+    // 1 baris raksasa waktu ada beberapa pekerjaan dipisah koma (ditemukan Maman 2026-09-04,
+    // contoh: "replace fuel filter..., Unit engine..., Perbaikan valve..., perbaikan brake...").
+    function jobDescToLines(text) {
+      return String(text || '').split(',').map(s => s.trim()).filter(Boolean).join('\n');
+    }
+    function jobDescFromLines(text) {
+      return String(text || '').split('\n').map(s => s.trim()).filter(Boolean).join(', ');
+    }
+    function lhUpdateJobDesc(i, textareaValue) {
+      lhUpdateEntry(i, 'job_desc', jobDescFromLines(textareaValue));
+    }
+    window.lhUpdateJobDesc = lhUpdateJobDesc;
 
     function lhUpdateEntry(i, field, value) {
       if (!lhState.entries[i]) return;
