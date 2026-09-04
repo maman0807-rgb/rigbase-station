@@ -16036,22 +16036,20 @@
     // Status, Remarks/Next Action — kolom RACI/RKAP/No WO di template
     // asli sengaja di-drop krn belum ada padanan datanya di sistem.
     // ============================================================
-    let ploState = { unitId: '', start: '', end: '', rows: null, unitName: '' };
+    let ploState = { unitId: '', year: '', rows: null, unitName: '' };
 
     async function renderPloReportPage(host) {
       host = host || document.getElementById('ram-content');
       if (!host) return;
       const rigs = (state.parentUnits || []).filter(u => u.type === 'Rig');
-      if (!ploState.start) {
-        const d = new Date(); d.setMonth(d.getMonth() - 1);
-        ploState.start = d.toISOString().slice(0, 10);
-        ploState.end = new Date().toISOString().slice(0, 10);
-      }
+      if (!ploState.year) ploState.year = String(new Date().getFullYear());
+      const curYear = new Date().getFullYear();
+      const yearOpts = []; for (let y = curYear + 1; y >= curYear - 5; y--) yearOpts.push(y);
       host.innerHTML = `
         <div class="space-y-4">
           <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
             <h3 class="text-base font-bold text-navy mb-1">📄 Laporan Daily Maintenance (PLO)</h3>
-            <p class="text-xs text-slate-500 mb-3">Kompilasi riwayat maintenance (PM/CM/TS dari Laporan Harian, Maintenance Log, dan Downtime) per rig — untuk lampiran syarat Persetujuan Layak Operasi.</p>
+            <p class="text-xs text-slate-500 mb-3">Kompilasi riwayat maintenance (PM/CM/TS dari Laporan Harian, Maintenance Log, Downtime, dan Input Harian Part) per rig per tahun.</p>
             <div class="flex flex-wrap items-end gap-3">
               <div>
                 <label class="block text-xs font-semibold text-slate-600 mb-1">Rig</label>
@@ -16061,12 +16059,10 @@
                 </select>
               </div>
               <div>
-                <label class="block text-xs font-semibold text-slate-600 mb-1">Dari Tanggal</label>
-                <input id="plo-start" type="date" value="${ploState.start}" class="border border-slate-300 rounded-lg text-sm px-3 py-2">
-              </div>
-              <div>
-                <label class="block text-xs font-semibold text-slate-600 mb-1">Sampai Tanggal</label>
-                <input id="plo-end" type="date" value="${ploState.end}" class="border border-slate-300 rounded-lg text-sm px-3 py-2">
+                <label class="block text-xs font-semibold text-slate-600 mb-1">Tahun</label>
+                <select id="plo-year" class="border border-slate-300 rounded-lg text-sm px-3 py-2 bg-white">
+                  ${yearOpts.map(y => `<option value="${y}" ${String(y) === String(ploState.year) ? 'selected' : ''}>${y}</option>`).join('')}
+                </select>
               </div>
               <button onclick="ploGenerate()" class="bg-navy hover:opacity-90 text-white px-4 py-2 rounded-lg text-sm font-semibold">🔍 Generate</button>
               ${ploState.rows ? `<button onclick="ploPrint()" class="bg-safety hover:opacity-90 text-white px-4 py-2 rounded-lg text-sm font-semibold">🖨 Cetak / PDF</button>` : ''}
@@ -16079,16 +16075,15 @@
 
     async function ploGenerate() {
       const unitId = document.getElementById('plo-rig')?.value;
-      const start = document.getElementById('plo-start')?.value;
-      const end = document.getElementById('plo-end')?.value;
+      const year = document.getElementById('plo-year')?.value;
       if (!unitId) { toast('Pilih rig dulu', 'warn'); return; }
-      if (!start || !end || start > end) { toast('Rentang tanggal tidak valid', 'warn'); return; }
-      ploState.unitId = unitId; ploState.start = start; ploState.end = end;
+      if (!year) { toast('Pilih tahun dulu', 'warn'); return; }
+      ploState.unitId = unitId; ploState.year = year;
       ploState.unitName = (state.parentUnits || []).find(u => String(u.id) === String(unitId))?.name || '';
+      const start = `${year}-01-01`, endExclusive = `${Number(year) + 1}-01-01`;
       const resultEl = document.getElementById('plo-result');
       resultEl.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat data…</div>';
       try {
-        const endExclusive = new Date(new Date(end).getTime() + 86400000).toISOString().slice(0, 10);
         const { data: eqList, error: eErr } = await state.supabase
           .from('equipment').select('id, tag_number, nama_equipment')
           .eq('assigned_unit_id', unitId);
@@ -16101,12 +16096,13 @@
           return;
         }
 
-        const [lhRes, mlRes, dtRes] = await Promise.all([
-          state.supabase.from('laporan_harian').select('id, tanggal, verified_by_name').eq('status', 'final').gte('tanggal', start).lt('tanggal', endExclusive),
-          state.supabase.from('maintenance_log').select('equipment_id, maintenance_date, maintenance_type, pic_mechanic, notes').in('equipment_id', eqIds).gte('maintenance_date', start).lt('maintenance_date', endExclusive),
-          state.supabase.from('downtime_events').select('equipment_id, category, start_at, end_at, notes, created_by_name').in('equipment_id', eqIds).gte('start_at', start).lt('start_at', endExclusive),
+        const [lhRes, mlRes, dtRes, dlRes] = await Promise.all([
+          state.supabase.from('laporan_harian').select('id, tanggal').eq('status', 'final').gte('tanggal', start).lt('tanggal', endExclusive),
+          state.supabase.from('maintenance_log').select('equipment_id, maintenance_date, maintenance_type, notes').in('equipment_id', eqIds).gte('maintenance_date', start).lt('maintenance_date', endExclusive),
+          state.supabase.from('downtime_events').select('equipment_id, category, start_at, end_at, notes').in('equipment_id', eqIds).gte('start_at', start).lt('start_at', endExclusive),
+          state.supabase.from('daily_logs').select('equipment_id, log_date, maintenance_type, notes, parts').in('equipment_id', eqIds).gte('log_date', start).lt('log_date', endExclusive),
         ]);
-        if (lhRes.error) throw lhRes.error; if (mlRes.error) throw mlRes.error; if (dtRes.error) throw dtRes.error;
+        if (lhRes.error) throw lhRes.error; if (mlRes.error) throw mlRes.error; if (dtRes.error) throw dtRes.error; if (dlRes.error) throw dlRes.error;
 
         const lhIds = (lhRes.data || []).map(r => r.id);
         const lhById = {}; (lhRes.data || []).forEach(r => { lhById[r.id] = r; });
@@ -16119,6 +16115,13 @@
           lhEntries = data || [];
         }
 
+        // Ringkas array `parts` (JSONB, format dari app Logbook: {description, qty, satuan, ...})
+        // jadi teks "Nama Part xQty satuan, ..." — cuma diisi kalau beneran ada penggantian part.
+        const fmtParts = parts => (Array.isArray(parts) ? parts : [])
+          .filter(p => p && p.description)
+          .map(p => `${p.description}${p.qty ? ` x${p.qty}` : ''}${p.satuan ? ` ${p.satuan}` : ''}`)
+          .join(', ');
+
         const rows = [];
         lhEntries.forEach(e => {
           const lh = lhById[e.laporan_id]; if (!lh) return;
@@ -16127,7 +16130,7 @@
             tglStart: lh.tanggal, tglFinish: lh.tanggal,
             lokasi: eq ? `${eq.tag_number} — ${eq.nama_equipment}` : '-',
             info: e.job_desc || '-',
-            responsible: lh.verified_by_name || '-',
+            part: '-',
             status: (e.progress_pct == null || Number(e.progress_pct) >= 100) ? 'Selesai' : 'In Progress',
             remarks: [e.notes, e.progress_pct != null ? `Progress ${e.progress_pct}%` : ''].filter(Boolean).join(' — ') || '-',
           });
@@ -16138,7 +16141,7 @@
             tglStart: m.maintenance_date, tglFinish: m.maintenance_date,
             lokasi: eq ? `${eq.tag_number} — ${eq.nama_equipment}` : '-',
             info: m.maintenance_type || '-',
-            responsible: m.pic_mechanic || '-',
+            part: '-',
             status: 'Selesai',
             remarks: m.notes || '-',
           });
@@ -16149,9 +16152,20 @@
             tglStart: (d.start_at || '').slice(0, 10), tglFinish: d.end_at ? d.end_at.slice(0, 10) : '',
             lokasi: eq ? `${eq.tag_number} — ${eq.nama_equipment}` : '-',
             info: `[${(d.category || '-').toUpperCase()}] ${d.notes || '-'}`,
-            responsible: d.created_by_name || '-',
+            part: '-',
             status: d.end_at ? 'Selesai' : 'In Progress',
             remarks: d.end_at ? '-' : 'Masih berjalan saat laporan digenerate',
+          });
+        });
+        (dlRes.data || []).forEach(d => {
+          const eq = eqById[d.equipment_id];
+          rows.push({
+            tglStart: d.log_date, tglFinish: d.log_date,
+            lokasi: eq ? `${eq.tag_number} — ${eq.nama_equipment}` : '-',
+            info: `[Input Harian${d.maintenance_type ? ' ' + d.maintenance_type : ''}] ${d.notes || '-'}`,
+            part: fmtParts(d.parts) || '-',
+            status: 'Selesai',
+            remarks: d.notes || '-',
           });
         });
         rows.sort((a, b) => (a.tglStart || '').localeCompare(b.tglStart || ''));
@@ -16165,11 +16179,11 @@
 
     function ploRenderTable() {
       const rows = ploState.rows || [];
-      if (!rows.length) return '<div class="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-400 text-sm">Tidak ada aktivitas maintenance tercatat di periode ini.</div>';
+      if (!rows.length) return '<div class="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-400 text-sm">Tidak ada aktivitas maintenance tercatat di tahun ini.</div>';
       return `
         <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           <div class="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
-            <h4 class="font-bold text-navy text-sm">${escapeHtml(ploState.unitName)} — ${fmtDate(ploState.start)} s/d ${fmtDate(ploState.end)}</h4>
+            <h4 class="font-bold text-navy text-sm">${escapeHtml(ploState.unitName)} — Tahun ${escapeHtml(ploState.year)}</h4>
             <span class="text-xs text-slate-500">${rows.length} entri</span>
           </div>
           <div class="overflow-x-auto"><table class="w-full">
@@ -16177,7 +16191,7 @@
               <th class="px-3 py-2">No</th><th class="px-3 py-2">Lokasi</th>
               <th class="px-3 py-2">Information / Decision / Follow Up</th>
               <th class="px-3 py-2">Start</th><th class="px-3 py-2">Finish</th>
-              <th class="px-3 py-2">Responsible</th><th class="px-3 py-2">Status</th>
+              <th class="px-3 py-2">Penggantian Part</th><th class="px-3 py-2">Status</th>
               <th class="px-3 py-2">Remarks / Next Action</th>
             </tr></thead>
             <tbody>${rows.map((r, i) => `
@@ -16187,7 +16201,7 @@
                 <td class="px-3 py-2 text-sm text-slate-700">${escapeHtml(r.info)}</td>
                 <td class="px-3 py-2 text-sm text-slate-500 whitespace-nowrap">${r.tglStart ? fmtDate(r.tglStart) : '-'}</td>
                 <td class="px-3 py-2 text-sm text-slate-500 whitespace-nowrap">${r.tglFinish ? fmtDate(r.tglFinish) : '-'}</td>
-                <td class="px-3 py-2 text-sm text-slate-600 whitespace-nowrap">${escapeHtml(r.responsible)}</td>
+                <td class="px-3 py-2 text-sm text-slate-600">${escapeHtml(r.part)}</td>
                 <td class="px-3 py-2 text-sm whitespace-nowrap">${r.status === 'Selesai' ? '<span class="text-green-700 font-semibold">Selesai</span>' : '<span class="text-amber-600 font-semibold">In Progress</span>'}</td>
                 <td class="px-3 py-2 text-sm text-slate-600">${escapeHtml(r.remarks)}</td>
               </tr>`).join('')}
@@ -16207,7 +16221,7 @@
           <td>${escapeHtml(r.info)}</td>
           <td style="white-space:nowrap">${r.tglStart ? fmtDate(r.tglStart) : '-'}</td>
           <td style="white-space:nowrap">${r.tglFinish ? fmtDate(r.tglFinish) : '-'}</td>
-          <td>${escapeHtml(r.responsible)}</td>
+          <td>${escapeHtml(r.part)}</td>
           <td>${r.status}</td>
           <td>${escapeHtml(r.remarks)}</td>
         </tr>`).join('');
@@ -16238,13 +16252,13 @@
           <div class="s">Asset Reliability Management</div>
         </div>
         <h1>Laporan Daily Maintenance — ${escapeHtml(ploState.unitName)}</h1>
-        <div class="meta">Periode ${fmtDate(ploState.start)} s/d ${fmtDate(ploState.end)} &nbsp;·&nbsp; Syarat lampiran Persetujuan Layak Operasi (PLO)</div>
+        <div class="meta">Tahun ${escapeHtml(ploState.year)}</div>
         <table>
-          <thead><tr><th style="width:26px">No</th><th>Lokasi</th><th>Information / Decision / Follow Up</th><th>Start</th><th>Finish</th><th>Responsible</th><th>Status</th><th>Remarks / Next Action</th></tr></thead>
+          <thead><tr><th style="width:26px">No</th><th>Lokasi</th><th>Information / Decision / Follow Up</th><th>Start</th><th>Finish</th><th>Penggantian Part</th><th>Status</th><th>Remarks / Next Action</th></tr></thead>
           <tbody>${body}</tbody>
         </table>
         <div class="foot">
-          <div>Dihasilkan otomatis dari data Laporan Harian, Maintenance Log, dan Downtime tercatat di <b>e<span class="ram">RAM</span>Hoist</b></div>
+          <div>Dihasilkan otomatis dari data Laporan Harian, Maintenance Log, Downtime, dan Input Harian tercatat di <b>e<span class="ram">RAM</span>Hoist</b></div>
           <div>Dicetak: ${tgl} · oleh ${who}</div>
         </div>
       </body></html>`;
