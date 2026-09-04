@@ -15622,7 +15622,10 @@
           </div>
         </div>
         <div>
-          <label class="block text-[11px] font-semibold text-slate-500 uppercase mb-1">Job Desc <span class="normal-case font-normal text-slate-400">(1 baris = 1 pekerjaan)</span></label>
+          <div class="flex items-center justify-between mb-1">
+            <label class="block text-[11px] font-semibold text-slate-500 uppercase">Job Desc <span class="normal-case font-normal text-slate-400">(1 baris = 1 pekerjaan)</span></label>
+            ${!dis && (e.job_desc || '').includes(',') ? `<button type="button" onclick="lhJobDescToChecklist(${i})" class="text-[11px] font-semibold text-navy hover:underline">↳ Jadikan Checklist</button>` : ''}
+          </div>
           <textarea ${dis} rows="3" oninput="lhUpdateJobDesc(${i},this.value)" class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm">${escapeHtml(jobDescToLines(e.job_desc))}</textarea>
         </div>
         <div>
@@ -15685,6 +15688,26 @@
       lhUpdateEntry(i, 'job_desc', jobDescFromLines(textareaValue));
     }
     window.lhUpdateJobDesc = lhUpdateJobDesc;
+
+    // Pecah Job Desc comma-joined jadi item Checklist terpisah (dicentang, krn statusnya
+    // dilaporkan sudah dikerjakan) — pola "Job Desc = judul singkat, Checklist = breakdown
+    // langkah" yg Maman anggap paling rapi (contoh CMP-VIBRO-03, 2026-08-22). Job Desc
+    // dikosongkan sesudahnya biar diisi ulang jadi judul singkat oleh admin/verifikator.
+    async function lhJobDescToChecklist(i) {
+      const entry = lhState.entries[i]; if (!entry) return;
+      const segments = String(entry.job_desc || '').split(',').map(s => s.trim()).filter(Boolean);
+      if (!segments.length) { toast('Job Desc kosong, gak ada yang bisa dipecah.', 'warn'); return; }
+      const ok = await confirmDialog({
+        title: 'Jadikan Checklist',
+        message: `Pecah ${segments.length} pekerjaan dari Job Desc jadi item checklist terpisah (otomatis dicentang, karena sudah dilaporkan)?\n\nJob Desc akan dikosongkan supaya bisa diisi ulang jadi judul singkat.`,
+        confirmText: 'Ya, Pecah',
+      });
+      if (!ok) return;
+      entry.checklist = [...(entry.checklist || []), ...segments.map(item => ({ item, checked: true }))];
+      entry.job_desc = '';
+      lhRenderEntriesList();
+    }
+    window.lhJobDescToChecklist = lhJobDescToChecklist;
 
     function lhUpdateEntry(i, field, value) {
       if (!lhState.entries[i]) return;
