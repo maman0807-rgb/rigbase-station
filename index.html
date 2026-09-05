@@ -15423,15 +15423,16 @@
             const tahunOpts = Array.from({length: 4}, (_, i) => tahunNow - i);
             return `<div class="flex flex-wrap items-center gap-2">
               <label class="text-xs font-semibold text-slate-500">Filter Bulan</label>
-              <select id="lh-filter-bulan-sel" onchange="lhApplyFilterBulanTahun()" class="px-3 py-1.5 border border-slate-300 rounded-lg text-sm bg-white">
+              <select id="lh-filter-bulan-sel" class="px-3 py-1.5 border border-slate-300 rounded-lg text-sm bg-white">
                 <option value="">Bulan</option>
                 ${bulanNamaLH.map((nm, i) => { const m = String(i + 1).padStart(2, '0'); return `<option value="${m}" ${m === selBulan ? 'selected' : ''}>${nm}</option>`; }).join('')}
               </select>
-              <select id="lh-filter-tahun-sel" onchange="lhApplyFilterBulanTahun()" class="px-3 py-1.5 border border-slate-300 rounded-lg text-sm bg-white">
+              <select id="lh-filter-tahun-sel" class="px-3 py-1.5 border border-slate-300 rounded-lg text-sm bg-white">
                 <option value="">Tahun</option>
                 ${tahunOpts.map(t => `<option value="${t}" ${String(t) === selTahun ? 'selected' : ''}>${t}</option>`).join('')}
               </select>
-              ${bulan ? `<button onclick="lhSetFilterBulan('')" class="text-xs text-slate-400 hover:text-slate-600 underline">Reset (tampilkan 60 terbaru)</button>` : `<span class="text-xs text-slate-400">Menampilkan 60 laporan terbaru — pilih bulan &amp; tahun untuk lihat yang lebih lama</span>`}
+              <button onclick="lhApplyFilterBulanTahun()" class="px-3 py-1.5 rounded-lg bg-navy text-white text-xs font-semibold hover:bg-navy/90">🔍 Terapkan</button>
+              ${bulan ? `<button onclick="lhSetFilterBulan('')" class="text-xs text-slate-400 hover:text-slate-600 underline">Reset (tampilkan 60 terbaru)</button>` : `<span class="text-xs text-slate-400">Pilih bulan &amp; tahun lalu klik Terapkan — default tampilkan 60 laporan terbaru</span>`}
             </div>`;
           })()}
           <div id="lh-list-body" class="space-y-2"></div>
@@ -15606,7 +15607,8 @@
     function lhApplyFilterBulanTahun() {
       const b = document.getElementById('lh-filter-bulan-sel')?.value || '';
       const t = document.getElementById('lh-filter-tahun-sel')?.value || '';
-      lhSetFilterBulan(b && t ? `${t}-${b}` : '');
+      if (!b || !t) { toast('Pilih Bulan dan Tahun dulu', 'error'); return; }
+      lhSetFilterBulan(`${t}-${b}`);
     }
     window.lhApplyFilterBulanTahun = lhApplyFilterBulanTahun;
 
