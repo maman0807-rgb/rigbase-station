@@ -15314,7 +15314,7 @@
     // ============================================================
     // LAPORAN HARIAN RAM — daily status report (manual entry + review draft dari bot Telegram)
     // ============================================================
-    let lhState = { mode: 'list', laporanId: null, entries: [], header: null, filterBulan: '' };
+    let lhState = { mode: 'list', laporanId: null, entries: [], header: null, filterBulan: '', filterStatus: '' };
     let lhEquipmentList = null; // cache terpisah dari state.equipmentList — itu ikut filter halaman Equipment, bisa kosong/parsial
 
     function lhIsReadonly() {
@@ -15346,6 +15346,7 @@
 
     async function lhRenderList(host) {
       const bulan = lhState.filterBulan || '';
+      const filterStatus = lhState.filterStatus || '';
       let q = state.supabase
         .from('laporan_harian')
         .select('id, tanggal, tim, status, sumber, created_at, verified_by_name, verified_at')
@@ -15356,8 +15357,9 @@
         const end = `${bulan}-${String(endDate).padStart(2, '0')}`;
         q = q.gte('tanggal', start).lte('tanggal', end);
       } else {
-        q = q.limit(60);
+        q = q.limit(30);
       }
+      if (filterStatus) q = q.eq('status', filterStatus);
       const { data: laporanRows, error } = await q;
       if (error) { host.innerHTML = `<div class="text-red-500 text-sm p-4">Gagal memuat: ${escapeHtml(error.message)}</div>`; return; }
       const ids = (laporanRows || []).map(r => r.id);
@@ -15432,7 +15434,12 @@
                 ${tahunOpts.map(t => `<option value="${t}" ${String(t) === selTahun ? 'selected' : ''}>${t}</option>`).join('')}
               </select>
               <button onclick="lhApplyFilterBulanTahun()" class="px-3 py-1.5 rounded-lg bg-navy text-white text-xs font-semibold hover:bg-navy/90">🔍 Terapkan</button>
-              ${bulan ? `<button onclick="lhSetFilterBulan('')" class="text-xs text-slate-400 hover:text-slate-600 underline">Reset (tampilkan 60 terbaru)</button>` : `<span class="text-xs text-slate-400">Pilih bulan &amp; tahun lalu klik Terapkan — default tampilkan 60 laporan terbaru</span>`}
+              <select onchange="lhSetFilterStatus(this.value)" class="px-3 py-1.5 border border-slate-300 rounded-lg text-sm bg-white">
+                <option value="" ${!filterStatus ? 'selected' : ''}>Semua Status</option>
+                <option value="draft" ${filterStatus === 'draft' ? 'selected' : ''}>Draft saja</option>
+                <option value="final" ${filterStatus === 'final' ? 'selected' : ''}>Final saja</option>
+              </select>
+              ${bulan ? `<button onclick="lhSetFilterBulan('')" class="text-xs text-slate-400 hover:text-slate-600 underline">Reset (tampilkan 30 terbaru)</button>` : `<span class="text-xs text-slate-400">Pilih bulan &amp; tahun lalu klik Terapkan — default tampilkan 30 laporan terbaru</span>`}
             </div>`;
           })()}
           <div id="lh-list-body" class="space-y-2"></div>
@@ -15593,7 +15600,7 @@
     window.lhCancelEdit = lhCancelEdit;
 
     function lhBackToList() {
-      lhState = { mode: 'list', laporanId: null, entries: [], header: null, filterBulan: lhState.filterBulan || '' };
+      lhState = { mode: 'list', laporanId: null, entries: [], header: null, filterBulan: lhState.filterBulan || '', filterStatus: lhState.filterStatus || '' };
       renderLaporanHarianPage();
     }
     window.lhBackToList = lhBackToList;
@@ -15611,6 +15618,12 @@
       lhSetFilterBulan(`${t}-${b}`);
     }
     window.lhApplyFilterBulanTahun = lhApplyFilterBulanTahun;
+
+    function lhSetFilterStatus(val) {
+      lhState.filterStatus = val;
+      renderLaporanHarianPage();
+    }
+    window.lhSetFilterStatus = lhSetFilterStatus;
 
     function lhRenderEntriesList(host) {
       host = host || document.getElementById('ram-content');
