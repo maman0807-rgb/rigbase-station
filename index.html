@@ -5525,10 +5525,12 @@
         if (error || !all || all.length === 0) return;
         const closed = all.filter(f => f.status === 'Closed').length;
         const progress = Math.round((closed / all.length) * 100);
-        await state.supabase
-          .from('inspections')
-          .update({ progress_akumulatif: progress, updated_by: state.profile?.id })
-          .eq('id', inspectionId);
+        // Progress nyampe 100% -> status ikut jadi Completed otomatis (sebelumnya 2 field ini
+        // independen, jadi siklus bisa 100% tapi status masih "On Progress" selamanya sampai
+        // ada yang edit manual — ditemukan Maman 2026-09-08).
+        const update = { progress_akumulatif: progress, updated_by: state.profile?.id };
+        if (progress >= 100) update.status = 'Completed';
+        await state.supabase.from('inspections').update(update).eq('id', inspectionId);
       } catch (_) { /* silent — progress update is non-critical */ }
     }
 
