@@ -5634,34 +5634,45 @@
         ];
       }).join('');
 
+      const who = escapeHtml(state.profile?.full_name || state.profile?.email || '');
+      const tglCetak = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+
       const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
-        <title>Laporan Inspeksi ${insp.inspection_code}</title>
+        <title>Laporan Inspeksi ${escapeHtml(insp.inspection_code)}</title>
         <style>
-          body { font-family: Arial, sans-serif; font-size: 12px; color: #1e293b; margin: 0; padding: 20px; }
-          h1 { font-size: 16px; margin: 0 0 4px 0; color: #11335d; }
-          h2 { font-size: 13px; margin: 0 0 12px 0; color: #475569; font-weight: normal; }
-          .cards { display: flex; gap: 10px; flex-wrap: wrap; margin: 12px 0; }
-          .card { border-radius: 8px; padding: 10px 14px; min-width: 90px; text-align: center; }
-          .card .num { font-size: 22px; font-weight: 800; }
-          .card .lbl { font-size: 10px; margin-top: 2px; }
-          .red   { background: #fee2e2; color: #dc2626; }
-          .amber { background: #fef3c7; color: #d97706; }
-          .green { background: #dcfce7; color: #16a34a; }
-          .slate { background: #f1f5f9; color: #475569; }
-          .navy  { background: #e0e7ff; color: #11335d; }
-          table { width: 100%; border-collapse: collapse; margin-top: 12px; }
-          thead tr { background: #11335d; color: white; }
-          th { padding: 7px 8px; font-size: 11px; text-align: left; }
-          td { vertical-align: top; }
-          .info-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px 16px; margin: 10px 0; font-size: 11px; }
-          .info-grid .lbl { color: #64748b; }
-          .progress-bar { background: #e2e8f0; border-radius: 4px; height: 8px; overflow: hidden; margin-top: 4px; }
-          .progress-fill { background: #22c55e; height: 100%; }
-          @media print { body { padding: 0; } }
+          *{box-sizing:border-box} body{font-family:Arial,Helvetica,sans-serif;color:#1f2937;padding:20px;font-size:11px;line-height:1.4;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+          @page{size:A4 landscape;margin:12mm}
+          .kop{border-bottom:3px solid #11335d;padding-bottom:10px;margin-bottom:12px;position:relative}
+          .kop::after{content:"";position:absolute;left:0;right:0;bottom:-3px;height:2px;background:#f97316}
+          .kop .brand{font-size:19px;font-weight:800;color:#11335d} .kop .brand .ram{color:#f97316}
+          .kop .t{font-size:11px;font-weight:bold;color:#11335d;margin-top:2px} .kop .s{font-size:9px;color:#6b7280}
+          h1{font-size:14px;text-align:center;margin:4px 0 2px;text-transform:uppercase;color:#1f2937}
+          .sub{text-align:center;font-size:10.5px;color:#475569;margin-bottom:12px}
+          .info-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px 20px;margin:0 0 14px;font-size:10.5px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px}
+          .info-grid .lbl{color:#64748b}
+          .progress-bar{background:#e2e8f0;border-radius:4px;height:7px;overflow:hidden;margin-top:3px;width:120px}
+          .progress-fill{background:#22c55e;height:100%}
+          .cards{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px}
+          .card{border-radius:8px;padding:8px 16px;min-width:82px;text-align:center}
+          .card .num{font-size:19px;font-weight:800} .card .lbl{font-size:9px;margin-top:1px}
+          .red{background:#fee2e2;color:#dc2626} .amber{background:#fef3c7;color:#d97706}
+          .green{background:#dcfce7;color:#16a34a} .slate{background:#f1f5f9;color:#475569}
+          table{width:100%;border-collapse:collapse}
+          thead tr{background:#11335d;color:#fff}
+          th{padding:7px 8px;font-size:10px;text-align:left}
+          td{vertical-align:top;padding:5px 8px;font-size:10px;border-bottom:1px solid #e5e7eb}
+          .foot{margin-top:16px;border-top:1px solid #e2e8f0;padding-top:6px;font-size:8.5px;color:#94a3b8;display:flex;justify-content:space-between}
+          .foot b{color:#11335d} .foot .ram{color:#f97316}
+          @media print{body{padding:0} button{display:none}}
         </style>
       </head><body>
+        <div class="kop">
+          <div class="brand">e<span class="ram">RAM</span>Hoist</div>
+          <div class="t">PT PERTAMINA HULU ROKAN — Hoist &amp; Heavy Equipment</div>
+          <div class="s">Asset Reliability Management</div>
+        </div>
         <h1>Laporan Inspeksi — ${escapeHtml(insp.inspection_code)}</h1>
-        <h2>🏭 ${escapeHtml(rigName)} &nbsp;|&nbsp; ${escapeHtml(insp.kategori_inspeksi)} &nbsp;|&nbsp; ${fmtD(insp.start_date)}${insp.end_date ? ' → ' + fmtD(insp.end_date) : ' (on progress)'}</h2>
+        <div class="sub">🏭 ${escapeHtml(rigName)} &nbsp;·&nbsp; ${escapeHtml(insp.kategori_inspeksi)} &nbsp;·&nbsp; ${fmtD(insp.start_date)}${insp.end_date ? ' → ' + fmtD(insp.end_date) : ' (on progress)'}</div>
         <div class="info-grid">
           <div><span class="lbl">PI Company:</span> <b>${escapeHtml(insp.pi_company)}</b></div>
           <div><span class="lbl">Inspector:</span> <b>${escapeHtml(insp.rig_inspector)}</b></div>
@@ -5687,14 +5698,18 @@
           </tr></thead>
           <tbody>${groupedRows || '<tr><td colspan="6" style="text-align:center;padding:12px;color:#94a3b8">Belum ada temuan.</td></tr>'}</tbody>
         </table>
-        <div style="margin-top:20px;font-size:10px;color:#94a3b8">Dicetak dari RigBase Station — ${new Date().toLocaleString('id-ID')}</div>
+        <div class="foot">
+          <div>Dihasilkan otomatis dari siklus inspeksi tercatat di <b>e<span class="ram">RAM</span>Hoist</b></div>
+          <div>Dicetak: ${tglCetak} · oleh ${who}</div>
+        </div>
       </body></html>`;
 
       const win = window.open('', '_blank');
       if (!win) { toast('Pop-up diblokir browser. Aktifkan pop-up untuk mencetak.', 'warn'); return; }
       win.document.write(html);
       win.document.close();
-      win.onload = () => win.print();
+      win.focus();
+      setTimeout(() => win.print(), 500);
     }
     window.cetakInspeksiReport = cetakInspeksiReport;
 
