@@ -16793,7 +16793,7 @@
         return `<tr class="border-b border-slate-100 bg-purple-50/40">
           <td class="px-3 py-2 text-sm font-bold text-navy">${escapeHtml(r.rig || '—')} <span class="ml-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-100 text-purple-700">🔒 Siklus</span></td>
           <td class="px-3 py-2 text-sm">Inspeksi Terjadwal <span class="ml-1 font-mono text-[11px] text-purple-600">${escapeHtml(r.inspection_code)}</span></td>
-          <td class="px-3 py-2 text-xs text-slate-400 italic" colspan="2">${r.open_count} temuan open · tutup di Modul Inspeksi</td>
+          <td class="px-3 py-2 text-xs text-slate-400 italic" colspan="3">${r.open_count} temuan open · tutup di Modul Inspeksi</td>
           <td class="px-3 py-2 text-sm">${r.mulai ? new Date(r.mulai).toLocaleString('id-ID') : '—'}</td>
           <td class="px-3 py-2 text-sm text-red-600 font-semibold">${fmtH(durH)}</td>
           <td class="px-3 py-2"></td>
@@ -16887,6 +16887,7 @@
           <td class="px-3 py-2 text-xs text-slate-500 max-w-[160px]">
             <div class="truncate" title="${escapeHtml(d.notes||'')}">${escapeHtml(d.notes || '—')}</div>
           </td>
+          <td class="px-3 py-2 text-xs font-mono text-slate-600 whitespace-nowrap">${escapeHtml(d.wo_number || '—')}</td>
           <td class="px-3 py-2 text-sm text-slate-500">${escapeHtml(d.start_at ? new Date(d.start_at).toLocaleString('id-ID') : '—')}</td>
           <td class="px-3 py-2 text-sm text-red-600 font-semibold">${fmtH((now - new Date(d.start_at).getTime()) / 3600000)}</td>
           <td class="px-3 py-2 text-right whitespace-nowrap">
@@ -16964,7 +16965,7 @@
         </div>
         ${(ongoing.length || inspOngoing.length) ? `<div class="bg-white rounded-xl border border-red-200 overflow-hidden">
           <div class="px-4 py-3 border-b border-slate-100 font-semibold text-red-700 text-sm">🔴 Sedang Down (${ongoing.length + inspOngoing.length}) <span class="ml-2 text-xs font-normal text-slate-400">🔒 = dari Siklus Inspeksi, read-only</span></div>
-          <div class="overflow-x-auto"><table class="w-full"><thead><tr class="bg-slate-50 text-left text-xs font-bold text-slate-600"><th class="px-3 py-2">Equipment</th><th class="px-3 py-2">Penyebab</th><th class="px-3 py-2 min-w-[160px]">Status Pekerjaan</th><th class="px-3 py-2 min-w-[140px]">Catatan</th><th class="px-3 py-2">Mulai</th><th class="px-3 py-2">Lama</th><th class="px-3 py-2"></th></tr></thead><tbody>${inspRows}${ongoingRows}</tbody></table></div>
+          <div class="overflow-x-auto"><table class="w-full"><thead><tr class="bg-slate-50 text-left text-xs font-bold text-slate-600"><th class="px-3 py-2">Equipment</th><th class="px-3 py-2">Penyebab</th><th class="px-3 py-2 min-w-[160px]">Status Pekerjaan</th><th class="px-3 py-2 min-w-[140px]">Catatan</th><th class="px-3 py-2">No. WO</th><th class="px-3 py-2">Mulai</th><th class="px-3 py-2">Lama</th><th class="px-3 py-2"></th></tr></thead><tbody>${inspRows}${ongoingRows}</tbody></table></div>
         </div>` : ''}
         ${ongoingWait.length ? `<div class="bg-white rounded-xl border border-orange-300 overflow-hidden">
           <div class="px-4 py-3 border-b border-orange-100 font-semibold text-orange-700 text-sm flex items-center gap-2">
@@ -17071,6 +17072,9 @@
           <div><label class="text-xs text-slate-500">Tgl Order Part (isi jika tunggu spare part)</label>
             <input id="dt-part-order" type="date" value="${e.part_order_date || ''}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy">
             <p class="text-[11px] text-slate-400 mt-1">Tanggal part/spare dipesan ke gudang atau supplier.</p></div>
+          <div><label class="text-xs text-slate-500">No. WO (SAP — dari Team Planner)</label>
+            <input id="dt-wo" value="${escapeHtml(e.wo_number || '')}" placeholder="mis. 4500123456" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy">
+            <p class="text-[11px] text-slate-400 mt-1">Nomor Work Order yang diterbitkan Planner di SAP untuk perbaikan ini. Isi kalau sudah terbit.</p></div>
           <div class="border-t border-slate-200 pt-3">
             <label class="text-xs font-semibold text-slate-600 uppercase">📸 Foto Pendukung (optional)</label>
             <div class="grid grid-cols-2 gap-2 mt-1">
@@ -17140,6 +17144,7 @@
         category: document.getElementById('dt-cat')?.value || 'lainnya',
         notes: (document.getElementById('dt-notes')?.value || '').trim() || null,
         part_order_date: document.getElementById('dt-part-order')?.value || null,
+        wo_number: (document.getElementById('dt-wo')?.value || '').trim() || null,
         created_by_name: reporterName,  // PELAPOR (manual), bukan user login
       };
       let savedId = id;
