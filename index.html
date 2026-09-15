@@ -16253,22 +16253,63 @@
       resultEl.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat data…</div>';
       try {
         const { data: eqList, error: eErr } = await state.supabase
-          .from('equipment').select('id, tag_number, nama_equipment')
+          .from('equipment').select('id, tag_number, nama_equipment, assigned_unit_id')
           .eq('assigned_unit_id', unitId);
         if (eErr) throw eErr;
-        const eqIds = (eqList || []).map(e => e.id);
+
+        // Equipment BISA pindah rig di tengah jalan (mudpump/genset dipinjam antar rig, dst) —
+        // assigned_unit_id cuma nunjukin posisi SEKARANG. Supaya riwayat PM/CM/TS-nya gak
+        // hilang/salah-rig, cari juga equipment yang PERNAH mampir ke rig ini lewat mutation_log,
+        // lalu tentukan posisi rig-nya PER TANGGAL laporan (bukan posisi sekarang) di bawah.
+        const { data: mutTouch, error: mtErr } = await state.supabase
+          .from('mutation_log').select('equipment_id')
+          .or(`from_unit_id.eq.${unitId},to_unit_id.eq.${unitId}`);
+        if (mtErr) throw mtErr;
+
         const eqById = {}; (eqList || []).forEach(e => { eqById[e.id] = e; });
-        if (!eqIds.length) {
+        const extraIds = [...new Set((mutTouch || []).map(m => m.equipment_id))].filter(id => !eqById[id]);
+        if (extraIds.length) {
+          const { data: extraEq, error: exErr } = await state.supabase
+            .from('equipment').select('id, tag_number, nama_equipment, assigned_unit_id').in('id', extraIds);
+          if (exErr) throw exErr;
+          (extraEq || []).forEach(e => { eqById[e.id] = e; });
+        }
+        const candidateIds = Object.keys(eqById);
+        if (!candidateIds.length) {
           resultEl.innerHTML = '<div class="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-400 text-sm">Tidak ada equipment terdaftar di rig ini.</div>';
           ploState.rows = null;
           return;
         }
 
+        // Riwayat mutasi LENGKAP tiap kandidat (bukan cuma yang nyentuh rig ini) — dibutuhkan
+        // buat nelusur mundur posisi rig-nya per tanggal, walau sempat mampir unit lain dulu.
+        const { data: mutFull, error: mfErr } = await state.supabase
+          .from('mutation_log').select('equipment_id, from_unit_id, to_unit_id, created_at')
+          .in('equipment_id', candidateIds).order('created_at', { ascending: false });
+        if (mfErr) throw mfErr;
+        const mutationsByEquip = {};
+        (mutFull || []).forEach(m => { (mutationsByEquip[m.equipment_id] ||= []).push(m); });
+
+        // Posisi rig equipment pada tanggal tertentu: mulai dari posisi SEKARANG, lalu "undo"
+        // tiap mutasi yang terjadi SETELAH tanggal itu (jalan mundur dari mutasi terbaru).
+        function unitAtDate(equipmentId, dateStr) {
+          const eq = eqById[equipmentId];
+          let unit = eq ? eq.assigned_unit_id : null;
+          if (!dateStr) return unit;
+          const targetTime = new Date(`${dateStr}T23:59:59`).getTime();
+          for (const m of (mutationsByEquip[equipmentId] || [])) {
+            if (targetTime < new Date(m.created_at).getTime()) unit = m.from_unit_id;
+            else break;
+          }
+          return unit;
+        }
+        const wasOnRig = (equipmentId, dateStr) => dateStr && String(unitAtDate(equipmentId, dateStr)) === String(unitId);
+
         const [lhRes, mlRes, dtRes, dlRes] = await Promise.all([
           state.supabase.from('laporan_harian').select('id, tanggal').eq('status', 'final').gte('tanggal', start).lt('tanggal', endExclusive),
-          state.supabase.from('maintenance_log').select('equipment_id, maintenance_date, maintenance_type, notes').in('equipment_id', eqIds).gte('maintenance_date', start).lt('maintenance_date', endExclusive),
-          state.supabase.from('downtime_events').select('equipment_id, category, start_at, end_at, notes').in('equipment_id', eqIds).gte('start_at', start).lt('start_at', endExclusive),
-          state.supabase.from('daily_logs').select('equipment_id, log_date, maintenance_type, notes, parts').in('equipment_id', eqIds).gte('log_date', start).lt('log_date', endExclusive),
+          state.supabase.from('maintenance_log').select('equipment_id, maintenance_date, maintenance_type, notes').in('equipment_id', candidateIds).gte('maintenance_date', start).lt('maintenance_date', endExclusive),
+          state.supabase.from('downtime_events').select('equipment_id, category, start_at, end_at, notes').in('equipment_id', candidateIds).gte('start_at', start).lt('start_at', endExclusive),
+          state.supabase.from('daily_logs').select('equipment_id, log_date, maintenance_type, notes, parts').in('equipment_id', candidateIds).gte('log_date', start).lt('log_date', endExclusive),
         ]);
         if (lhRes.error) throw lhRes.error; if (mlRes.error) throw mlRes.error; if (dtRes.error) throw dtRes.error; if (dlRes.error) throw dlRes.error;
 
@@ -16278,7 +16319,7 @@
         if (lhIds.length) {
           const { data, error } = await state.supabase.from('laporan_harian_entries')
             .select('laporan_id, equipment_id, job_desc, status_kerja, notes, progress_pct')
-            .in('laporan_id', lhIds).in('equipment_id', eqIds).in('status_kerja', ['PM', 'CM', 'TS']);
+            .in('laporan_id', lhIds).in('equipment_id', candidateIds).in('status_kerja', ['PM', 'CM', 'TS']);
           if (error) throw error;
           lhEntries = data || [];
         }
@@ -16293,6 +16334,7 @@
         const rows = [];
         lhEntries.forEach(e => {
           const lh = lhById[e.laporan_id]; if (!lh) return;
+          if (!wasOnRig(e.equipment_id, lh.tanggal)) return;
           const eq = eqById[e.equipment_id];
           rows.push({
             tglStart: lh.tanggal, tglFinish: lh.tanggal,
@@ -16304,6 +16346,7 @@
           });
         });
         (mlRes.data || []).forEach(m => {
+          if (!wasOnRig(m.equipment_id, m.maintenance_date)) return;
           const eq = eqById[m.equipment_id];
           rows.push({
             tglStart: m.maintenance_date, tglFinish: m.maintenance_date,
@@ -16315,9 +16358,11 @@
           });
         });
         (dtRes.data || []).forEach(d => {
+          const dtDate = (d.start_at || '').slice(0, 10);
+          if (!wasOnRig(d.equipment_id, dtDate)) return;
           const eq = eqById[d.equipment_id];
           rows.push({
-            tglStart: (d.start_at || '').slice(0, 10), tglFinish: d.end_at ? d.end_at.slice(0, 10) : '',
+            tglStart: dtDate, tglFinish: d.end_at ? d.end_at.slice(0, 10) : '',
             lokasi: eq ? `${eq.tag_number} — ${eq.nama_equipment}` : '-',
             info: `[${(d.category || '-').toUpperCase()}] ${d.notes || '-'}`,
             part: '-',
@@ -16326,6 +16371,7 @@
           });
         });
         (dlRes.data || []).forEach(d => {
+          if (!wasOnRig(d.equipment_id, d.log_date)) return;
           const eq = eqById[d.equipment_id];
           rows.push({
             tglStart: d.log_date, tglFinish: d.log_date,
