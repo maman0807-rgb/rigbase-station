@@ -9032,7 +9032,7 @@
         const childIds = children.map(c => c.id);
         const childById = Object.fromEntries(children.map(c => [c.id, c]));
 
-        const [muts, loans, dt, mlog, lhPmEntries, childMuts, catC71Logs] = await Promise.all([
+        const [muts, loans, dt, mlog, lhWorkEntries, childMuts, catC71Logs] = await Promise.all([
           fetchMutationLog(eq.id),
           fetchLoanHistory(eq.id).catch(() => []),
           state.supabase.from('downtime_events').select('*').eq('equipment_id', eq.id)
@@ -9041,12 +9041,16 @@
           // bebas teks, nggak selalu PM. Ditampilkan sbg grup sendiri biar kelihatan, TIDAK
           // ikut dihitung ke grup "pm" (biar count PM formal tetap akurat, bukan tebak-tebakan teks).
           fetchMaintenanceLog(eq.id).catch(() => []),
-          // Entry PM dari Laporan Harian (status_kerja='PM', laporan sudah final) — sumber ke-3.
-          // status_kerja EKSPLISIT 'PM' (bukan tebakan teks), jadi ditampilkan sbg grup sendiri
-          // juga (bukan disatukan ke grup "pm" formal — biar jelas asalnya, hindari dobel-hitung
-          // kalau PM yang sama juga di-klik "Catat PM Selesai" terpisah).
+          // Entry PM/CM/TS dari Laporan Harian (laporan sudah final) — sumber ke-3.
+          // status_kerja EKSPLISIT (bukan tebakan teks), jadi ditampilkan sbg grup sendiri
+          // juga (bukan disatukan ke grup "pm"/"downtime" formal — biar jelas asalnya, hindari
+          // dobel-hitung kalau yang sama juga di-klik "Catat PM Selesai"/dibuka event Downtime
+          // terpisah). CM/TS dari sini ditandai jelas "belum ada event Downtime" — sebelumnya
+          // CM/TS di Laporan Harian yang tidak dibukakan event Downtime terpisah sama sekali
+          // tidak muncul di History (ditemukan Maman 2026-09-16: CM GS-KB150B-DEUTZ 27-30 Agu
+          // 2026 kelihatan di pencarian Laporan Harian tapi hilang dari tab History equipment).
           state.supabase.from('laporan_harian_entries').select('*')
-            .eq('equipment_id', eq.id).eq('status_kerja', 'PM')
+            .eq('equipment_id', eq.id).in('status_kerja', ['PM','CM','TS'])
             .then(r => r.data || []).catch(() => []),
           // Mutasi children — sekali query semua sekaligus
           childIds.length
@@ -9145,28 +9149,31 @@
             color: 'bg-slate-500',
           });
         });
-        // Entry PM dari Laporan Harian (sumber ke-3) — cuma dari laporan yg sudah FINAL
-        // (draft belum dikonfirmasi, jangan ikut dihitung sbg PM yang "sudah dilakukan").
-        const lhIds = [...new Set(lhPmEntries.map(e => e.laporan_id))];
+        // Entry PM/CM/TS dari Laporan Harian (sumber ke-3) — cuma dari laporan yg sudah FINAL
+        // (draft belum dikonfirmasi, jangan ikut dihitung sbg yang "sudah dilakukan").
+        const lhIds = [...new Set(lhWorkEntries.map(e => e.laporan_id))];
         const lhHeaders = lhIds.length
           ? await state.supabase.from('laporan_harian').select('id, tanggal, status').in('id', lhIds)
               .then(r => r.data || []).catch(() => [])
           : [];
         const lhHeaderById = Object.fromEntries(lhHeaders.map(h => [h.id, h]));
-        lhPmEntries.forEach(e => {
+        lhWorkEntries.forEach(e => {
           const header = lhHeaderById[e.laporan_id];
           if (!header || header.status !== 'final') return;
           const lhDetail = [];
           if (e.job_desc) lhDetail.push(`📝 ${escapeHtml(e.job_desc)}`);
           if (e.progress_pct != null) lhDetail.push(`📊 Progress: ${e.progress_pct}%`);
           if (e.notes) lhDetail.push(`🗒️ ${escapeHtml(e.notes)}`);
+          const isPM = e.status_kerja === 'PM';
           events.push({
-            group: 'pm_lh', kind: 'pm_lh',
+            group: isPM ? 'pm_lh' : 'cmts_lh', kind: isPM ? 'pm_lh' : 'cmts_lh',
             date: header.tanggal,
-            title: `📋 PM (Laporan Harian)${e.progress_pct != null ? ` — ${e.progress_pct}%` : ''}`,
+            title: isPM
+              ? `📋 PM (Laporan Harian)${e.progress_pct != null ? ` — ${e.progress_pct}%` : ''}`
+              : `⚠️ ${escapeHtml(e.status_kerja)} (Laporan Harian — belum ada event Downtime)${e.progress_pct != null ? ` — ${e.progress_pct}%` : ''}`,
             detail: lhDetail.join('<br>') || null,
             detailIsHtml: true,
-            color: 'bg-emerald-500',
+            color: isPM ? 'bg-emerald-500' : 'bg-orange-500',
           });
         });
         // Entry PM Cat C7.1 (sumber ke-4, GS-KB150A-CAT/GS-KB150B-CAT saja) — 1 aksi user
@@ -9362,7 +9369,7 @@
       const h = window.__hist, container = window.__histHost;
       if (!h || !container) return;
       const all = h.events;
-      const cnt = { all: all.length, mutasi: 0, pinjam: 0, downtime: 0, pm: 0, maintenance_manual: 0, pm_lh: 0, pm_cat71: 0 };
+      const cnt = { all: all.length, mutasi: 0, pinjam: 0, downtime: 0, pm: 0, maintenance_manual: 0, pm_lh: 0, pm_cat71: 0, cmts_lh: 0 };
       all.forEach(e => { cnt[e.group] = (cnt[e.group] || 0) + 1; });
       const ev = historyFilter === 'all' ? all : all.filter(e => e.group === historyFilter);
 
@@ -9376,6 +9383,7 @@
             ${chip('pm', 'PM')}
             ${cnt.pm_cat71 ? chip('pm_cat71', 'PM Cat C7.1') : ''}
             ${chip('pm_lh', 'PM (Laporan Harian)')}
+            ${cnt.cmts_lh ? chip('cmts_lh', '⚠️ CM/TS (Laporan Harian)') : ''}
             ${chip('maintenance_manual', 'Maintenance Log (manual)')}
             ${chip('mutasi', 'Mutasi')}
             ${chip('pinjam', 'Pinjaman')}
@@ -9437,7 +9445,7 @@
           cnt[e.group] = (cnt[e.group] || 0) + 1;
         }
       });
-      const grpLabel = { mutasi: 'Mutasi', pinjam: 'Pinjaman', downtime: 'Downtime', gejala: 'Gejala', pm: 'PM', maintenance_manual: 'Maintenance Log (manual)', pm_lh: 'PM (Laporan Harian)', pm_cat71: 'PM Cat C7.1' };
+      const grpLabel = { mutasi: 'Mutasi', pinjam: 'Pinjaman', downtime: 'Downtime', gejala: 'Gejala', pm: 'PM', maintenance_manual: 'Maintenance Log (manual)', pm_lh: 'PM (Laporan Harian)', pm_cat71: 'PM Cat C7.1', cmts_lh: 'CM/TS (Laporan Harian)' };
       const filterLabel = historyFilter === 'all' ? 'Semua Kejadian' : grpLabel[historyFilter];
 
       const summary = `<div class="cards">
