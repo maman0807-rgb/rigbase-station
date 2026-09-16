@@ -15537,13 +15537,13 @@
     }
 
     function lhStartCreate() {
-      lhState = { mode: 'create', laporanId: null, entries: [lhBlankEntry()], header: { tanggal: new Date().toISOString().slice(0, 10) } };
+      lhState = { mode: 'create', laporanId: null, entries: [lhBlankEntry()], header: { tanggal: new Date().toISOString().slice(0, 10) }, filterBulan: lhState.filterBulan || '', filterStatus: lhState.filterStatus || '', filterEqId: lhState.filterEqId || '', filterEqLabel: lhState.filterEqLabel || '' };
       renderLaporanHarianPage();
     }
     window.lhStartCreate = lhStartCreate;
 
     async function lhOpenDetail(id) {
-      lhState = { mode: 'detail', laporanId: id, entries: [], header: null };
+      lhState = { mode: 'detail', laporanId: id, entries: [], header: null, filterBulan: lhState.filterBulan || '', filterStatus: lhState.filterStatus || '', filterEqId: lhState.filterEqId || '', filterEqLabel: lhState.filterEqLabel || '' };
       renderLaporanHarianPage();
     }
     window.lhOpenDetail = lhOpenDetail;
@@ -15628,7 +15628,7 @@
     window.lhCancelEdit = lhCancelEdit;
 
     function lhBackToList() {
-      lhState = { mode: 'list', laporanId: null, entries: [], header: null, filterBulan: lhState.filterBulan || '', filterStatus: lhState.filterStatus || '' };
+      lhState = { mode: 'list', laporanId: null, entries: [], header: null, filterBulan: lhState.filterBulan || '', filterStatus: lhState.filterStatus || '', filterEqId: lhState.filterEqId || '', filterEqLabel: lhState.filterEqLabel || '' };
       renderLaporanHarianPage();
     }
     window.lhBackToList = lhBackToList;
@@ -15676,7 +15676,9 @@
       const { data: entryRows, error } = await state.supabase
         .from('laporan_harian_entries')
         .select('laporan_id, status_kerja, job_desc, notes, progress_pct')
-        .eq('equipment_id', eqId);
+        .eq('equipment_id', eqId)
+        .order('created_at', { ascending: false })
+        .limit(300);
       if (error) { host.innerHTML = `<div class="text-red-500 text-sm p-4">Gagal memuat: ${escapeHtml(error.message)}</div>`; return; }
       const laporanIds = [...new Set((entryRows || []).map(r => r.laporan_id))];
       let laporanById = {};
