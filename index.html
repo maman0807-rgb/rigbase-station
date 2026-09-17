@@ -15356,7 +15356,7 @@
       if (lhEquipmentList) return lhEquipmentList;
       const { data, error } = await state.supabase
         .from('equipment')
-        .select('id, tag_number, nama_equipment, brand, model, serial_number, running_hours')
+        .select('id, tag_number, nama_equipment, brand, model, serial_number, running_hours, status_operasi')
         .order('tag_number');
       if (error) { toast('Gagal ambil daftar equipment: ' + error.message, 'error'); lhEquipmentList = []; return lhEquipmentList; }
       lhEquipmentList = data || [];
@@ -15741,6 +15741,9 @@
       const v = (val || '').trim();
       const match = (lhEquipmentList || []).find(eq => `${eq.tag_number} — ${eq.nama_equipment || ''}`.trim() === v);
       if (v && !match) toast('Equipment tidak ketemu — pilih dari daftar saran.', 'warn');
+      if (match && (match.status_operasi === 'Down' || match.status_operasi === 'Scrap')) {
+        toast(`⚠️ ${match.tag_number} statusnya "${match.status_operasi}" — equipment ini seharusnya sudah tidak dipakai. Cek lagi kalau ini bukan equipment yang dimaksud.`, 'warn');
+      }
       lhUpdateEntry(i, 'equipment_id', match ? match.id : null);
     }
     window.lhResolveEqInput = lhResolveEqInput;
@@ -17180,7 +17183,7 @@
     async function openDowntimeForm(existing) {
       if (!isSrMekanikOrAbove()) { toast('Khusus Sr Mekanik ke atas.', 'warn'); return; }
       let eqs = [];
-      try { const { data } = await state.supabase.from('equipment').select('id, tag_number, nama_equipment, assigned_unit_id').order('tag_number'); eqs = data || []; } catch (e) {}
+      try { const { data } = await state.supabase.from('equipment').select('id, tag_number, nama_equipment, assigned_unit_id, status_operasi').order('tag_number'); eqs = data || []; } catch (e) {}
       window.__dtEqs = eqs; // dipakai dtEqResolve() buat cari equipment dari teks yg diketik
       const e = existing || {};
       const selectedEq = eqs.find(x => x.id === e.equipment_id);
@@ -17256,6 +17259,9 @@
       hidden.dataset.name = match ? (match.nama_equipment || '') : '';
       hidden.dataset.unit = match?.assigned_unit_id || '';
       if (val && !match) toast('Equipment tidak ketemu — pilih dari daftar saran.', 'warn');
+      if (match && (match.status_operasi === 'Down' || match.status_operasi === 'Scrap')) {
+        toast(`⚠️ ${match.tag_number} statusnya "${match.status_operasi}" — equipment ini seharusnya sudah tidak dipakai. Cek lagi kalau ini bukan equipment yang dimaksud.`, 'warn');
+      }
     }
     window.dtEqResolve = dtEqResolve;
     async function openDowntimeEdit(id) {
