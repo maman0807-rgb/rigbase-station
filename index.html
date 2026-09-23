@@ -18140,6 +18140,11 @@
         const now = new Date();
         const todayMs = now.getTime();
         const events = [];
+        // SKPI/COC yang expire-nya >365 hari lagi gak ikut masuk `events` (lihat blok SKPI/
+        // Sertifikat di bawah) — dicatat terpisah di sini cuma buat ditampilin sbg info note
+        // di Per Urgency, biar Maman gak nyangka datanya ilang/kosong padahal cuma di luar
+        // window proyeksi 1 tahun (ditanya 2026-09-23: MR-KB150B/BW-100A gak muncul di SKPI).
+        const farFutureCerts = [];
 
         // 1b. Riwayat — semua downtime_events (PM/TOH/GOH/breakdown/troubleshoot/dst), 12 bulan terakhir.
         // Cuma di-fetch kalau lagi di mode Riwayat, biar mode lain (proyeksi ke depan) tidak kena query ekstra.
@@ -18257,6 +18262,8 @@
                 color: days < 0 ? 'bg-red-600' : days < 60 ? 'bg-amber-500' : 'bg-slate-400',
                 icon: '📜',
               });
+            } else if (days > 365) {
+              farFutureCerts.push({ eq, unitName, kind: 'SKPI', days });
             }
           }
 
@@ -18273,6 +18280,8 @@
                 color: days < 0 ? 'bg-red-600' : days < 60 ? 'bg-amber-500' : 'bg-slate-400',
                 icon: '📋',
               });
+            } else if (days > 365) {
+              farFutureCerts.push({ eq, unitName, kind: 'COC', days });
             }
           }
         });
@@ -18618,6 +18627,20 @@
                 }).join('')}</tbody>
               </table></div></div>`;
           }).join('<div class="h-3"></div>') || '<div class="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-400 text-sm">Tidak ada event setelah filter.</div>';
+
+          // Note: SKPI/COC yang expire-nya masih >365 hari lagi sengaja gak ikut ditampilkan
+          // di atas (di luar window proyeksi 1 tahun kalender ini) — biar Maman gak nyangka
+          // datanya kosong/ilang pas cari equipment tertentu (ditanya 2026-09-23).
+          const farFutureFiltered = farFutureCerts
+            .filter((f) => !calFilter.unit_id || String(f.eq.assigned_unit_id) === String(calFilter.unit_id))
+            .filter((f) => !calFilter.kind || calFilter.kind === f.kind)
+            .sort((a, b) => a.days - b.days);
+          if (farFutureFiltered.length) {
+            detailContent += `<div class="bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-500 mt-3">
+              ℹ️ ${farFutureFiltered.length} SKPI/COC masih lebih dari 365 hari lagi, jadi belum ditampilkan di atas (proyeksi ini cuma 1 tahun ke depan):
+              ${farFutureFiltered.map((f) => `<span class="inline-block mr-2">${escapeHtml(f.eq.tag_number)} (${f.kind}, ${f.days}h lagi)</span>`).join('')}
+            </div>`;
+          }
         } else if (calFilter.viewMode === 'rig') {
           // Group by rig (unit_id)
           const byRig = {};
