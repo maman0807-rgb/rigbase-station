@@ -9180,6 +9180,19 @@
               .then(r => r.data || []).catch(() => [])
           : [];
         const lhHeaderById = Object.fromEntries(lhHeaders.map(h => [h.id, h]));
+        // Cek apakah tanggal CM/TS ini udah punya event Downtime yang overlap (±1 hari,
+        // sama persis logic lhHasDowntimeMatch() di form Laporan Harian) — kalau sudah,
+        // hapus label "belum ada event Downtime" biar gak nyesatin begitu event Downtime-nya
+        // dicatat belakangan (kasus nyata: GS-KB150B-DEUTZ alternator 25-31 Agu 2026, ditemukan
+        // via investigasi 2026-09-23, Downtime-nya baru ditambahkan manual setelah kejadian).
+        const hasDtMatch = (tanggal) => {
+          const reportDateMs = new Date(tanggal).getTime(), dayMs = 86400000;
+          return dt.some(d => {
+            const s = new Date(d.start_at).getTime();
+            const en = d.end_at ? new Date(d.end_at).getTime() : Date.now();
+            return s <= reportDateMs + dayMs && en >= reportDateMs - dayMs;
+          });
+        };
         lhWorkEntries.forEach(e => {
           const header = lhHeaderById[e.laporan_id];
           if (!header || header.status !== 'final') return;
@@ -9188,15 +9201,18 @@
           if (e.progress_pct != null) lhDetail.push(`📊 Progress: ${e.progress_pct}%`);
           if (e.notes) lhDetail.push(`🗒️ ${escapeHtml(e.notes)}`);
           const isPM = e.status_kerja === 'PM';
+          const matched = !isPM && hasDtMatch(header.tanggal);
           events.push({
             group: isPM ? 'pm_lh' : 'cmts_lh', kind: isPM ? 'pm_lh' : 'cmts_lh',
             date: header.tanggal,
             title: isPM
               ? `📋 PM (Laporan Harian)${e.progress_pct != null ? ` — ${e.progress_pct}%` : ''}`
-              : `⚠️ ${escapeHtml(e.status_kerja)} (Laporan Harian — belum ada event Downtime)${e.progress_pct != null ? ` — ${e.progress_pct}%` : ''}`,
+              : matched
+                ? `${escapeHtml(e.status_kerja)} (Laporan Harian — sudah ada event Downtime)${e.progress_pct != null ? ` — ${e.progress_pct}%` : ''}`
+                : `⚠️ ${escapeHtml(e.status_kerja)} (Laporan Harian — belum ada event Downtime)${e.progress_pct != null ? ` — ${e.progress_pct}%` : ''}`,
             detail: lhDetail.join('<br>') || null,
             detailIsHtml: true,
-            color: isPM ? 'bg-emerald-500' : 'bg-orange-500',
+            color: isPM ? 'bg-emerald-500' : (matched ? 'bg-slate-400' : 'bg-orange-500'),
           });
         });
         // Entry PM Cat C7.1 (sumber ke-4, GS-KB150A-CAT/GS-KB150B-CAT saja) — 1 aksi user
