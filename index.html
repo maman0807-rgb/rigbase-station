@@ -762,6 +762,25 @@
       });
     }
 
+    // Hard block: equipment berstatus Scrap gak boleh dipilih buat catat aktivitas baru
+    // (Laporan Harian, Downtime, FMEA, Temuan Inspeksi, Pemasangan anak) — beda dari warning
+    // Down/Scrap yang cuma toast non-blocking (lihat lhResolveEqInput/dtEqResolve), permintaan
+    // Maman 2026-09-23: Scrap = unit sudah tidak bisa dipergunakan sama sekali, koordinasi Admin.
+    function guardScrapEquipment(eq) {
+      if (!eq || eq.status_operasi !== 'Scrap') return false;
+      openModal({
+        title: '⛔ Equipment Berstatus Scrap',
+        maxWidth: 'max-w-md',
+        body: `<div class="text-sm text-slate-700 space-y-2">
+          <p><b>${escapeHtml(eq.tag_number || '')}</b> — ${escapeHtml(eq.nama_equipment || '')} berstatus <span class="font-bold text-red-600">Scrap</span>.</p>
+          <p>Unit ini sudah tidak bisa dipergunakan lagi. Silakan koordinasi dengan Admin kalau ini bukan kesalahan pilih equipment.</p>
+        </div>`,
+        footer: `<button onclick="closeModal()" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy-700 text-white text-sm font-semibold">Mengerti</button>`,
+      });
+      return true;
+    }
+    window.guardScrapEquipment = guardScrapEquipment;
+
     // ============================================================
     // 4c. SUPABASE STORAGE HELPERS
     // ============================================================
@@ -1558,7 +1577,7 @@
     async function fetchEquipmentByRig(parentUnitId) {
       const { data, error } = await state.supabase
         .from('equipment')
-        .select('id, tag_number, nama_equipment, kategori_id')
+        .select('id, tag_number, nama_equipment, kategori_id, status_operasi')
         .eq('assigned_unit_id', parentUnitId)
         .order('tag_number');
       if (error) throw error;
@@ -6195,7 +6214,7 @@
       const eqOpts = ['<option value="">— pilih (atau biarkan untuk unresolved) —</option>'].concat(
         equipmentList.map(e => {
           const cat = state.categories.find(c => c.id === e.kategori_id);
-          return `<option value="${e.id}" data-name="${escapeHtml(e.nama_equipment)}" data-kategori="${e.kategori_id}" ${data.equipment_id === e.id ? 'selected' : ''}>${escapeHtml(e.tag_number)} — ${escapeHtml(e.nama_equipment)} ${cat ? '(' + escapeHtml(cat.name) + ')' : ''}</option>`;
+          return `<option value="${e.id}" data-tag="${escapeHtml(e.tag_number)}" data-name="${escapeHtml(e.nama_equipment)}" data-kategori="${e.kategori_id}" data-status="${escapeHtml(e.status_operasi || '')}" ${data.equipment_id === e.id ? 'selected' : ''}>${escapeHtml(e.tag_number)} — ${escapeHtml(e.nama_equipment)} ${cat ? '(' + escapeHtml(cat.name) + ')' : ''}</option>`;
         })
       ).join('');
 
@@ -6365,6 +6384,9 @@
 
       const insp = window.__currentInspection;
       if (!insp) return;
+
+      const eqOpt = form.elements.equipment_id.selectedOptions?.[0];
+      if (eqOpt?.value && guardScrapEquipment({ tag_number: eqOpt.dataset.tag, nama_equipment: eqOpt.dataset.name, status_operasi: eqOpt.dataset.status })) return;
 
       const payload = {
         inspection_id: insp.id,
@@ -8916,10 +8938,11 @@
           // Ambil HM anak sekarang kalau numpang (untuk kalkulasi hm_induk_pasang relatif)
           // ilike (bukan eq) — tag_number equipment tidak dipaksa uppercase saat disimpan (lihat submitEquipmentForm),
           // jadi pencarian harus case-insensitive supaya "Trans-Standby-02" tetap ketemu meski dicari "TRANS-STANDBY-02"
-          const { data: anakEqRows, error: anakEqErr } = await state.supabase.from('equipment').select('id, tag_number, running_hours').ilike('tag_number', anakTag);
+          const { data: anakEqRows, error: anakEqErr } = await state.supabase.from('equipment').select('id, tag_number, running_hours, status_operasi').ilike('tag_number', anakTag);
           if (anakEqErr) throw anakEqErr;
           if (!anakEqRows || anakEqRows.length === 0) throw new Error(`Tag "${anakTag}" tidak ditemukan di database`);
           const anakEq = anakEqRows[0];
+          if (anakEq.status_operasi === 'Scrap') throw new Error(`${anakEq.tag_number} berstatus Scrap — unit ini sudah tidak bisa dipergunakan lagi. Silakan koordinasi dengan Admin.`);
           const anakHm = Number(anakEq.running_hours || 0);
           const payload = {
             induk_id: indukId,
@@ -14429,7 +14452,8 @@
     async function openFmeaForm(existing, preset) {
       if (!isSrMekanikOrAbove()) { toast('Khusus Sr Mekanik ke atas.', 'warn'); return; }
       let eqs = [];
-      try { const { data } = await state.supabase.from('equipment').select('id, tag_number, nama_equipment').order('tag_number'); eqs = data || []; } catch (e) {}
+      try { const { data } = await state.supabase.from('equipment').select('id, tag_number, nama_equipment, status_operasi').order('tag_number'); eqs = data || []; } catch (e) {}
+      window.__fmeaEqs = eqs; // dipakai saveFmea() buat cek status_operasi
       const e = existing || {};
       const selId = e.equipment_id || preset?.id || '';
       const locked = !!preset && !existing;
@@ -14497,6 +14521,7 @@
       const lockedId = document.getElementById('fmea-eq-locked')?.value;
       const eqId = lockedId || eqSel?.value;
       if (!eqId) { toast('Pilih equipment dulu.', 'warn'); return; }
+      if (guardScrapEquipment((window.__fmeaEqs || []).find(x => x.id === eqId))) return;
       const mode = (document.getElementById('fmea-mode')?.value || '').trim();
       if (!mode) { toast('Isi mode kegagalan.', 'warn'); return; }
       const opt = eqSel?.selectedOptions?.[0];
@@ -15741,9 +15766,10 @@
       const v = (val || '').trim();
       const match = (lhEquipmentList || []).find(eq => `${eq.tag_number} — ${eq.nama_equipment || ''}`.trim() === v);
       if (v && !match) toast('Equipment tidak ketemu — pilih dari daftar saran.', 'warn');
-      if (match && (match.status_operasi === 'Down' || match.status_operasi === 'Scrap')) {
-        toast(`⚠️ ${match.tag_number} statusnya "${match.status_operasi}" — equipment ini seharusnya sudah tidak dipakai. Cek lagi kalau ini bukan equipment yang dimaksud.`, 'warn');
+      if (match && match.status_operasi === 'Down') {
+        toast(`⚠️ ${match.tag_number} statusnya "Down" — equipment ini seharusnya sudah tidak dipakai. Cek lagi kalau ini bukan equipment yang dimaksud.`, 'warn');
       }
+      guardScrapEquipment(match);
       lhUpdateEntry(i, 'equipment_id', match ? match.id : null);
     }
     window.lhResolveEqInput = lhResolveEqInput;
@@ -15928,6 +15954,12 @@
       const tanggal = tanggalInput ? tanggalInput.value : (lhState.header?.tanggal || new Date().toISOString().slice(0, 10));
       if (!tanggal) { toast('Tanggal wajib diisi.', 'warn'); return; }
       if (!lhState.entries.length) { toast('Tambahkan minimal 1 unit.', 'warn'); return; }
+
+      for (const e of lhState.entries) {
+        if (!e.equipment_id) continue;
+        const eq = (lhEquipmentList || []).find(x => x.id === e.equipment_id);
+        if (guardScrapEquipment(eq)) return;
+      }
 
       // Sanity check RH sebelum simpan: cegah salah ketik RH turun besar dari Laporan Harian
       // (kejadian TL-KB150A 2026-08-05: rh diketik 1415.2 padahal seharusnya ~8941, langsung
@@ -17259,9 +17291,10 @@
       hidden.dataset.name = match ? (match.nama_equipment || '') : '';
       hidden.dataset.unit = match?.assigned_unit_id || '';
       if (val && !match) toast('Equipment tidak ketemu — pilih dari daftar saran.', 'warn');
-      if (match && (match.status_operasi === 'Down' || match.status_operasi === 'Scrap')) {
-        toast(`⚠️ ${match.tag_number} statusnya "${match.status_operasi}" — equipment ini seharusnya sudah tidak dipakai. Cek lagi kalau ini bukan equipment yang dimaksud.`, 'warn');
+      if (match && match.status_operasi === 'Down') {
+        toast(`⚠️ ${match.tag_number} statusnya "Down" — equipment ini seharusnya sudah tidak dipakai. Cek lagi kalau ini bukan equipment yang dimaksud.`, 'warn');
       }
+      guardScrapEquipment(match);
     }
     window.dtEqResolve = dtEqResolve;
     async function openDowntimeEdit(id) {
@@ -17284,6 +17317,7 @@
       if (window.__dtSaving) return;
       const eqSel = document.getElementById('dt-eq'); const eqId = eqSel?.value;
       if (!eqId) { toast('Pilih equipment dulu.', 'warn'); return; }
+      if (guardScrapEquipment((window.__dtEqs || []).find(x => x.id === eqId))) return;
       const startV = document.getElementById('dt-start')?.value;
       if (!startV) { toast('Isi waktu mulai down.', 'warn'); return; }
       const endV = document.getElementById('dt-end')?.value;
