@@ -373,6 +373,8 @@
         { name: 'tahun_commissioning', label: 'Tahun Commissioning', type: 'number', min: 1900, max: 2100 },
         { name: 'year_used',           label: 'Year Used',         type: 'number', min: 0 },
         { name: 'country_of_origin',   label: 'Country of Origin', type: 'text' },
+        { name: 'build_date',          label: 'Build Date',        type: 'date', placeholder: 'tanggal keluar pabrik (mis. dari lookup CAT SIS)' },
+        { name: 'delivery_date',       label: 'Delivery Date',     type: 'date', placeholder: 'tanggal diterima dari dealer/vendor' },
         { name: 'spek_khusus',         label: 'Spek Khusus',       type: 'textarea' },
       ]},
       { section: 'C. Status', fields: [
@@ -4414,6 +4416,8 @@
           'Tahun Commissioning': eq.tahun_commissioning,
           'Year Used': eq.year_used,
           'Country of Origin': eq.country_of_origin,
+          'Build Date': eq.build_date,
+          'Delivery Date': eq.delivery_date,
           'Spek Khusus': eq.spek_khusus,
           'Status Operasi': eq.status_operasi,
           'Kondisi Fisik': eq.kondisi_fisik,
@@ -7823,6 +7827,8 @@
           ['Tahun Commissioning', eq.tahun_commissioning],
           ['Year Used', eq.year_used],
           ['Country of Origin', eq.country_of_origin],
+          ['Build Date', fmtDate(eq.build_date)],
+          ['Delivery Date', fmtDate(eq.delivery_date)],
           ['Spek Khusus', eq.spek_khusus],
         ]],
         ['Status', [
