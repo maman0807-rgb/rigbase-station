@@ -16736,7 +16736,7 @@
         const since = new Date(); since.setMonth(since.getMonth() - 11); since.setDate(1); since.setHours(0,0,0,0);
         const [dtRes, eqRes] = await Promise.all([
           state.supabase.from('downtime_events').select('equipment_id,start_at,end_at,category').gte('start_at', since.toISOString()),
-          state.supabase.from('equipment').select('id,assigned_unit_id,tanggal_masuk_operasi'),
+          state.supabase.from('equipment').select('id,tag_number,nama_equipment,assigned_unit_id,tanggal_masuk_operasi'),
         ]);
         if (dtRes.error) throw dtRes.error;
         const events = dtRes.data || [];
@@ -16788,6 +16788,14 @@
         const avgAi  = (aiData.reduce((a, b) => a + b, 0) / aiData.length).toFixed(1);
         const maxAo  = Math.max(...aoData).toFixed(1);
         const minAo  = Math.min(...aoData).toFixed(1);
+        const worstMonthIdx = aoData.indexOf(Math.min(...aoData));
+        // Simpan data mentah buat drill-down "equipment mana penyebab Ao jelek bulan X" —
+        // klik baris tabel bawah manggil showRamTrendMonthDetail(i), gak query ulang ke
+        // server, tinggal reuse events+eqAll yang udah kefetch di atas (diminta Maman
+        // 2026-09-25: "gimana aku tau penyebab Ao terburuk itu di equipment apa").
+        window.__ramTrendEvents = events;
+        window.__ramTrendEqAll = eqAll;
+        window.__ramTrendMonths = monthData;
         const unitName = availFilter.unit_id
           ? (state.parentUnits || []).find(u => String(u.id) === String(availFilter.unit_id))?.name || 'Unit'
           : 'Semua Fleet';
@@ -16822,7 +16830,10 @@
           </div>
 
           <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-            <div class="px-5 py-3 border-b border-slate-100"><h4 class="font-bold text-slate-800">📋 Data per Bulan</h4></div>
+            <div class="px-5 py-3 border-b border-slate-100 flex items-center justify-between">
+              <h4 class="font-bold text-slate-800">📋 Data per Bulan</h4>
+              <span class="text-xs text-slate-400">💡 Klik baris buat lihat equipment penyebabnya</span>
+            </div>
             <div class="overflow-x-auto">
               <table class="w-full text-sm">
                 <thead class="bg-slate-50 text-xs text-slate-500 uppercase tracking-wide">
@@ -16836,11 +16847,11 @@
                   </tr>
                 </thead>
                 <tbody>
-                  ${monthData.map(m => {
+                  ${monthData.map((m, i) => {
                     const sc = m.Ao >= 95 ? 'text-green-700 bg-green-50' : m.Ao >= 85 ? 'text-amber-700 bg-amber-50' : 'text-red-700 bg-red-50';
-                    const sl = m.Ao >= 95 ? '✅ Target' : m.Ao >= 85 ? '⚠️ Warning' : '🔴 Below';
+                    const sl = m.Ao >= 95 ? '✅ Target' : m.Ao >= 85 ? '⚠️ Warning' : (i === worstMonthIdx ? '🔴 Terburuk' : '🔴 Below');
                     const ac = m.Ao >= 95 ? 'text-green-600 font-bold' : m.Ao >= 85 ? 'text-amber-600 font-bold' : 'text-red-600 font-bold';
-                    return `<tr class="border-b border-slate-100 hover:bg-slate-50">
+                    return `<tr class="border-b border-slate-100 hover:bg-slate-50 cursor-pointer ${i === worstMonthIdx ? 'ring-1 ring-inset ring-red-300 bg-red-50/40' : ''}" onclick="showRamTrendMonthDetail(${i})">
                       <td class="px-4 py-3 font-semibold text-slate-700">${m.label}</td>
                       <td class="px-4 py-3 text-right ${ac}">${m.Ao}%</td>
                       <td class="px-4 py-3 text-right text-green-700">${m.Ai}%</td>
@@ -16859,6 +16870,57 @@
       }
     }
     window.renderRamTrendPage = renderRamTrendPage;
+
+    // Drill-down: equipment mana yang paling nyumbang downtime di bulan tertentu (dipanggil
+    // dari klik baris tabel "Data per Bulan"). Reuse events+eqAll dari renderRamTrendPage,
+    // gak query ulang ke server.
+    function showRamTrendMonthDetail(i) {
+      const m = (window.__ramTrendMonths || [])[i];
+      if (!m) return;
+      const events = window.__ramTrendEvents || [];
+      const eqAll  = window.__ramTrendEqAll || [];
+      const eqById = {}; eqAll.forEach(e => { eqById[e.id] = e; });
+      const byEquip = {};
+      events.forEach(e => {
+        if (e.category === GEJALA_CAT) return;
+        const s   = new Date(e.start_at).getTime();
+        const end = e.end_at ? new Date(e.end_at).getTime() : Date.now();
+        if (s >= m.end || end <= m.start) return;
+        const clipped = Math.max(0, Math.min(end, m.end) - Math.max(s, m.start)) / 3600000;
+        if (clipped <= 0) return;
+        if (!byEquip[e.equipment_id]) byEquip[e.equipment_id] = { downH: 0, failures: 0 };
+        byEquip[e.equipment_id].downH += clipped;
+        if (FAILURE_CATS.includes(e.category) && s >= m.start) byEquip[e.equipment_id].failures++;
+      });
+      const rows = Object.entries(byEquip)
+        .map(([eqId, v]) => ({ eq: eqById[eqId], ...v }))
+        .sort((a, b) => b.downH - a.downH);
+      const totalDownH = rows.reduce((a, r) => a + r.downH, 0);
+      const bodyTable = rows.length ? `
+        <div class="overflow-x-auto"><table class="w-full text-sm">
+          <thead><tr class="text-left text-xs font-bold text-slate-500 border-b border-slate-200">
+            <th class="px-3 py-2">Equipment</th>
+            <th class="px-3 py-2 text-right">Downtime (jam)</th>
+            <th class="px-3 py-2 text-right">% dari total down bulan ini</th>
+            <th class="px-3 py-2 text-right">Failure</th>
+          </tr></thead>
+          <tbody>
+            ${rows.map(r => `<tr class="border-b border-slate-100 hover:bg-slate-50 cursor-pointer" onclick="closeModal(); setEquipmentView('detail','${r.eq?.id || ''}'); navigate('equipment')">
+              <td class="px-3 py-2"><div class="font-mono font-bold text-navy">${escapeHtml(r.eq?.tag_number || '(equipment terhapus)')}</div><div class="text-xs text-slate-500">${escapeHtml(r.eq?.nama_equipment || '')}</div></td>
+              <td class="px-3 py-2 text-right font-semibold text-red-600">${r.downH.toFixed(1)}</td>
+              <td class="px-3 py-2 text-right text-slate-500">${totalDownH > 0 ? (r.downH / totalDownH * 100).toFixed(0) : 0}%</td>
+              <td class="px-3 py-2 text-right">${r.failures}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table></div>`
+        : '<div class="text-sm text-slate-400 text-center py-6">Gak ada downtime tercatat bulan ini.</div>';
+      openModal({
+        title: `⚠️ Penyebab Ao ${m.label} (Ao ${m.Ao}%)`,
+        maxWidth: 'max-w-2xl',
+        body: `<p class="text-xs text-slate-500 mb-3">Diurutkan dari equipment yang paling banyak nyumbang downtime bulan ini. Klik baris buat buka detail equipment-nya.</p>${bodyTable}`,
+      });
+    }
+    window.showRamTrendMonthDetail = showRamTrendMonthDetail;
 
     function cetakRamTrendReport() {
       const host = document.getElementById('ram-content');
