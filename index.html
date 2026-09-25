@@ -16359,7 +16359,18 @@
     async function renderPloReportPage(host) {
       host = host || document.getElementById('ram-content');
       if (!host) return;
-      const rigs = (state.parentUnits || []).filter(u => u.type === 'Rig');
+      // Sebelumnya cuma parent_unit type='Rig' yang muncul di dropdown — PLO/laporan
+      // maintenance-nya sebenernya relevan juga buat unit non-Rig (Standalone, Alat Berat,
+      // Kendaraan, Fire & Safety), jadi sekarang semua type ditampilin, dikelompokkan per
+      // type biar tetap gampang dicari (diminta Maman 2026-09-25).
+      const allUnits = state.parentUnits || [];
+      const unitTypeOrder = ['Rig', 'Standalone', 'Alat Berat', 'Kendaraan', 'Fire & Safety'];
+      const unitsByType = {};
+      allUnits.forEach(u => { (unitsByType[u.type] ||= []).push(u); });
+      const unitOptGroups = [...unitTypeOrder, ...Object.keys(unitsByType).filter(t => !unitTypeOrder.includes(t))]
+        .filter(t => unitsByType[t]?.length)
+        .map(t => `<optgroup label="${escapeHtml(t)}">${unitsByType[t].map(u => `<option value="${u.id}" ${String(ploState.unitId) === String(u.id) ? 'selected' : ''}>${escapeHtml(u.name)}</option>`).join('')}</optgroup>`)
+        .join('');
       if (!ploState.year) ploState.year = String(new Date().getFullYear());
       const curYear = new Date().getFullYear();
       const yearOpts = []; for (let y = curYear + 1; y >= curYear - 5; y--) yearOpts.push(y);
@@ -16367,13 +16378,13 @@
         <div class="space-y-4">
           <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
             <h3 class="text-base font-bold text-navy mb-1">📄 Laporan Daily Maintenance (PLO)</h3>
-            <p class="text-xs text-slate-500 mb-3">Kompilasi riwayat maintenance (PM/CM/TS dari Laporan Harian, Maintenance Log, Downtime, dan Input Harian Part) per rig per tahun.</p>
+            <p class="text-xs text-slate-500 mb-3">Kompilasi riwayat maintenance (PM/CM/TS dari Laporan Harian, Maintenance Log, Downtime, dan Input Harian Part) per rig/unit per tahun.</p>
             <div class="flex flex-wrap items-end gap-3">
               <div>
-                <label class="block text-xs font-semibold text-slate-600 mb-1">Rig</label>
+                <label class="block text-xs font-semibold text-slate-600 mb-1">Rig / Unit</label>
                 <select id="plo-rig" class="border border-slate-300 rounded-lg text-sm px-3 py-2 bg-white min-w-[220px]">
-                  <option value="">— Pilih Rig —</option>
-                  ${rigs.map(u => `<option value="${u.id}" ${String(ploState.unitId) === String(u.id) ? 'selected' : ''}>${escapeHtml(u.name)}</option>`).join('')}
+                  <option value="">— Pilih Rig / Unit —</option>
+                  ${unitOptGroups}
                 </select>
               </div>
               <div>
@@ -16394,7 +16405,7 @@
     async function ploGenerate() {
       const unitId = document.getElementById('plo-rig')?.value;
       const year = document.getElementById('plo-year')?.value;
-      if (!unitId) { toast('Pilih rig dulu', 'warn'); return; }
+      if (!unitId) { toast('Pilih rig/unit dulu', 'warn'); return; }
       if (!year) { toast('Pilih tahun dulu', 'warn'); return; }
       ploState.unitId = unitId; ploState.year = year;
       ploState.unitName = (state.parentUnits || []).find(u => String(u.id) === String(unitId))?.name || '';
@@ -16426,7 +16437,7 @@
         }
         const candidateIds = Object.keys(eqById);
         if (!candidateIds.length) {
-          resultEl.innerHTML = '<div class="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-400 text-sm">Tidak ada equipment terdaftar di rig ini.</div>';
+          resultEl.innerHTML = '<div class="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-400 text-sm">Tidak ada equipment terdaftar di rig/unit ini.</div>';
           ploState.rows = null;
           return;
         }
