@@ -8183,8 +8183,8 @@
                 ${isFollow ? '✓ Saat parent HM update → equipment ini auto-sync' : '⚠ HM harus di-update terpisah (manual atau via Logbook)'}</div>
               </div>
             </div>
-            ${isSrMekanikOrAbove() ? `<button onclick="toggleFollowParentHM('${eq.id}',${isFollow})" class="px-3 py-1.5 rounded-lg text-xs font-semibold ${isFollow ? 'bg-slate-100 hover:bg-slate-200 text-slate-700' : 'bg-green-600 hover:bg-green-700 text-white'}">${isFollow ? '🔓 Lepas Auto-sync' : '🔗 Aktifkan Auto-sync'}</button>` : ''}
-          </div>`;
+          </div>
+          <p class="text-xs text-amber-700 mt-1">🔒 Tombol toggle di sini dikunci — mode Auto-sync (copy mentah HM parent) gampang salah pakai (insiden HYDTONG-Wellkin-01, 2026-09-27, seharusnya hitung mandiri bukan ikut penuh induk). Untuk memasang/melepas komponen, gunakan tab <b>Pemasangan</b> → "+ Pasang Anak Baru" (mode Numpang = hitung selisih sejak dipasang, benar untuk mayoritas kasus). Kalau memang perlu mode ikut-penuh (jarang, mis. transmisi yang betul-betul satu HM dengan engine), ubah manual lewat SQL Editor Supabase.</p>`;
         }
 
         // Cek snooze aktif untuk equipment ini
