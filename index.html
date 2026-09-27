@@ -9777,11 +9777,17 @@
       } else if (f.type === 'select-parent-equipment') {
         // Dropdown ini diisi async setelah form di-render (pas kategori/unit dipilih).
         // Render placeholder dulu, isi lewat populateParentEquipmentDropdown().
+        // SENGAJA di-disable: mengubah relasi lewat sini cuma nyetel parent_equipment_id tanpa
+        // pernah membuat baris `pemasangan` (offset HM) — bikin cascade HM equipment anak beku/salah
+        // selamanya (insiden nyata: HYDTONG-Wellkin-01/02/03, 2026-09-27). Wajib lewat tab
+        // Pemasangan > "+ Pasang Anak Baru" supaya offset HM ikut tersimpan benar. `disabled` di
+        // sini tidak menghalangi payload tersimpan saat edit (submitEquipmentForm baca `el.value`
+        // langsung, disabled select tetap punya .value), cuma mengunci dari diubah lewat form ini.
         const selectedTag = v ? `data-current-value="${v}"` : '';
-        input = `<select name="${f.name}" ${selectedTag} class="${baseCls} bg-white">
+        input = `<select name="${f.name}" ${selectedTag} disabled class="${baseCls} bg-slate-100 text-slate-500 cursor-not-allowed">
           <option value="">— tidak ada parent (top-level) —</option>
         </select>
-        ${f.placeholder ? `<p class="text-xs text-slate-500 mt-1">${escapeHtml(f.placeholder)}</p>` : ''}`;
+        <p class="text-xs text-amber-700 mt-1">🔒 Dikunci — untuk memasang/melepas komponen dengan tracking HM yang benar, gunakan tab <b>Pemasangan</b> di halaman detail equipment (tombol "+ Pasang Anak Baru").</p>`;
       } else {
         const extras = [
           f.min != null ? `min="${f.min}"` : '',
