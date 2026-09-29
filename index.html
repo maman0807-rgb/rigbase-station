@@ -13468,6 +13468,9 @@
     let csppMats = [];
     let csppFilter = { category: '', q: '', critOnly: false, outOnly: false, belowOnly: false, equipmentId: '', equipmentLabel: '' };
     let csppCurrentMappedIds = null;   // Set material_id yg di-mapping ke csppFilter.equipmentId, null = tidak difilter
+    // Centang manual buat gabungin beberapa PN yang gak sefilter/sekategori ke SATU Justifikasi
+    // sekaligus — sebelumnya harus cari 1 PN, cetak, ulang lagi per PN (diminta Maman 2026-09-29).
+    let csppSelectedIds = new Set();
 
     PAGES.cspp = function () {
       const div = document.createElement('div');
@@ -13508,7 +13511,12 @@
             <h3 class="text-xl font-bold text-slate-900">📦 CSPP — Critical Spare Parts</h3>
             <p class="text-sm text-slate-500">Perencanaan suku cadang kritis — klik kartu merah/kuning untuk filter cepat.</p>
           </div>
-          <button onclick="cetakCsppReport()" class="btn-cetak">🖨 Cetak Justifikasi</button>
+          <div class="flex items-center gap-2">
+            <span id="cspp-sel-count" class="text-xs text-purple-700 font-semibold hidden"></span>
+            <button onclick="clearCsppSelection()" id="cspp-btn-clear-sel" class="text-xs text-slate-400 hover:text-red-600 hidden">✕ Kosongkan</button>
+            <button id="cspp-btn-cetak-terpilih" onclick="cetakCsppReport(true)" class="btn-cetak bg-purple-600 hover:bg-purple-700 hidden">🖨 Cetak Terpilih</button>
+            <button onclick="cetakCsppReport()" class="btn-cetak">🖨 Cetak Justifikasi (Semua yang Tampil)</button>
+          </div>
         </div>
         <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
           ${kpi('Total Spare Parts', total)}
@@ -13536,6 +13544,7 @@
           </div>
           <div class="overflow-x-auto max-h-[28rem] overflow-y-auto"><table class="w-full">
             <thead class="sticky top-0 bg-slate-50"><tr class="text-left text-xs font-bold text-slate-600">
+              <th class="px-3 py-2"><input type="checkbox" id="cspp-select-all" onchange="toggleCsppSelectAll(this.checked)" title="Pilih semua yang tampil"></th>
               <th class="px-3 py-2">#</th><th class="px-3 py-2">Part Number</th><th class="px-3 py-2">Deskripsi</th><th class="px-3 py-2">Kategori</th><th class="px-3 py-2">Stok</th><th class="px-3 py-2">Safety</th><th class="px-3 py-2">Status</th>
             </tr></thead>
             <tbody id="cspp-body"></tbody>
@@ -13644,6 +13653,7 @@
       const n = v => Number(v) || 0; const list = csppFiltered();
       body.innerHTML = list.length ? list.slice(0, 500).map((m, i) => `
         <tr class="border-b border-slate-100">
+          <td class="px-3 py-2"><input type="checkbox" onchange="toggleCsppSelect('${m.id}', this.checked)" ${csppSelectedIds.has(m.id) ? 'checked' : ''}></td>
           <td class="px-3 py-2 text-sm text-slate-400">${i + 1}</td>
           <td class="px-3 py-2 text-sm font-mono font-bold text-navy">${escapeHtml(m.part_number || '—')}</td>
           <td class="px-3 py-2 text-sm font-semibold text-slate-700">${escapeHtml(m.description || '')}</td>
@@ -13651,9 +13661,36 @@
           <td class="px-3 py-2 text-base font-extrabold text-slate-900">${n(m.stok)}</td>
           <td class="px-3 py-2 text-sm font-semibold text-slate-700">${n(m.safety_stock) || '—'}</td>
           <td class="px-3 py-2">${csppStatus(m)}</td>
-        </tr>`).join('') : '<tr><td colspan="7" class="px-3 py-6 text-center text-slate-400 text-sm">Tidak ada part sesuai filter.</td></tr>';
+        </tr>`).join('') : '<tr><td colspan="8" class="px-3 py-6 text-center text-slate-400 text-sm">Tidak ada part sesuai filter.</td></tr>';
       const cnt = document.getElementById('cspp-count'); if (cnt) cnt.textContent = `(${list.length}${list.length > 500 ? ', tampil 500' : ''})`;
+      const selectAll = document.getElementById('cspp-select-all');
+      if (selectAll) selectAll.checked = list.length > 0 && list.slice(0, 500).every(m => csppSelectedIds.has(m.id));
+      updateCsppSelCount();
     }
+    // Centang per-baris — dibiarkan lintas filter/search (pilih PN A di search "ban", ganti
+    // search ke "filter", pilih PN B, dst — semua tetap kecentang sampai di-reset manual atau
+    // dicetak) biar bisa gabungin PN yang beda kategori/gak nyambung ke 1 Justifikasi.
+    function toggleCsppSelect(id, checked) {
+      if (checked) csppSelectedIds.add(id); else csppSelectedIds.delete(id);
+      updateCsppSelCount();
+    }
+    window.toggleCsppSelect = toggleCsppSelect;
+    function toggleCsppSelectAll(checked) {
+      csppFiltered().slice(0, 500).forEach(m => { if (checked) csppSelectedIds.add(m.id); else csppSelectedIds.delete(m.id); });
+      renderCsppList();
+    }
+    window.toggleCsppSelectAll = toggleCsppSelectAll;
+    function updateCsppSelCount() {
+      const span = document.getElementById('cspp-sel-count');
+      const btn = document.getElementById('cspp-btn-cetak-terpilih');
+      const clearBtn = document.getElementById('cspp-btn-clear-sel');
+      const count = csppSelectedIds.size;
+      if (span) { span.textContent = count ? `${count} part dipilih` : ''; span.classList.toggle('hidden', !count); }
+      if (btn) { btn.textContent = `🖨 Cetak Terpilih (${count})`; btn.classList.toggle('hidden', !count); }
+      if (clearBtn) clearBtn.classList.toggle('hidden', !count);
+    }
+    function clearCsppSelection() { csppSelectedIds.clear(); renderCsppList(); }
+    window.clearCsppSelection = clearCsppSelection;
     let _csppDeb;
     function setCsppFilter(k, v) { csppFilter.belowOnly = false; csppFilter[k] = v; renderCsppList(); }
     function setCsppFilterQ(v) { csppFilter.belowOnly = false; csppFilter.q = v; clearTimeout(_csppDeb); _csppDeb = setTimeout(renderCsppList, 300); }
@@ -21394,8 +21431,15 @@
     window.openSignDialog = openSignDialog;
     window.doPrintReport = doPrintReport;
 
-    function cetakCsppReport() {
-      const list = csppFiltered(); const n = v => Number(v) || 0;
+    function cetakCsppReport(selectedOnly) {
+      const n = v => Number(v) || 0;
+      // selectedOnly: pakai centang manual (csppSelectedIds) — biar bisa gabung PN yang gak
+      // sefilter/sekategori ke 1 Justifikasi sekaligus, gak perlu cari-cetak-ulang per PN
+      // (diminta Maman 2026-09-29). Kalau gak selectedOnly, tetep pakai filter aktif kayak biasa.
+      const list = selectedOnly
+        ? csppMats.filter(m => csppSelectedIds.has(m.id)).sort((a, b) => n(a.stok) - n(b.stok))
+        : csppFiltered();
+      if (selectedOnly && !list.length) { toast('Belum ada part yang dipilih (centang dulu di tabel).', 'warn'); return; }
       const habis = list.filter(x => n(x.stok) === 0).length;
       const rendah = list.filter(x => n(x.safety_stock) > 0 && n(x.stok) > 0 && n(x.stok) < n(x.safety_stock)).length;
       const summary = `<div class="cards">
@@ -21403,7 +21447,9 @@
         <div class="card red"><div class="num">${habis}</div><div class="lbl">Habis Stok</div></div>
         <div class="card amber"><div class="num">${rendah}</div><div class="lbl">Di Bawah Safety</div></div>
       </div>`;
-      const intro = `<p>Daftar suku cadang yang memerlukan tindak lanjut pengadaan, berdasarkan status stok &amp; kekritisan (kategori Critical) di sistem RAM eRAMHoist.</p>`;
+      const intro = selectedOnly
+        ? `<p>Daftar suku cadang yang dipilih manual untuk pengadaan, berdasarkan status stok &amp; kekritisan (kategori Critical) di sistem RAM eRAMHoist.</p>`
+        : `<p>Daftar suku cadang yang memerlukan tindak lanjut pengadaan, berdasarkan status stok &amp; kekritisan (kategori Critical) di sistem RAM eRAMHoist.</p>`;
       const rows = list.slice(0, 300).map((m, i) => {
         const s = n(m.stok), sf = n(m.safety_stock);
         const cell = s === 0 ? '<td style="text-align:center;background:#fef2f2;color:#dc2626;font-weight:bold">HABIS</td>' : (sf > 0 && s < sf ? '<td style="text-align:center;background:#fffbeb;color:#d97706;font-weight:bold">RENDAH</td>' : '<td style="text-align:center;color:#16a34a">AMAN</td>');
