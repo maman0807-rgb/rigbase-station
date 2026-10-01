@@ -1047,7 +1047,13 @@
       const { data, error } = await state.supabase
         .from('equipment')
         .select('id, tag_number, nama_equipment, assigned_unit_id, status_operasi, running_hours, last_pm_hours, last_pm_date, pm_interval_hours, pm_type, pm_cycle_count, goh_interval_hours, pm_max_interval_days')
-        .gt('running_hours', 0)
+        // Sebelumnya .gt('running_hours', 0) doang -- nge-exclude equipment yg HM-nya masih 0
+        // (belum pernah dipakai sejak PM terakhir) dari query SAMA SEKALI, padahal equipment
+        // begitu justru target utama fallback time-based (pm_max_interval_days) di bawah --
+        // "jarang/belum jalan" itu kasusnya persis. Ketemu nyata: FL-FORKLIFT-02 (running_hours=0,
+        // last_pm_date 22 Feb 2026, pm_max_interval_days=180) udah 221 hari/41 hari lewat batas,
+        // tapi gak pernah nongol di Dashboard krn ke-filter di sini duluan (Maman 2026-10-01).
+        .or('running_hours.gt.0,pm_max_interval_days.not.is.null')
         .neq('pm_type', 'km')
         .neq('pm_type', 'plo');  // exclude PLO dari analisa PM-jam
       if (error) throw error;
