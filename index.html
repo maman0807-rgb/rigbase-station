@@ -439,6 +439,21 @@
       { section: 'I. Catatan', fields: [
         { name: 'remarks', label: 'Remarks', type: 'textarea' },
       ]},
+      { section: 'J. Klasifikasi AIR (Pedoman A4-009/PHE23000/2026-S9)', fields: [
+        { name: 'kategori_aset', label: 'Kategori Aset AIR', type: 'select',
+          options: [['AUX','AUX — Auxiliaries'],['CIV','CIV — Civil & Structure'],['DRL','DRL — Drilling'],['ELE','ELE — Electrical'],['GSP','GSP — General Support'],['ICC','ICC — Instrument, Control & Custody'],['LFT','LFT — Lifting'],['MAR','MAR — Marine'],['PIP','PIP — Pipeline'],['ROT','ROT — Rotating'],['SNE','SNE — Safety & Environment'],['STA','STA — Static'],['SUB','SUB — Subsea Production'],['TRK','TRK — Truck Fleet'],['UTL','UTL — Utilities'],['VSL','VSL — Vessel Fleet'],['WCO','WCO — Well Completion'],['WIN','WIN — Well Intervention']],
+          emptyLabel: 'kosongkan = otomatis ikut kategori equipment' },
+        { name: 'status_aset', label: 'Status Aset', type: 'select', options: ['ACTIVE','STANDBY','IDLE','ABANDONED','DECOMMISSIONED'],
+          emptyLabel: 'terpisah dari Status Operasi — kosongkan = ACTIVE' },
+        { name: 'kepemilikan', label: 'Kepemilikan', type: 'select', options: [['MILIK','Milik'],['SEWA','Sewa']] },
+        { name: 'alasan_di_luar_lingkup', label: 'Di Luar Lingkup AIR karena', type: 'select',
+          options: [['NON_OPERASI','Aset non-operasi (mis. kendaraan dinas)'],['SEWA','Aset sewa — ikut klausul kontrak'],['WELL_INTEGRITY','Well Integrity'],['BOT','BOT / alih kelola belum diserahterimakan'],['KSO','Non-operator / KSO'],['GENERAL_SERVICES','Dikelola General Services']],
+          emptyLabel: 'kosongkan = dalam lingkup AIR' },
+        { name: 'sap_equipment_no', label: 'No. Equipment SAP', type: 'text' },
+        { name: 'taxonomy_level', label: 'Level Taxonomy ISO 14224', type: 'select',
+          options: [['6','6 — Equipment Unit'],['7','7 — Sub Unit / Assembly'],['8','8 — Maintainable Item'],['9','9 — Part']],
+          emptyLabel: 'kosongkan = otomatis (6 unit induk, 7 kalau punya Parent Equipment)' },
+      ]},
     ];
 
     // ============================================================
@@ -834,7 +849,7 @@
     async function fetchEquipmentList() {
       let q = state.supabase
         .from('equipment')
-        .select('id, tag_number, nama_equipment, kategori_id, assigned_unit_id, tipe_kepemilikan, status_operasi, kondisi_fisik, brand, model, serial_number, next_maintenance_date, skpi_end_date, tgl_expired_sertifikat, cof_score, criticality_level');
+        .select('id, tag_number, nama_equipment, kategori_id, assigned_unit_id, tipe_kepemilikan, status_operasi, kondisi_fisik, brand, model, serial_number, next_maintenance_date, skpi_end_date, tgl_expired_sertifikat, cof_score, kategori_aset, criticality, status_integrity');
       const f = state.equipmentFilters;
       if (f.parent_unit_id) q = q.eq('assigned_unit_id', Number(f.parent_unit_id));
       if (f.kategori_id)    q = q.eq('kategori_id',      Number(f.kategori_id));
@@ -7394,6 +7409,7 @@
             <div class="text-xs text-slate-500 mt-1 truncate">
               ${escapeHtml(getCategoryName(eq.kategori_id))} • ${escapeHtml(getParentUnitName(eq.assigned_unit_id))}
             </div>
+            ${eq.criticality || eq.status_integrity ? `<div class="flex gap-1 mt-1.5">${eq.criticality ? critBadge(eq.criticality) : ''}${eq.status_integrity ? integBadge(eq.status_integrity) : ''}</div>` : ''}
           </button>
         </div>
       `).join('');
@@ -7410,6 +7426,7 @@
           <td class="px-3 py-2 text-sm cursor-pointer" onclick="setEquipmentView('detail', '${eq.id}')">${statusBadge(eq.tipe_kepemilikan)}</td>
           <td class="px-3 py-2 text-sm text-slate-600 whitespace-nowrap cursor-pointer" onclick="setEquipmentView('detail', '${eq.id}')">${fmtDate(eq.next_maintenance_date)}</td>
           <td class="px-3 py-2 text-sm cursor-pointer" onclick="setEquipmentView('detail', '${eq.id}')">${eq.cof_score != null ? `<span class="px-1.5 py-0.5 rounded text-xs font-semibold bg-slate-100 text-slate-600">CoF ${eq.cof_score}</span>` : '<span class="text-slate-300 text-xs">—</span>'}</td>
+          <td class="px-3 py-2 text-sm cursor-pointer whitespace-nowrap" onclick="setEquipmentView('detail', '${eq.id}', 'air')">${eq.criticality || eq.status_integrity ? `${critBadge(eq.criticality)} ${integBadge(eq.status_integrity)}` : '<span class="text-slate-300 text-xs">—</span>'}</td>
         </tr>
       `).join('');
       // Action bar (muncul kalau ada selected)
@@ -7448,6 +7465,7 @@
                   <th class="px-3 py-2 text-left text-xs font-bold text-slate-700 uppercase">Tipe</th>
                   <th class="px-3 py-2 text-left text-xs font-bold text-slate-700 uppercase">Next Maint.</th>
                   <th class="px-3 py-2 text-left text-xs font-bold text-slate-700 uppercase">CoF</th>
+                  <th class="px-3 py-2 text-left text-xs font-bold text-slate-700 uppercase" title="Criticality & Status Integrity (Pedoman AIR)">AIR</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-200">${rows}</tbody>
@@ -7761,6 +7779,7 @@
             <div class="flex border-b border-slate-200 overflow-x-auto">
               ${[
                 ['info','📋 Info'],
+                ['air','🧭 AIR'],
                 ['maintenance','🛠️ Maintenance'],
                 ['sos','🧪 SOS Lab'],
                 ['sertifikasi','📜 Sertifikasi'],
@@ -7791,6 +7810,595 @@
       return div;
     }
 
+    // ============================================================
+    // AIR — Pedoman Asset Integrity & Reliability
+    // No. A4-009/PHE23000/2026-S9 Rev.0 (Fase 35, Tahap 1)
+    // Klasifikasi aset, criticality (SECE/PCE/IMPORTANT/SECONDARY),
+    // status integrity (Hitam/Merah/Kuning/Hijau), matriks tindak lanjut.
+    // Hasil penilaian dihitung TRIGGER di database (fase35_air_tahap1.sql);
+    // UI di sini hanya preview + input.
+    // ============================================================
+    const AIR_KATEGORI = [
+      ['AUX','Auxiliaries'], ['CIV','Civil & Structure'], ['DRL','Drilling'], ['ELE','Electrical'],
+      ['GSP','General Support'], ['ICC','Instrument, Control & Custody'], ['LFT','Lifting'], ['MAR','Marine'],
+      ['PIP','Pipeline'], ['ROT','Rotating'], ['SNE','Safety & Environment'], ['STA','Static'],
+      ['SUB','Subsea Production'], ['TRK','Truck Fleet'], ['UTL','Utilities'], ['VSL','Vessel Fleet'],
+      ['WCO','Well Completion'], ['WIN','Well Intervention'],
+    ];
+    const AIR_ALASAN_LUAR = [
+      ['NON_OPERASI', 'Aset non-operasi (mis. kendaraan dinas)'],
+      ['SEWA', 'Aset sewa — ikut klausul kontrak'],
+      ['WELL_INTEGRITY', 'Well Integrity (dikelola Drilling & WI)'],
+      ['BOT', 'BOT / alih kelola belum diserahterimakan'],
+      ['KSO', 'Non-operator / KSO'],
+      ['GENERAL_SERVICES', 'Dikelola General Services'],
+    ];
+    const AIR_CRIT = {
+      SECE:      { label: 'SECE',      cls: 'bg-red-700 text-white',      vital: true },
+      PCE:       { label: 'PCE',       cls: 'bg-orange-600 text-white',   vital: true },
+      IMPORTANT: { label: 'Important', cls: 'bg-amber-200 text-amber-900', vital: false },
+      SECONDARY: { label: 'Secondary', cls: 'bg-slate-200 text-slate-700', vital: false },
+    };
+    const AIR_INTEG = {
+      BREAKDOWN: { label: 'Breakdown', warna: 'Hitam',  cls: 'bg-slate-900 text-white' },
+      LOW:       { label: 'Low',       warna: 'Merah',  cls: 'bg-red-600 text-white' },
+      MEDIUM:    { label: 'Medium',    warna: 'Kuning', cls: 'bg-yellow-300 text-yellow-900' },
+      HIGH:      { label: 'High',      warna: 'Hijau',  cls: 'bg-green-600 text-white' },
+    };
+    // Gambar 6 — dievaluasi berurutan, berhenti begitu hasil ketemu
+    const AIR_Q = [
+      { k: 'q1', t: 'Apakah barrier menampung bahan mudah terbakar yang dapat menyebabkan skenario MAH (Major Accident Hazard)?', ya: 'SECE' },
+      { k: 'q2', t: 'Apakah barrier dirancang untuk mencegah atau memitigasi MAH?', ya: 'SECE' },
+      { k: 'q3', t: 'Apakah kegagalan barrier dapat menyebabkan MAH?', ya: 'SECE' },
+      { k: 'q4', t: 'Apakah kegagalan barrier berdampak pada produksi?', ya: 'PCE' },
+      { k: 'q5', t: 'Apakah barrier menampung bahan mudah terbakar?', ya: 'IMPORTANT', tidak: 'SECONDARY' },
+    ];
+    // Gambar 9 / Tabel 5
+    const AIR_S = [
+      { k: 's1', t: 'Apakah peralatan sudah mengalami kegagalan fungsi/kinerja?', ya: 'BREAKDOWN' },
+      { k: 's2', t: 'Apakah ada anomaly/penurunan fungsi yang TIDAK memenuhi performance standard?', ya: 'LOW' },
+      { k: 's3', t: 'Apakah peralatan memenuhi performance standard NAMUN ada anomaly/penurunan fungsi?', ya: 'MEDIUM', tidak: 'HIGH' },
+    ];
+    const AIR_DAMPAK = ['Insignificant', 'Minor', 'Moderate', 'Significant', 'Catastrophic'];
+    const AIR_PROB   = ['< 10⁻⁴ /th', '10⁻⁴ – 10⁻³', '10⁻³ – 10⁻²', '10⁻² – 1', '> 1 /th'];
+    const AIR_SUMBER = [['INSPEKSI','Inspeksi'], ['PM','PM'], ['LAPORAN_HARIAN','Laporan Harian'], ['SOS','SOS Lab'], ['LAINNYA','Lainnya']];
+
+    // Penilaian criticality/integrity: admin + manager (sama dengan RLS is_admin() OR is_manager())
+    function airCanAssess() {
+      return ['admin', 'spv', 'sr_spv', 'astmen'].includes(state.profile?.role);
+    }
+    function airKategoriNama(kode) {
+      return (AIR_KATEGORI.find(([k]) => k === kode) || [])[1] || null;
+    }
+    function critBadge(c) {
+      const m = AIR_CRIT[c];
+      if (!m) return '<span class="text-slate-300 text-xs">—</span>';
+      return `<span class="inline-block px-2 py-0.5 rounded text-xs font-bold ${m.cls}" title="${m.vital ? 'Peralatan Vital' : ''}">${m.label}${m.vital ? ' ★' : ''}</span>`;
+    }
+    function integBadge(s) {
+      const m = AIR_INTEG[s];
+      if (!m) return '<span class="text-slate-300 text-xs">—</span>';
+      return `<span class="inline-block px-2 py-0.5 rounded text-xs font-bold ${m.cls}" title="${m.warna}">${m.label}</span>`;
+    }
+    // Hitung hasil berurutan (preview; nilai final dari trigger DB)
+    function airEvalSeq(questions, ans) {
+      for (const q of questions) {
+        if (ans[q.k] == null) return { hasil: null, nextKey: q.k };
+        if (ans[q.k]) return { hasil: q.ya, nextKey: null };
+        if (q.tidak) return { hasil: q.tidak, nextKey: null };
+      }
+      return { hasil: null, nextKey: null };
+    }
+    let __airEcaCfg = null;
+    async function airEcaConfig() {
+      if (__airEcaCfg) return __airEcaCfg;
+      const fallback = { pce_min: 15, important_min: 5, dampak_kandidat_sece: 5 };
+      try {
+        const { data } = await state.supabase.from('air_config').select('nilai').eq('kunci', 'eca_mapping').maybeSingle();
+        __airEcaCfg = { ...fallback, ...(data?.nilai || {}) };
+      } catch { __airEcaCfg = fallback; }
+      return __airEcaCfg;
+    }
+    function airEcaHasil(d, p, cfg) {
+      const skor = d * p;
+      return skor >= cfg.pce_min ? 'PCE' : skor >= cfg.important_min ? 'IMPORTANT' : 'SECONDARY';
+    }
+    async function airReloadCurrentEq(eqId) {
+      try {
+        const fresh = await fetchEquipment(eqId);
+        window.__currentEq = fresh;
+        renderDetailTab(fresh);
+      } catch (e) { toast('Gagal memuat ulang: ' + e.message, 'error'); }
+    }
+
+    // ---------- Tab AIR di detail equipment ----------
+    async function renderAirTab(eq, container) {
+      try {
+        const [critRes, integRes, matRes] = await Promise.all([
+          state.supabase.from('criticality_assessment').select('*').eq('equipment_id', eq.id)
+            .order('tanggal', { ascending: false }).order('created_at', { ascending: false }),
+          state.supabase.from('integrity_assessment').select('*').eq('equipment_id', eq.id)
+            .order('tanggal', { ascending: false }).order('created_at', { ascending: false }),
+          (eq.criticality && eq.status_integrity)
+            ? state.supabase.from('matriks_tindak_lanjut_air').select('*')
+                .eq('criticality', eq.criticality).eq('status_integrity', eq.status_integrity).maybeSingle()
+            : Promise.resolve({ data: null }),
+        ]);
+        if (critRes.error) throw critRes.error;
+        if (integRes.error) throw integRes.error;
+        const crits = critRes.data || [];
+        const integs = integRes.data || [];
+        const mat = matRes.data;
+        const can = airCanAssess();
+        const isAdmin = state.profile?.role === 'admin';
+
+        const taxLevel = eq.taxonomy_level || (eq.parent_equipment_id ? 7 : 6);
+        const taxLabel = { 6: 'Equipment Unit', 7: 'Sub Unit / Assembly', 8: 'Maintainable Item', 9: 'Part' }[taxLevel];
+        const valDays = daysUntil(eq.criticality_tgl_validasi_ulang);
+        const valDisplay = eq.criticality_tgl_validasi_ulang
+          ? `${fmtDate(eq.criticality_tgl_validasi_ulang)} ${valDays < 0 ? `<span class="text-red-700 font-bold">⚠ lewat ${-valDays} hari</span>`
+              : valDays <= 60 ? `<span class="text-amber-700 font-bold">⏰ ${valDays} hari lagi</span>` : ''}`
+          : (eq.criticality_metode ? '<span class="text-slate-400 text-sm">Tidak wajib (metode ' + escapeHtml(eq.criticality_metode) + ')</span>' : null);
+        const alasanLabel = (AIR_ALASAN_LUAR.find(([k]) => k === eq.alasan_di_luar_lingkup) || [])[1];
+
+        let tindakLanjut;
+        if (!eq.criticality || !eq.status_integrity) {
+          tindakLanjut = `<div class="text-sm text-slate-500">Lengkapi penilaian ${!eq.criticality ? '<b>criticality</b>' : ''}${!eq.criticality && !eq.status_integrity ? ' dan ' : ''}${!eq.status_integrity ? '<b>status integrity</b>' : ''} untuk melihat tindak lanjut sesuai Tabel 7 pedoman.</div>`;
+        } else if (!mat || !mat.aksi) {
+          tindakLanjut = `<div class="text-sm text-slate-500">Kombinasi ${escapeHtml(eq.criticality)} × ${escapeHtml(eq.status_integrity)} tidak ditetapkan oleh pedoman.</div>`;
+        } else {
+          tindakLanjut = `
+            <div class="flex items-start gap-3">
+              <div class="text-center flex-shrink-0">
+                <div class="text-[10px] text-slate-500 uppercase">Prioritas</div>
+                <div class="text-2xl font-bold ${mat.prioritas <= 2 ? 'text-red-700' : mat.prioritas <= 4 ? 'text-orange-600' : mat.prioritas <= 7 ? 'text-amber-600' : 'text-green-700'}">${mat.prioritas}</div>
+              </div>
+              <div>
+                <div class="text-sm font-semibold text-slate-900">${escapeHtml(mat.aksi)}</div>
+                ${mat.immediate ? '<div class="text-xs text-red-700 font-bold mt-1">⚡ IMMEDIATE — peralatan vital</div>' : ''}
+              </div>
+            </div>`;
+        }
+
+        const critRows = crits.map(c => `
+          <tr class="border-b border-slate-100">
+            <td class="px-2 py-1.5 whitespace-nowrap">${fmtDate(c.tanggal)}</td>
+            <td class="px-2 py-1.5">${escapeHtml(c.metode)}${c.metode === 'ECA' ? ` <span class="text-xs text-slate-500">(${c.dampak}×${c.probabilitas}=${c.skor})</span>` : ''}</td>
+            <td class="px-2 py-1.5">${critBadge(c.hasil)}${c.kandidat_sece ? ' <span class="text-xs text-red-700" title="Dampak Catastrophic — konfirmasi lewat PHA">kandidat SECE</span>' : ''}</td>
+            <td class="px-2 py-1.5 text-xs text-slate-600">${escapeHtml(c.penilai || '')}${c.referensi_dokumen ? `<br><span class="text-slate-400">${escapeHtml(c.referensi_dokumen)}</span>` : ''}</td>
+            <td class="px-2 py-1.5 text-xs text-slate-600">${escapeHtml(c.catatan || '')}</td>
+            ${isAdmin ? `<td class="px-2 py-1.5 text-right"><button onclick="airDeleteAssessment('criticality_assessment','${c.id}','${eq.id}')" class="text-red-600 hover:underline text-xs">Hapus</button></td>` : ''}
+          </tr>`).join('');
+        const integRows = integs.map(s => `
+          <tr class="border-b border-slate-100 ${s.konfirmasi === 'DRAFT' ? 'bg-amber-50' : ''}">
+            <td class="px-2 py-1.5 whitespace-nowrap">${fmtDate(s.tanggal)}</td>
+            <td class="px-2 py-1.5">${integBadge(s.status)}${s.konfirmasi === 'DRAFT' ? ' <span class="text-xs text-amber-700 font-semibold">DRAFT</span>' : ''}</td>
+            <td class="px-2 py-1.5 text-xs">${escapeHtml((AIR_SUMBER.find(([k]) => k === s.sumber) || [])[1] || s.sumber)}</td>
+            <td class="px-2 py-1.5 text-xs text-slate-600">${escapeHtml(s.penilai || '')}</td>
+            <td class="px-2 py-1.5 text-xs text-slate-600">${escapeHtml(s.temuan || '')}</td>
+            ${isAdmin || can ? `<td class="px-2 py-1.5 text-right whitespace-nowrap">
+              ${s.konfirmasi === 'DRAFT' && can ? `<button onclick="airConfirmIntegrity('${s.id}','${eq.id}')" class="text-green-700 hover:underline text-xs mr-2">Konfirmasi</button>` : ''}
+              ${isAdmin ? `<button onclick="airDeleteAssessment('integrity_assessment','${s.id}','${eq.id}')" class="text-red-600 hover:underline text-xs">Hapus</button>` : ''}
+            </td>` : ''}
+          </tr>`).join('');
+
+        const card = (title, body, action = '') => `
+          <div class="bg-white border border-slate-200 rounded-lg p-4">
+            <div class="flex items-center justify-between gap-2 mb-3 flex-wrap">
+              <h4 class="font-bold text-navy text-sm uppercase tracking-wider">${title}</h4>${action}
+            </div>
+            ${body}
+          </div>`;
+
+        container.innerHTML = `
+          <div class="space-y-4">
+            <div class="text-xs text-slate-500">Pedoman AIR No. A4-009/PHE23000/2026-S9 Rev.0 — eRAMHoist alat bantu lapangan; register resmi tetap di SAP.</div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+              ${card('Criticality', `
+                <div class="mb-2">${critBadge(eq.criticality)}</div>
+                <div class="text-xs text-slate-600 space-y-0.5">
+                  <div>Metode: <b>${escapeHtml(eq.criticality_metode || '—')}</b></div>
+                  <div>Ditetapkan: <b>${eq.criticality_tgl_penetapan ? fmtDate(eq.criticality_tgl_penetapan) : '—'}</b></div>
+                  <div>Validasi ulang: ${valDisplay || '—'}</div>
+                </div>`,
+                can ? `<button onclick="openCriticalityWizard('${eq.id}')" class="px-2.5 py-1 bg-navy hover:bg-navy/80 text-white rounded text-xs font-semibold">${eq.criticality ? '↻ Nilai Ulang' : '+ Nilai'}</button>` : '')}
+              ${card('Status Integrity', `
+                <div class="mb-2">${integBadge(eq.status_integrity)}</div>
+                <div class="text-xs text-slate-600">Dinilai: <b>${eq.status_integrity_tgl ? fmtDate(eq.status_integrity_tgl) : '—'}</b></div>`,
+                can ? `<button onclick="openIntegrityWizard('${eq.id}')" class="px-2.5 py-1 bg-navy hover:bg-navy/80 text-white rounded text-xs font-semibold">${eq.status_integrity ? '↻ Nilai Ulang' : '+ Nilai'}</button>` : '')}
+              ${card('Tindak Lanjut (Tabel 7)', tindakLanjut)}
+            </div>
+
+            ${card('Klasifikasi Aset', `
+              ${infoRow('Kategori Aset', eq.kategori_aset ? `${escapeHtml(eq.kategori_aset)} — ${escapeHtml(airKategoriNama(eq.kategori_aset) || '')}` : '<span class="text-amber-700 text-sm">Belum diklasifikasi</span>')}
+              ${infoRow('Status Aset', eq.status_aset ? escapeHtml(eq.status_aset) : null)}
+              ${infoRow('Kepemilikan', eq.kepemilikan ? escapeHtml(eq.kepemilikan) : null)}
+              ${infoRow('Lingkup AIR', eq.dalam_lingkup_air === false ? `<span class="text-slate-500">Di luar lingkup — ${escapeHtml(alasanLabel || eq.alasan_di_luar_lingkup)}</span>` : '<span class="text-green-700">Dalam lingkup</span>')}
+              ${infoRow('No. Equipment SAP', eq.sap_equipment_no ? escapeHtml(eq.sap_equipment_no) : null)}
+              ${infoRow('Level Taxonomy (ISO 14224)', `${taxLevel} — ${taxLabel}${eq.taxonomy_level ? '' : ' <span class="text-xs text-slate-400">(otomatis)</span>'}`)}
+              <div class="text-xs text-slate-400 mt-2">Ubah lewat tombol ✏ Edit → bagian <b>J. Klasifikasi AIR</b>.</div>`)}
+
+            ${card(`Riwayat Criticality (${crits.length})`, crits.length ? `
+              <div class="overflow-x-auto"><table class="w-full text-sm">
+                <thead><tr class="text-left text-xs text-slate-500 border-b"><th class="px-2 py-1">Tanggal</th><th class="px-2 py-1">Metode</th><th class="px-2 py-1">Hasil</th><th class="px-2 py-1">Penilai / Ref.</th><th class="px-2 py-1">Catatan</th>${isAdmin ? '<th></th>' : ''}</tr></thead>
+                <tbody>${critRows}</tbody></table></div>` : '<div class="text-sm text-slate-400 italic">Belum ada penilaian.</div>')}
+
+            ${card(`Riwayat Status Integrity (${integs.length})`, integs.length ? `
+              <div class="overflow-x-auto"><table class="w-full text-sm">
+                <thead><tr class="text-left text-xs text-slate-500 border-b"><th class="px-2 py-1">Tanggal</th><th class="px-2 py-1">Status</th><th class="px-2 py-1">Sumber</th><th class="px-2 py-1">Penilai</th><th class="px-2 py-1">Temuan</th>${isAdmin || can ? '<th></th>' : ''}</tr></thead>
+                <tbody>${integRows}</tbody></table></div>` : '<div class="text-sm text-slate-400 italic">Belum ada penilaian.</div>')}
+          </div>`;
+      } catch (err) {
+        container.innerHTML = `<div class="bg-red-50 text-red-700 p-4 rounded-xl text-sm">Gagal load data AIR: ${escapeHtml(err.message)}<br><small>⚠️ Pastikan <b>fase35_air_tahap1.sql</b> sudah dijalankan di Supabase.</small></div>`;
+      }
+    }
+
+    async function airDeleteAssessment(table, id, eqId) {
+      const ok = await confirmDialog({ title: 'Hapus penilaian', message: 'Hapus penilaian ini? Status di equipment akan ikut menyesuaikan ke penilaian terbaru yang tersisa.', confirmText: 'Hapus', danger: true });
+      if (!ok) return;
+      const { error } = await state.supabase.from(table).delete().eq('id', id);
+      if (error) { toast('Gagal hapus: ' + error.message, 'error'); return; }
+      toast('Penilaian dihapus.', 'success');
+      airReloadCurrentEq(eqId);
+    }
+    window.airDeleteAssessment = airDeleteAssessment;
+
+    async function airConfirmIntegrity(id, eqId) {
+      const { error } = await state.supabase.from('integrity_assessment').update({ konfirmasi: 'DIKONFIRMASI' }).eq('id', id);
+      if (error) { toast('Gagal konfirmasi: ' + error.message, 'error'); return; }
+      toast('Penilaian dikonfirmasi.', 'success');
+      airReloadCurrentEq(eqId);
+    }
+    window.airConfirmIntegrity = airConfirmIntegrity;
+
+    // ---------- Wizard Criticality ----------
+    const AIR_INPUT = 'w-full px-3 py-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-navy text-sm bg-white';
+    function airCommonFields(w) {
+      return `
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4 pt-4 border-t border-slate-200">
+          <label class="text-sm"><span class="text-slate-600 font-medium">Tanggal penilaian</span>
+            <input type="date" value="${w.tanggal}" onchange="window.__airWiz.tanggal=this.value" class="${AIR_INPUT} mt-1"></label>
+          <label class="text-sm"><span class="text-slate-600 font-medium">Penilai</span>
+            <input type="text" value="${escapeHtml(w.penilai)}" oninput="window.__airWiz.penilai=this.value" class="${AIR_INPUT} mt-1"></label>
+          ${w.kind === 'crit' ? `
+          <label class="text-sm md:col-span-2"><span class="text-slate-600 font-medium">Referensi dokumen ${w.metode === 'PHA' ? '<span class="text-red-600">*</span>' : '(opsional)'}</span>
+            <input type="text" value="${escapeHtml(w.referensi_dokumen)}" oninput="window.__airWiz.referensi_dokumen=this.value" placeholder="mis. No. laporan PHA / notulen kajian" class="${AIR_INPUT} mt-1"></label>` : `
+          <label class="text-sm md:col-span-2"><span class="text-slate-600 font-medium">Sumber</span>
+            <select onchange="window.__airWiz.sumber=this.value" class="${AIR_INPUT} mt-1">
+              ${AIR_SUMBER.map(([k, l]) => `<option value="${k}" ${w.sumber === k ? 'selected' : ''}>${l}</option>`).join('')}
+            </select></label>`}
+          <label class="text-sm md:col-span-2"><span class="text-slate-600 font-medium">${w.kind === 'crit' ? 'Catatan' : 'Temuan / anomaly'}</span>
+            <textarea rows="2" oninput="window.__airWiz.catatan=this.value" class="${AIR_INPUT} mt-1">${escapeHtml(w.catatan)}</textarea></label>
+        </div>`;
+    }
+    function airQuestionList(questions, ans, setFn) {
+      const ev = airEvalSeq(questions, ans);
+      let html = '';
+      for (const [i, q] of questions.entries()) {
+        const a = ans[q.k];
+        html += `
+          <div class="border ${a == null ? 'border-navy bg-navy/5' : 'border-slate-200'} rounded-lg p-3">
+            <div class="text-sm text-slate-800"><b>${q.k.toUpperCase()}.</b> ${escapeHtml(q.t)}</div>
+            <div class="flex gap-2 mt-2">
+              <button onclick="${setFn}('${q.k}',true)" class="px-3 py-1 rounded text-sm font-semibold ${a === true ? 'bg-navy text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}">Ya</button>
+              <button onclick="${setFn}('${q.k}',false)" class="px-3 py-1 rounded text-sm font-semibold ${a === false ? 'bg-navy text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}">Tidak</button>
+              <span class="text-xs text-slate-400 self-center">Ya → ${q.ya}${q.tidak ? ` · Tidak → ${q.tidak}` : (i < questions.length - 1 ? ' · Tidak → lanjut' : '')}</span>
+            </div>
+          </div>`;
+        // Berhenti otomatis: pertanyaan berikutnya tidak ditampilkan kalau hasil sudah ketemu / belum dijawab
+        if (a == null || a === true || q.tidak) break;
+      }
+      return { html, hasil: ev.hasil };
+    }
+
+    async function openCriticalityWizard(eqId) {
+      const eq = window.__currentEq;
+      window.__airWiz = {
+        kind: 'crit', eqId, metode: 'KUALITATIF', ans: {}, dampak: null, probabilitas: null, hasilPha: '',
+        tanggal: new Date().toISOString().slice(0, 10),
+        penilai: state.profile?.full_name || state.profile?.email || '',
+        referensi_dokumen: '', catatan: '',
+        cfg: await airEcaConfig(), tag: eq?.tag_number || '',
+      };
+      openModal({
+        title: `Penilaian Criticality — ${eq?.tag_number || ''}`,
+        maxWidth: 'max-w-2xl',
+        body: '<div id="air-wiz-body"></div>',
+        footer: `<button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
+                 <button id="air-wiz-save" onclick="airSaveCriticality()" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy/80 text-white text-sm font-semibold">Simpan</button>`,
+      });
+      airRenderCritWizard();
+    }
+    window.openCriticalityWizard = openCriticalityWizard;
+
+    function airRenderCritWizard() {
+      const w = window.__airWiz;
+      const host = document.getElementById('air-wiz-body');
+      if (!host || !w) return;
+      let inner = '', hasil = null;
+      if (w.metode === 'KUALITATIF') {
+        const r = airQuestionList(AIR_Q, w.ans, 'airCritAnswer');
+        inner = `<div class="text-xs text-slate-500 mb-2">Diagram kualitatif (Gambar 6). Hasil kualitatif <b>wajib divalidasi ulang paling lambat 2 tahun</b>.</div><div class="space-y-2">${r.html}</div>`;
+        hasil = r.hasil;
+      } else if (w.metode === 'ECA') {
+        const cells = [];
+        for (let d = 5; d >= 1; d--) {
+          cells.push(`<div class="text-[11px] text-slate-600 pr-1 self-center text-right">${d} ${AIR_DAMPAK[d - 1]}</div>`);
+          for (let p = 1; p <= 5; p++) {
+            const h = airEcaHasil(d, p, w.cfg);
+            const sel = w.dampak === d && w.probabilitas === p;
+            const bg = h === 'PCE' ? 'bg-red-500 text-white' : h === 'IMPORTANT' ? 'bg-amber-300 text-amber-900' : 'bg-green-200 text-green-900';
+            cells.push(`<button onclick="airCritEca(${d},${p})" class="h-10 rounded text-xs font-bold ${bg} ${sel ? 'ring-4 ring-navy' : 'opacity-80 hover:opacity-100'}">${d * p}</button>`);
+          }
+        }
+        cells.push('<div></div>');
+        for (let p = 1; p <= 5; p++) cells.push(`<div class="text-[10px] text-slate-500 text-center leading-tight">${p}<br>${AIR_PROB[p - 1]}</div>`);
+        if (w.dampak && w.probabilitas) hasil = airEcaHasil(w.dampak, w.probabilitas, w.cfg);
+        inner = `
+          <div class="text-xs text-slate-500 mb-2">Risk matrix (Gambar 5): baris = <b>Dampak</b>, kolom = <b>Probabilitas</b>. Klik satu sel.
+            <span class="text-amber-700">Pemetaan skor → criticality adalah usulan dari warna gambar (skor ≥${w.cfg.pce_min} PCE, ≥${w.cfg.important_min} Important) — perlu diverifikasi.</span></div>
+          <div class="grid gap-1" style="grid-template-columns: 7rem repeat(5, minmax(0,1fr))">${cells.join('')}</div>
+          ${w.dampak >= w.cfg.dampak_kandidat_sece ? '<div class="mt-2 text-xs text-red-700 font-semibold">⚠ Dampak Catastrophic → kandidat SECE. Konfirmasi lewat PHA.</div>' : ''}`;
+      } else {
+        hasil = w.hasilPha || null;
+        inner = `
+          <div class="text-xs text-slate-500 mb-2">PHA (dipakai untuk penetapan SECE bersama HSSE & Risk Owner). Isi hasil sesuai laporan PHA.</div>
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+            ${Object.keys(AIR_CRIT).map(k => `<button onclick="window.__airWiz.hasilPha='${k}'; airRenderCritWizard()" class="py-2 rounded-lg text-sm font-semibold border-2 ${w.hasilPha === k ? 'border-navy' : 'border-transparent'} ${AIR_CRIT[k].cls}">${AIR_CRIT[k].label}</button>`).join('')}
+          </div>`;
+      }
+      w.hasilPreview = hasil;
+      host.innerHTML = `
+        <div class="flex gap-1 mb-4 bg-slate-100 rounded-lg p-1">
+          ${[['KUALITATIF', 'Kualitatif (Q1–Q5)'], ['ECA', 'ECA (Risk Matrix)'], ['PHA', 'PHA']].map(([k, l]) => `
+            <button onclick="window.__airWiz.metode='${k}'; airRenderCritWizard()" class="flex-1 py-1.5 rounded-md text-sm font-semibold ${w.metode === k ? 'bg-white shadow text-navy' : 'text-slate-500'}">${l}</button>`).join('')}
+        </div>
+        ${inner}
+        <div class="mt-4 p-3 rounded-lg ${hasil ? 'bg-slate-50 border border-slate-200' : 'bg-slate-50 text-slate-400'} text-sm">
+          Hasil: ${hasil ? `${critBadge(hasil)} ${AIR_CRIT[hasil].vital ? '<span class="text-xs text-slate-600 ml-1">Peralatan Vital (SECE + PCE)</span>' : ''}` : 'belum lengkap'}
+        </div>
+        ${airCommonFields(w)}`;
+    }
+    window.airRenderCritWizard = airRenderCritWizard;
+    window.airCritAnswer = (k, v) => {
+      const w = window.__airWiz;
+      w.ans[k] = v;
+      // Jawaban setelah pertanyaan ini dibuang — urutan bisa berubah
+      const idx = AIR_Q.findIndex(q => q.k === k);
+      AIR_Q.slice(idx + 1).forEach(q => { delete w.ans[q.k]; });
+      airRenderCritWizard();
+    };
+    window.airCritEca = (d, p) => { window.__airWiz.dampak = d; window.__airWiz.probabilitas = p; airRenderCritWizard(); };
+
+    async function airSaveCriticality() {
+      const w = window.__airWiz;
+      if (!w?.hasilPreview) { toast('Penilaian belum lengkap.', 'warn'); return; }
+      if (w.metode === 'PHA' && !w.referensi_dokumen.trim()) { toast('PHA wajib mencantumkan referensi dokumen.', 'warn'); return; }
+      const row = {
+        equipment_id: w.eqId, tanggal: w.tanggal, metode: w.metode,
+        penilai: w.penilai || null, referensi_dokumen: w.referensi_dokumen || null, catatan: w.catatan || null,
+        created_by: state.user.id,
+      };
+      if (w.metode === 'KUALITATIF') AIR_Q.forEach(q => { row[q.k] = w.ans[q.k] ?? null; });
+      if (w.metode === 'ECA') { row.dampak = w.dampak; row.probabilitas = w.probabilitas; }
+      if (w.metode === 'PHA') row.hasil = w.hasilPha;
+      const btn = document.getElementById('air-wiz-save');
+      if (btn) { btn.disabled = true; btn.textContent = 'Menyimpan…'; }
+      const { data, error } = await state.supabase.from('criticality_assessment').insert(row).select().single();
+      if (error) {
+        toast('Gagal simpan: ' + error.message, 'error');
+        if (btn) { btn.disabled = false; btn.textContent = 'Simpan'; }
+        return;
+      }
+      logActivity('created', 'criticality_assessment', w.eqId, w.tag, { metode: data.metode, hasil: data.hasil });
+      closeModal();
+      toast(`Criticality tersimpan: ${data.hasil}`, 'success');
+      airReloadCurrentEq(w.eqId);
+    }
+    window.airSaveCriticality = airSaveCriticality;
+
+    // ---------- Wizard Integrity ----------
+    function openIntegrityWizard(eqId) {
+      const eq = window.__currentEq;
+      window.__airWiz = {
+        kind: 'integ', eqId, ans: {}, sumber: 'INSPEKSI',
+        tanggal: new Date().toISOString().slice(0, 10),
+        penilai: state.profile?.full_name || state.profile?.email || '',
+        catatan: '', tag: eq?.tag_number || '',
+      };
+      openModal({
+        title: `Penilaian Status Integrity — ${eq?.tag_number || ''}`,
+        maxWidth: 'max-w-2xl',
+        body: '<div id="air-wiz-body"></div>',
+        footer: `<button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
+                 <button id="air-wiz-save" onclick="airSaveIntegrity()" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy/80 text-white text-sm font-semibold">Simpan</button>`,
+      });
+      airRenderIntegWizard();
+    }
+    window.openIntegrityWizard = openIntegrityWizard;
+
+    function airRenderIntegWizard() {
+      const w = window.__airWiz;
+      const host = document.getElementById('air-wiz-body');
+      if (!host || !w) return;
+      const r = airQuestionList(AIR_S, w.ans, 'airIntegAnswer');
+      w.hasilPreview = r.hasil;
+      host.innerHTML = `
+        <div class="text-xs text-slate-500 mb-2">Gambar 9 / Tabel 5 pedoman. Performance standard ditentukan Field per jenis peralatan.</div>
+        <div class="space-y-2">${r.html}</div>
+        <div class="mt-4 p-3 rounded-lg bg-slate-50 border border-slate-200 text-sm">
+          Hasil: ${r.hasil ? `${integBadge(r.hasil)} <span class="text-xs text-slate-600 ml-1">${AIR_INTEG[r.hasil].warna}</span>` : '<span class="text-slate-400">belum lengkap</span>'}
+        </div>
+        ${airCommonFields(w)}`;
+    }
+    window.airIntegAnswer = (k, v) => {
+      const w = window.__airWiz;
+      w.ans[k] = v;
+      const idx = AIR_S.findIndex(q => q.k === k);
+      AIR_S.slice(idx + 1).forEach(q => { delete w.ans[q.k]; });
+      airRenderIntegWizard();
+    };
+
+    async function airSaveIntegrity() {
+      const w = window.__airWiz;
+      if (!w?.hasilPreview) { toast('Penilaian belum lengkap.', 'warn'); return; }
+      const row = {
+        equipment_id: w.eqId, tanggal: w.tanggal, sumber: w.sumber,
+        s1: w.ans.s1 ?? null, s2: w.ans.s2 ?? null, s3: w.ans.s3 ?? null,
+        penilai: w.penilai || null, temuan: w.catatan || null, created_by: state.user.id,
+      };
+      const btn = document.getElementById('air-wiz-save');
+      if (btn) { btn.disabled = true; btn.textContent = 'Menyimpan…'; }
+      const { data, error } = await state.supabase.from('integrity_assessment').insert(row).select().single();
+      if (error) {
+        toast('Gagal simpan: ' + error.message, 'error');
+        if (btn) { btn.disabled = false; btn.textContent = 'Simpan'; }
+        return;
+      }
+      logActivity('created', 'integrity_assessment', w.eqId, w.tag, { status: data.status, sumber: data.sumber });
+      closeModal();
+      toast(`Status integrity tersimpan: ${data.status}`, 'success');
+      airReloadCurrentEq(w.eqId);
+    }
+    window.airSaveIntegrity = airSaveIntegrity;
+
+    // ---------- Dashboard AIR (tab di halaman RAM) ----------
+    async function renderAirDashboard(host) {
+      try {
+        const { data, error } = await state.supabase.from('v_equipment_air_status').select('*').order('tag_number');
+        if (error) throw error;
+        state.__airAll = data || [];
+        if (state.airScope == null) state.airScope = 'lingkup';
+        state.airCell = null;
+        airPaintDashboard(host);
+      } catch (err) {
+        host.innerHTML = `<div class="bg-red-50 text-red-700 p-4 rounded-xl text-sm">Gagal load dashboard AIR: ${escapeHtml(err.message)}<br><small>⚠️ Pastikan <b>fase35_air_tahap1.sql</b> sudah dijalankan di Supabase.</small></div>`;
+      }
+    }
+
+    function airPaintDashboard(host) {
+      host = host || document.getElementById('ram-content');
+      if (!host) return;
+      const all = state.__airAll || [];
+      const rows = state.airScope === 'lingkup'
+        ? all.filter(r => r.dalam_lingkup_air && r.status_aset !== 'DECOMMISSIONED')
+        : all;
+      const CRITS = ['SECE', 'PCE', 'IMPORTANT', 'SECONDARY'];
+      const INTEGS = ['BREAKDOWN', 'LOW', 'MEDIUM', 'HIGH'];
+      const count = (c, s) => rows.filter(r => r.criticality === c && r.status_integrity === s).length;
+      const belum = rows.filter(r => r.belum_dinilai);
+      const belumKat = rows.filter(r => !r.kategori_aset);
+      const validasi = rows.filter(r => r.perlu_validasi_criticality);
+      const prioritas = rows.filter(r => r.prioritas != null && r.prioritas < 9)
+        .sort((a, b) => a.prioritas - b.prioritas || a.tag_number.localeCompare(b.tag_number));
+      const vital = rows.filter(r => r.is_vital).length;
+      // Warna sel heatmap mengikuti prioritas matriks (bukan jumlah unit)
+      const prioOf = {};
+      all.forEach(r => { if (r.prioritas != null) prioOf[r.criticality + '|' + r.status_integrity] = r.prioritas; });
+      const cellBg = (c, s) => {
+        if (c === 'SECONDARY' && s !== 'BREAKDOWN') return 'bg-slate-50';
+        const vitalRow = c === 'SECE' || c === 'PCE';
+        if (s === 'BREAKDOWN') return vitalRow ? 'bg-red-700 text-white' : 'bg-red-500 text-white';
+        if (s === 'LOW') return vitalRow ? 'bg-red-500 text-white' : 'bg-orange-400 text-white';
+        if (s === 'MEDIUM') return 'bg-amber-200 text-amber-900';
+        return 'bg-green-100 text-green-900';
+      };
+      const unitRow = r => `
+        <tr class="border-b border-slate-100 hover:bg-slate-50 cursor-pointer" onclick="setEquipmentView('detail','${r.id}','air')">
+          <td class="px-2 py-1.5 font-semibold text-navy whitespace-nowrap">${escapeHtml(r.tag_number)}</td>
+          <td class="px-2 py-1.5">${escapeHtml(r.nama_equipment)}</td>
+          <td class="px-2 py-1.5 whitespace-nowrap">${escapeHtml(getParentUnitName(r.assigned_unit_id))}</td>
+          <td class="px-2 py-1.5">${critBadge(r.criticality)}</td>
+          <td class="px-2 py-1.5">${integBadge(r.status_integrity)}</td>
+          <td class="px-2 py-1.5 text-xs">${r.prioritas != null && r.aksi ? `<b>P${r.prioritas}</b> ${escapeHtml(r.aksi)}` : '<span class="text-slate-300">—</span>'}</td>
+        </tr>`;
+      const tableOf = list => list.length ? `
+        <div class="overflow-x-auto"><table class="w-full text-sm">
+          <thead><tr class="text-left text-xs text-slate-500 border-b"><th class="px-2 py-1">Tag</th><th class="px-2 py-1">Nama</th><th class="px-2 py-1">Unit</th><th class="px-2 py-1">Criticality</th><th class="px-2 py-1">Integrity</th><th class="px-2 py-1">Tindak lanjut</th></tr></thead>
+          <tbody>${list.map(unitRow).join('')}</tbody></table></div>` : '<div class="text-sm text-slate-400 italic">Tidak ada.</div>';
+
+      let cellList = '';
+      if (state.airCell) {
+        const [c, s] = state.airCell.split('|');
+        const list = rows.filter(r => r.criticality === c && r.status_integrity === s);
+        cellList = `
+          <div class="bg-white border-2 border-navy rounded-xl p-4">
+            <div class="flex items-center justify-between mb-2">
+              <h4 class="font-bold text-navy text-sm">${critBadge(c)} × ${integBadge(s)} — ${list.length} unit</h4>
+              <button onclick="state.airCell=null; airPaintDashboard()" class="text-xs text-slate-500 hover:underline">Tutup</button>
+            </div>${tableOf(list)}
+          </div>`;
+      }
+      const stat = (label, val, cls = 'text-navy') => `
+        <div class="bg-white border border-slate-200 rounded-xl p-3">
+          <div class="text-xs text-slate-500">${label}</div>
+          <div class="text-2xl font-bold ${cls}">${val}</div>
+        </div>`;
+
+      host.innerHTML = `
+        <div class="space-y-4">
+          <div class="flex items-center justify-between flex-wrap gap-2">
+            <div>
+              <h3 class="font-bold text-slate-800">🧭 Asset Integrity & Reliability (AIR)</h3>
+              <p class="text-xs text-slate-500">Pedoman A4-009/PHE23000/2026-S9 — criticality × status integrity → tindak lanjut (Tabel 7)</p>
+            </div>
+            <div class="flex gap-1 bg-slate-100 rounded-lg p-1 text-sm">
+              <button onclick="state.airScope='lingkup'; state.airCell=null; airPaintDashboard()" class="px-3 py-1 rounded-md font-semibold ${state.airScope === 'lingkup' ? 'bg-white shadow text-navy' : 'text-slate-500'}">Dalam lingkup AIR</button>
+              <button onclick="state.airScope='semua'; state.airCell=null; airPaintDashboard()" class="px-3 py-1 rounded-md font-semibold ${state.airScope === 'semua' ? 'bg-white shadow text-navy' : 'text-slate-500'}">Semua</button>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+            ${stat('Equipment', rows.length)}
+            ${stat('Peralatan Vital', vital, 'text-red-700')}
+            ${stat('Perlu tindak lanjut', prioritas.length, prioritas.length ? 'text-orange-600' : 'text-green-700')}
+            ${stat('Belum dinilai', belum.length, belum.length ? 'text-amber-600' : 'text-green-700')}
+            ${stat('Validasi ulang ≤60 hr', validasi.length, validasi.length ? 'text-amber-600' : 'text-green-700')}
+          </div>
+
+          <div class="bg-white border border-slate-200 rounded-xl p-4">
+            <h4 class="font-bold text-navy text-sm uppercase tracking-wider mb-3">Heatmap Criticality × Status Integrity</h4>
+            <div class="overflow-x-auto">
+              <div class="grid gap-1 min-w-[520px]" style="grid-template-columns: 8rem repeat(4, minmax(0,1fr))">
+                <div></div>
+                ${INTEGS.map(s => `<div class="text-center text-xs font-semibold text-slate-600 pb-1">${integBadge(s)}<div class="text-[10px] text-slate-400 mt-0.5">${AIR_INTEG[s].warna}</div></div>`).join('')}
+                ${CRITS.map(c => `
+                  <div class="self-center text-right pr-2">${critBadge(c)}</div>
+                  ${INTEGS.map(s => {
+                    const n = count(c, s);
+                    const p = prioOf[c + '|' + s];
+                    return `<button ${n ? `onclick="state.airCell='${c}|${s}'; airPaintDashboard()"` : 'disabled'}
+                      class="h-16 rounded-lg ${cellBg(c, s)} ${n ? 'hover:ring-2 hover:ring-navy cursor-pointer' : 'opacity-40 cursor-default'} ${state.airCell === c + '|' + s ? 'ring-4 ring-navy' : ''} flex flex-col items-center justify-center">
+                      <span class="text-xl font-bold">${n}</span>
+                      ${p != null && p < 9 ? `<span class="text-[10px] opacity-80">P${p}</span>` : ''}
+                    </button>`;
+                  }).join('')}`).join('')}
+              </div>
+            </div>
+            <div class="text-[11px] text-slate-400 mt-2">★ = Vital (SECE + PCE). P = prioritas usulan (1 paling mendesak). Klik sel untuk melihat unitnya. Sel Secondary non-breakdown tidak ditetapkan pedoman.</div>
+          </div>
+
+          ${cellList}
+
+          <div class="bg-white border border-slate-200 rounded-xl p-4">
+            <h4 class="font-bold text-navy text-sm uppercase tracking-wider mb-3">Daftar Prioritas Tindak Lanjut (${prioritas.length})</h4>
+            ${tableOf(prioritas)}
+          </div>
+
+          ${validasi.length ? `
+          <div class="bg-amber-50 border border-amber-200 rounded-xl p-4">
+            <h4 class="font-bold text-amber-800 text-sm mb-2">⏰ Criticality kualitatif perlu validasi ulang (${validasi.length})</h4>
+            ${tableOf(validasi)}
+          </div>` : ''}
+
+          <details class="bg-white border border-slate-200 rounded-xl p-4" ${belum.length && belum.length <= 10 ? 'open' : ''}>
+            <summary class="font-bold text-navy text-sm cursor-pointer">Belum dinilai lengkap (${belum.length})${belumKat.length ? ` · <span class="text-amber-700">${belumKat.length} belum punya kategori aset</span>` : ''}</summary>
+            <div class="mt-3">${tableOf(belum)}</div>
+          </details>
+        </div>`;
+    }
+    window.airPaintDashboard = airPaintDashboard;
+
     function renderDetailTab(eq) {
       const c = document.getElementById('detail-tab-content');
       if (!c) return;
@@ -7798,12 +8406,13 @@
       const parent = c.parentElement.querySelector('.flex.border-b');
       if (parent) {
         parent.querySelectorAll('button').forEach((btn, i) => {
-          const ids = ['info','maintenance','sos','sertifikasi','dokumen','inspeksi','history','stress','fmea','rca','pemasangan'];
+          const ids = ['info','air','maintenance','sos','sertifikasi','dokumen','inspeksi','history','stress','fmea','rca','pemasangan'];
           btn.className = `px-4 py-3 text-sm font-medium whitespace-nowrap ${state.equipmentDetailTab===ids[i] ? 'border-b-2 border-safety text-safety bg-safety/5' : 'text-slate-600 hover:text-navy'}`;
         });
       }
       switch (state.equipmentDetailTab) {
         case 'info':        c.innerHTML = renderInfoTab(eq); break;
+        case 'air':         c.innerHTML = '<div class="text-slate-400">Memuat…</div>'; renderAirTab(eq, c); break;
         case 'sertifikasi': c.innerHTML = renderSertifikasiTab(eq); break;
         case 'maintenance': c.innerHTML = '<div class="text-slate-400">Memuat…</div>'; renderMaintenanceTab(eq, c); break;
         case 'sos':         c.innerHTML = '<div class="text-slate-400">Memuat…</div>'; renderSosTab(eq, c); break;
@@ -9764,8 +10373,8 @@
         input = `<textarea name="${f.name}" rows="3" ${required} class="${baseCls}">${escapeHtml(v)}</textarea>`;
       } else if (f.type === 'select') {
         input = `<select name="${f.name}" ${required} class="${baseCls} bg-white">
-          ${f.required ? '' : '<option value="">—</option>'}
-          ${f.options.map(o => `<option value="${o}" ${v == o ? 'selected' : ''}>${o}</option>`).join('')}
+          ${f.required ? '' : `<option value="">${f.emptyLabel ? `— ${escapeHtml(f.emptyLabel)}` : '—'}</option>`}
+          ${f.options.map(o => { const [ov, ol] = Array.isArray(o) ? o : [o, o]; return `<option value="${ov}" ${v == ov ? 'selected' : ''}>${escapeHtml(ol)}</option>`; }).join('')}
         </select>`;
       } else if (f.type === 'select-parent-unit') {
         input = `<select name="${f.name}" ${required} class="${baseCls} bg-white">
@@ -14895,7 +15504,7 @@
       if (!state.reliabilityTab) state.reliabilityTab = 'overview';
       const div = document.createElement('div');
       div.className = 'page space-y-4';
-      const pillars = [['reliability', '🛡️ Reliability'], ['availability', '🟢 Availability'], ['trend', '📈 Trend RAM'], ['maintenance', '🛠️ Maintenance'], ['kelayakan', '📋 Kelayakan']];
+      const pillars = [['reliability', '🛡️ Reliability'], ['availability', '🟢 Availability'], ['trend', '📈 Trend RAM'], ['maintenance', '🛠️ Maintenance'], ['kelayakan', '📋 Kelayakan'], ['air', '🧭 AIR']];
       if (state.profile?.role === 'admin') pillars.push(['laporan', '📝 Laporan Harian'], ['analisa', '📊 Analisa Laporan'], ['plo', '📄 Laporan PLO']);
       div.innerHTML = `
         <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -14916,6 +15525,7 @@
       if (t === 'trend')        { host.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat data trend…</div>'; renderRamTrendPage(host); return; }
       if (t === 'maintenance') { host.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat…</div>'; renderRamMaintenance(host); return; }
       if (t === 'kelayakan') { host.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat…</div>'; renderKelayakanPage(host); return; }
+      if (t === 'air') { host.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat…</div>'; renderAirDashboard(host); return; }
       if (t === 'laporan') { host.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat…</div>'; renderLaporanHarianPage(host); return; }
       if (t === 'analisa') { host.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat…</div>'; renderAnalisaLaporanPage(host); return; }
       if (t === 'plo') { renderPloReportPage(host); return; }
@@ -20506,6 +21116,10 @@
               <button onclick="openSosComponentModal('${eq.id}')" class="bg-safety hover:bg-safety-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium">➕ Tambah Component</button>
             </div>` : ''}
           </div>
+          ${eq.criticality ? `<div class="mb-3 rounded-lg p-3 text-xs flex items-center gap-2 flex-wrap ${AIR_CRIT[eq.criticality]?.vital ? 'bg-red-50 border border-red-200 text-red-800' : 'bg-slate-50 border border-slate-200 text-slate-700'}">
+            🧭 Criticality AIR: ${critBadge(eq.criticality)} ${eq.status_integrity ? `· Integrity: ${integBadge(eq.status_integrity)}` : ''}
+            ${AIR_CRIT[eq.criticality]?.vital ? '<span>— <b>Peralatan Vital</b>: hasil SOS abnormal/kritis perlu ditindaklanjuti sebagai prioritas tinggi.</span>' : ''}
+          </div>` : ''}
           <div class="space-y-3">${compCards}</div>
           <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-800 mt-3">
             💡 <b>Cara kerja:</b> Trakindo kasih verdict per-sample (snapshot). eRAMHoist baca SEMUA sample lintas-waktu → kasih analisa trend (NAIK/STABIL/TURUN) + tandai EVENT (anomali sesaat) + penjelasan tiap parameter yg bergerak. Trend lebih powerful dari snapshot karena bisa detect early warning sebelum kerusakan.
