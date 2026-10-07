@@ -24215,6 +24215,7 @@
           <b>Alur RAM:</b> 🚛 <b>Stress Score</b> (beban mobilisasi) → menaikkan <b>Occurrence</b> di ⚠️ <b>FMEA</b> (risiko/RPN) → komponen RPN tinggi → spare-nya prioritas di 📦 <b>CSPP</b>.
           🟢 <b>Availability</b> mengukur kesiapan harian; 🛠️ <b>Maintenance</b> (PM/TOH/GOH) jaga performa; 📋 <b>Kelayakan</b> putuskan unit layak dirawat atau ganti.
           📸 <b>Catat Downtime + Foto</b> = audit trail visual tiap kejadian.
+          <br>🧭 <b>AIR</b> (Pedoman A4-009/PHE23000/2026-S9): criticality × status integrity → tindak lanjut; kegagalan dicatat format ISO 14224 → RCA otomatis bila berulang; spare part kelas V/I/S; izin operasi & umur layan; laporan KPI bulanan. Mulai dari <b>📋 Daftar Kerja AIR</b> di Dashboard / RAM → 🧭 AIR.
         </div>
 
         ${sec('#dc2626', '🚛', 'Stress Score — beban mobilisasi', `
@@ -24229,8 +24230,10 @@
 
         ${sec('#11335d', '📦', 'CSPP — Critical Spare Parts Planning', `
           <p>Memastikan suku cadang <b>kritis</b> tersedia agar equipment tidak menganggur menunggu part.</p>
-          ${tbl(['Status', 'Arti'], [['🔴 Habis', 'Stok = 0'], ['🟠 Rendah', 'Stok di bawah safety stock'], ['🟢 Aman', 'Stok cukup']])}
-          <p><b>Fokus utama:</b> part berkategori <b>Critical</b> yang <b>habis stok</b> = prioritas pengadaan (lampiran justifikasi ke atasan).</p>`)}
+          ${tbl(['Status', 'Arti'], [['🔴 Habis', 'Stok = 0 (benar-benar habis)'], ['🤝 Dipinjam', 'Stok 0 karena dipinjamkan (Peminjaman Part di Input Harian) dan belum ada stok masuk sesudahnya — bukan habis'], ['🟠 Rendah', 'Stok di bawah safety stock'], ['🔵 Di atas maks', 'Stok melebihi stok maksimum (kalau diisi)'], ['🟢 Aman', 'Stok cukup']])}
+          <p><b>Fokus utama:</b> part berkategori <b>Critical</b> yang <b>habis stok</b> = prioritas pengadaan (lampiran justifikasi ke atasan).</p>
+          <p><b>Panel 🧭 Spare Part VIS (Pedoman AIR):</b> tiap part punya kelas <b>V</b> (Vital — part peralatan SECE/PCE, <b>tidak boleh stok 0</b>), <b>I</b> (Important) atau <b>S</b> (Secondary), dihitung otomatis dari criticality equipment yang terkait. Kartu merah/kuning bisa diklik untuk filter: Vital habis, Vital ≤ minimum, sedang dipinjam, usia simpan lewat batas. Klik badge V/I/S untuk koreksi kelas, isi stok maksimum, atau catat No. reservasi SAP. Tombol <b>📈 Rekomendasi 2 Tahun</b> = usulan pengadaan (bisa Excel).</p>
+          <p class="text-xs text-slate-500">Part yang belum dihubungkan ke equipment (lewat <b>Kelola Part Kritis</b>) selalu kelas S — petakan dulu part Critical supaya alert Vital bekerja.</p>`)}
 
         ${sec('#16a34a', '🟢', 'Availability — kesiapan equipment', `
           <p>Persentase waktu equipment <b>siap pakai</b> (tidak down), dihitung dari catatan downtime.</p>
@@ -24467,24 +24470,27 @@
           <p>Gabungan <b>umur jam/km</b> (TOH/GOH/eco life) + <b>keandalan</b> (MTBF berbasis HM). Pakai 2 sumbu untuk verdict.</p>
           ${tbl(['Verdict', 'Aturan'], [['🟢 Sehat', 'Umur &lt;80% AND keandalan ≥1 siklus TOH'], ['🟡 Pantau', 'Salah satu sumbu bermasalah (umur 80-99% atau MTBF &lt;1 siklus)'], ['🔴 Kandidat ganti', 'Umur ≥100% AND keandalan &lt;½ TOH']])}
           <p><b>Layout:</b> 2 section terpisah — Berbasis JAM (engine, genset, pump) + Berbasis KM (Kendaraan, Damkar, Slickline truck).</p>
-          <p><b>Catatan:</b> kolom Rusak/MTBF/Avail terisi seiring kamu mencatat kerusakan di tab Availability. Selama belum ada catatan, verdict bersandar pada umur saja.</p>`)}
+          <p><b>Catatan:</b> kolom Rusak/MTBF/Avail terisi seiring kamu mencatat kerusakan di tab Availability. Selama belum ada catatan, verdict bersandar pada umur saja.</p>
+          <p>Pelengkap keputusan ganti: hasil <b>RLA</b> (batas layan) dan <b>biaya pemeliharaan per tahun</b> ada di tab 🧭 AIR tiap equipment (AIR langkah 9).</p>`)}
 
         ${sec('#7c3aed', '📸', 'Catat Downtime + Foto — workflow real-time', `
           <p>Setiap kejadian downtime bisa diupload <b>foto dengan tanggal kejadian</b> (bukan tanggal upload — supaya audit trail jujur kalau telat upload).</p>
           ${tbl(['Phase', 'Saat upload', 'Border warna'], [['Sebelum (before)', 'Saat lapor rusak / kondisi awal', '🔴 merah'], ['Part (part)', 'Saat part datang / dipasang', '🔵 biru'], ['Sesudah (after)', 'Saat perbaikan selesai', '🟢 hijau'], ['Lainnya (other)', 'Foto update progress', '⚪ abu-abu']])}
           <p><b>Alur 3 fase multi-day repair:</b></p>
           <ol class="list-decimal pl-5 space-y-1">
-            <li><b>Hari 1 — Rusak:</b> + Catat Downtime → catatan + foto fase "Sebelum". Selesai dikosongkan.</li>
+            <li><b>Hari 1 — Rusak:</b> + Catat Downtime → catatan + foto fase "Sebelum". Selesai dikosongkan. Kalau kategori <b>Breakdown/Troubleshoot</b>, isi <b>failure mode</b> (wajib — mis. VIB getaran, ELU bocor oli, FTS tidak mau start) dan komponen yang gagal bila ada.</li>
             <li><b>Hari 3 — Part datang:</b> Edit record yg sama → tambah foto fase "Part" dgn tgl kejadian = tgl part datang. Status tetap 🔴 Sedang Down.</li>
-            <li><b>Hari 5 — Selesai:</b> Edit → isi tanggal Selesai + foto fase "Sesudah". Record closed, durasi auto-terhitung.</li>
+            <li><b>Hari 5 — Selesai:</b> Edit → isi tanggal Selesai + foto fase "Sesudah" + <b>failure cause</b> (wajib untuk Breakdown/Troubleshoot — mis. 3.4 aus wajar, 3.3 kesalahan pemeliharaan). Record closed, durasi auto-terhitung. Tombol <b>Selesai</b> di daftar akan membuka form ini kalau failure mode/cause belum lengkap.</li>
           </ol>
           <p><b>Hasil di History tab</b> equipment: 3 baris timeline (DOWN → PART → SELESAI) dengan thumbnail foto + nama pelapor.</p>
-          <p>Foto auto-compress ke ≤300KB (1280px JPEG q78). Max 5 per upload session (bisa multiple session via Edit).</p>`)}
+          <p>Foto auto-compress ke ≤300KB (1280px JPEG q78). Max 5 per upload session (bisa multiple session via Edit).</p>
+          <p class="text-xs text-slate-500">Failure mode yang sama pada ≥3 kejadian di kategori equipment yang sama dalam 12 bulan otomatis membuat RCA (lihat bagian RCA & AIR langkah 7).</p>`)}
 
         <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-slate-700">
           <b class="text-amber-800">📚 Dokumen lengkap di GitHub:</b><br>
           • <a href="https://github.com/maman0807-rgb/rigbase-station/blob/main/PANDUAN_RAM_eRAMHoist.md" target="_blank" class="text-navy underline hover:text-navy-700"><b>PANDUAN_RAM_eRAMHoist.md</b></a> — user manual operasional komprehensif (SOP harian/mingguan, workflow detail, common pitfalls)<br>
-          • <a href="https://github.com/maman0807-rgb/rigbase-station/blob/main/PANDUAN_INTERVAL_HM.md" target="_blank" class="text-navy underline hover:text-navy-700"><b>PANDUAN_INTERVAL_HM.md</b></a> — angka OEM tier per merek (Perkins/CAT/Cummins/Deutz/FG Wilson) + audit trail rename
+          • <a href="https://github.com/maman0807-rgb/rigbase-station/blob/main/PANDUAN_INTERVAL_HM.md" target="_blank" class="text-navy underline hover:text-navy-700"><b>PANDUAN_INTERVAL_HM.md</b></a> — angka OEM tier per merek (Perkins/CAT/Cummins/Deutz/FG Wilson) + audit trail rename<br>
+          • <a href="https://github.com/maman0807-rgb/rigbase-station/tree/main/docs" target="_blank" class="text-navy underline hover:text-navy-700"><b>docs/AIR_TAHAP1–4C.md</b></a> — catatan teknis & keputusan penerapan Pedoman AIR per tahap
         </div>
         `;
       return div;
