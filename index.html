@@ -8136,13 +8136,15 @@
         }
         return out;
       };
-      const [eqs, strat, parts, dt, izinExp] = await Promise.all([
+      const perLalu = lapAirDefaultPeriode();
+      const [eqs, strat, parts, dt, izinExp, lapLalu] = await Promise.all([
         pageAll('v_equipment_air_status', 'id, tag_number, nama_equipment, kategori_aset, kategori_aset_nama, taxonomy_level, status_aset, dalam_lingkup_air, criticality, status_integrity'),
         pageAll('equipment', 'id, strategi_pemeliharaan').catch(() => null),
         pageAll('v_sparepart_vis', 'id, category, dipetakan, kelas_vis, alert_vital_tanpa_minimum').catch(() => null),
         state.supabase.from('downtime_events').select('id', { count: 'exact', head: true })
           .in('category', ['breakdown', 'troubleshoot']).is('failure_mode', null).gte('start_at', since12.toISOString()),
         state.supabase.from('v_air_lifecycle_alert').select('equipment_id', { count: 'exact', head: true }).eq('tipe', 'IZIN').eq('status', 'KEDALUWARSA'),
+        state.supabase.from('laporan_air_bulanan').select('status').eq('periode', perLalu).maybeSingle(),
       ]);
       const scope = eqs.filter(e => e.dalam_lingkup_air && e.status_aset !== 'DECOMMISSIONED');
       const stratById = strat ? Object.fromEntries(strat.map(x => [x.id, x.strategi_pemeliharaan])) : null;
@@ -8157,6 +8159,8 @@
         vitalTanpaMin: parts ? parts.filter(p => p.alert_vital_tanpa_minimum).length : null,
         dtBelumKlas: dt.count ?? null,
         izinKedaluwarsa: izinExp?.error ? null : (izinExp?.count ?? null),
+        // null = fitur laporan belum ada (fase39 belum dijalankan)
+        laporanLalu: lapLalu?.error ? null : { periode: perLalu, final: lapLalu?.data?.status === 'FINAL' },
       };
     }
     function airWorklistItems(d) {
@@ -8176,6 +8180,12 @@
         ket: 'Part Vital tanpa stok minimum — alert "≤ minimum" tidak bisa bekerja.', aksi: `goCsppPreset('vitaltanpamin')` });
       if (d.izinKedaluwarsa) items.push({ key: 'izin', ico: '📜', judul: 'Perpanjang izin operasi yang kedaluwarsa', sisa: d.izinKedaluwarsa, total: null,
         ket: 'Izin aktif (SKPI/COI/PLO/…) sudah lewat masa berlaku. Kalau sebenarnya sudah diperpanjang, catat izin barunya di tab 📜 Sertifikasi.', aksi: `airGoDashboard('life')` });
+      if (d.laporanLalu && lapAirCanEdit()) {
+        const sisaHr = Math.ceil((lapAirDeadline(d.laporanLalu.periode) - new Date()) / 86400000);
+        items.push({ key: 'lap', ico: '📊', judul: `Finalkan Laporan AIR ${lapAirLabel(d.laporanLalu.periode)}`, sisa: d.laporanLalu.final ? 0 : 1, total: null,
+          ket: d.laporanLalu.final ? 'Sudah final.' : `Kirim ke SHU paling lambat tgl 12 — ${sisaHr < 0 ? `<b class="text-red-700">terlambat ${-sisaHr} hari</b>` : `${sisaHr} hari lagi`}. Hitung KPI otomatis, isi KPI manual & SAMBAL, lalu finalkan.`,
+          aksi: `airGoLaporan('${d.laporanLalu.periode}')` });
+      }
       if (d.dtBelumKlas) items.push({ key: 'dt', ico: '🏷️', judul: 'Klasifikasi failure mode downtime 12 bulan', sisa: d.dtBelumKlas, total: null,
         ket: 'Belum ikut dihitung deteksi repetitive failure / RCA otomatis.', aksi: `airGoDashboard('dt')` });
       return items;
@@ -8245,6 +8255,12 @@
       navigate('reliability');
     }
     window.airGoDashboard = airGoDashboard;
+    function airGoLaporan(per) {
+      state.lapAirPeriode = per || lapAirDefaultPeriode();
+      state.ramTab = 'lapair';
+      navigate('reliability');
+    }
+    window.airGoLaporan = airGoLaporan;
     // Banner di Dashboard utama (admin & manager): ringkas, hanya muncul kalau masih ada pekerjaan
     async function renderAirWorklistBanner(host) {
       if (!host) return;
@@ -8615,6 +8631,283 @@
         return data || null;
       } catch { return null; }
     }
+
+    // ============================================================
+    // AIR Tahap 4C — Laporan Kinerja AIR Bulanan + KPI + SAMBAL (Fase 39)
+    // Dikirim Regional ke SHU paling lambat tgl 12 bulan berikutnya.
+    // ============================================================
+    const BULAN_ID = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+    const lapAirLabel = per => { const d = new Date(per + 'T00:00:00'); return `${BULAN_ID[d.getMonth()]} ${d.getFullYear()}`; };
+    // Pakai tanggal lokal (WIB), bukan toISOString (UTC) — tgl 1 sebelum jam 07.00 bisa bergeser bulan
+    const lapAirPer = (y, m) => { const d = new Date(y, m, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`; };
+    const lapAirDefaultPeriode = () => { const n = new Date(); return lapAirPer(n.getFullYear(), n.getMonth() - 1); };
+    const lapAirDeadline = per => { const d = new Date(per + 'T00:00:00'); d.setMonth(d.getMonth() + 1); d.setDate(12); return d; };
+    function lapAirCanEdit() { return ['admin', 'spv', 'sr_spv', 'astmen'].includes(state.profile?.role); }
+    const SAMBAL_FIELDS = [['sambal_siapa', 'Siapa', 'Siapa pemilik / penanggung jawab KPI ini?'], ['sambal_apa', 'Apa', 'Apa yang terjadi — berapa gap dari target?'],
+      ['sambal_mengapa', 'Mengapa', 'Mengapa target tidak tercapai (akar masalah)?'], ['sambal_bagaimana', 'Bagaimana', 'Bagaimana kondisi / dampaknya dan apa yang sudah dilakukan?'],
+      ['sambal_aksi_lanjut', 'Aksi Lanjut', 'Aksi lanjut + PIC + target waktu']];
+    const sambalLengkap = r => SAMBAL_FIELDS.every(([k]) => (r?.[k] || '').trim());
+    const kpiFmt = (v, sat) => v == null ? '—' : `${Number(v).toLocaleString('id-ID', { maximumFractionDigits: 2 })}${sat === '%' ? '%' : sat ? ' ' + sat : ''}`;
+
+    async function renderLaporanAir(host) {
+      host = host || document.getElementById('ram-content');
+      if (!host) return;
+      if (!state.lapAirPeriode) state.lapAirPeriode = lapAirDefaultPeriode();
+      const per = state.lapAirPeriode;
+      try {
+        const [kRes, rRes, lRes, eqRes, lifeRes, rcaRes, spRes] = await Promise.all([
+          state.supabase.from('kpi_air').select('*').eq('aktif', true).order('urutan'),
+          state.supabase.from('kpi_air_realisasi').select('*').eq('periode', per),
+          state.supabase.from('laporan_air_bulanan').select('*').eq('periode', per).maybeSingle(),
+          state.supabase.from('v_equipment_air_status').select('id, tag_number, nama_equipment, criticality, is_vital, status_integrity, dalam_lingkup_air, status_aset, aksi, prioritas'),
+          state.supabase.from('v_air_lifecycle_alert').select('tipe, status'),
+          state.supabase.from('rca_records').select('id, status, pemicu').neq('status', 'CLOSED'),
+          state.supabase.from('v_sparepart_vis').select('id', { count: 'exact', head: true }).eq('alert_vital_habis', true),
+        ]);
+        if (kRes.error) throw kRes.error;
+        const kpis = kRes.data || [];
+        const real = Object.fromEntries((rRes.data || []).map(r => [r.kpi_kode, r]));
+        const lap = lRes.data || { periode: per, status: 'DRAFT' };
+        state.__lapAir = { per, kpis, real, lap };
+        const final = lap.status === 'FINAL';
+        const can = lapAirCanEdit();
+        const deadline = lapAirDeadline(per);
+        const sisa = Math.ceil((deadline - new Date()) / 86400000);
+        const scope = (eqRes.data || []).filter(e => e.dalam_lingkup_air && e.status_aset !== 'DECOMMISSIONED');
+        const dist = ['BREAKDOWN', 'LOW', 'MEDIUM', 'HIGH'].map(s => [s, scope.filter(e => e.status_integrity === s).length]);
+        const vitalBermasalah = scope.filter(e => e.is_vital && ['BREAKDOWN', 'LOW'].includes(e.status_integrity));
+        const life = lifeRes.data || [];
+        const izinExp = life.filter(x => x.tipe === 'IZIN' && x.status === 'KEDALUWARSA').length;
+        const izinSoon = life.filter(x => x.tipe === 'IZIN' && x.status === 'AKAN_HABIS').length;
+        const tidak = kpis.filter(k => real[k.kode]?.tercapai === false);
+        const sambalKurang = tidak.filter(k => !sambalLengkap(real[k.kode]));
+        state.__lapAirRingkas = { scope: scope.length, dist, vitalBermasalah, izinExp, izinSoon, rca: (rcaRes.data || []).length, spVital: spRes.count || 0 };
+
+        const periodeOpts = [];
+        for (let i = 0; i < 13; i++) { const nw = new Date(); const v = lapAirPer(nw.getFullYear(), nw.getMonth() - i); periodeOpts.push(`<option value="${v}" ${v === per ? 'selected' : ''}>${lapAirLabel(v)}${i === 0 ? ' (berjalan)' : ''}</option>`); }
+
+        const rows = kpis.map(k => {
+          const r = real[k.kode];
+          const st = r?.tercapai === true ? '<span class="text-green-700 font-bold">✅ Tercapai</span>'
+                   : r?.tercapai === false ? '<span class="text-red-700 font-bold">❌ Tidak</span>' : '<span class="text-slate-400 text-xs">—</span>';
+          const tgt = (r?.target_saat_itu ?? k.target);
+          const nilaiCell = k.sumber === 'MANUAL' && can && !final
+            ? `<input type="number" step="any" value="${r?.nilai ?? ''}" onchange="lapAirSetManual('${k.kode}', this.value)" class="w-24 px-2 py-1 border border-slate-300 rounded text-sm text-right">`
+            : `<span class="font-semibold" title="${escapeHtml(r?.detail ? JSON.stringify(r.detail) : '')}">${kpiFmt(r?.nilai, k.satuan)}</span>`;
+          const detail = r?.detail ? Object.entries(r.detail).map(([a, b]) => `${a.replace(/_/g, ' ')}: ${b}`).join(' · ') : '';
+          return `
+            <tr class="border-b border-slate-100 align-top">
+              <td class="px-2 py-2 text-xs text-slate-500">${escapeHtml(k.kategori_pedoman || '')}</td>
+              <td class="px-2 py-2 text-sm"><div class="font-semibold text-slate-800">${escapeHtml(k.nama)}</div>
+                <div class="text-[11px] text-slate-400">${k.sumber === 'OTOMATIS' ? '⚙️ otomatis' : '✍️ manual'}${detail ? ' · ' + escapeHtml(detail) : ''}</div></td>
+              <td class="px-2 py-2 text-sm text-right whitespace-nowrap">${tgt == null ? '<span class="text-slate-400 text-xs">info</span>' : `${k.arah === 'MIN' ? '≥' : '≤'} ${kpiFmt(tgt, k.satuan)}`}</td>
+              <td class="px-2 py-2 text-sm text-right whitespace-nowrap">${nilaiCell}</td>
+              <td class="px-2 py-2 text-sm whitespace-nowrap">${st}</td>
+              <td class="px-2 py-2 text-right whitespace-nowrap">${r?.tercapai === false
+                ? `<button onclick="openSambal('${k.kode}')" class="px-2 py-1 rounded text-xs font-semibold ${sambalLengkap(r) ? 'bg-green-100 text-green-800' : 'bg-red-600 text-white'}">${sambalLengkap(r) ? '✓ SAMBAL' : '+ SAMBAL'}</button>`
+                : (r?.catatan ? '<span class="text-xs text-slate-400">📝</span>' : '')}</td>
+            </tr>`;
+        }).join('');
+
+        host.innerHTML = `
+          <div class="space-y-4">
+            <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+              <div class="flex items-start justify-between gap-3 flex-wrap">
+                <div>
+                  <h3 class="text-base font-bold text-navy">📊 Laporan Kinerja AIR Bulanan</h3>
+                  <p class="text-xs text-slate-500">Pedoman AIR: materi monev dikirim ke SHU paling lambat <b>tanggal 12</b> bulan berikutnya. KPI tidak tercapai wajib dijelaskan dengan <b>SAMBAL</b> (Siapa, Apa, Mengapa, Bagaimana, Aksi Lanjut).</p>
+                </div>
+                <div class="flex items-center gap-2 flex-wrap">
+                  <select onchange="state.lapAirPeriode=this.value; renderLaporanAir()" class="px-2 py-1.5 border border-slate-300 rounded-lg text-sm bg-white">${periodeOpts.join('')}</select>
+                  <span class="px-2 py-1 rounded-full text-xs font-bold ${final ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'}">${final ? '✅ FINAL' : '✏️ DRAFT'}</span>
+                </div>
+              </div>
+              <div class="mt-3 text-sm ${final ? 'text-green-700' : sisa < 0 ? 'text-red-700 font-bold' : sisa <= 5 ? 'text-amber-700 font-semibold' : 'text-slate-600'}">
+                ${final ? `Difinalkan ${lap.tgl_final ? new Date(lap.tgl_final).toLocaleDateString('id-ID') : ''}${lap.difinalkan_oleh ? ' oleh ' + escapeHtml(lap.difinalkan_oleh) : ''}.`
+                  : `Batas kirim: <b>${deadline.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}</b> — ${sisa < 0 ? `terlambat ${-sisa} hari` : `${sisa} hari lagi`}.`}
+              </div>
+              <div class="flex gap-2 flex-wrap mt-3">
+                ${can && !final ? `<button onclick="lapAirHitung()" class="px-3 py-1.5 bg-navy hover:bg-navy/80 text-white rounded-lg text-sm font-semibold">🔄 Hitung KPI otomatis</button>` : ''}
+                ${can && !final ? `<button onclick="lapAirFinal(true)" class="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-semibold">✅ Finalkan</button>` : ''}
+                ${can && final ? `<button onclick="lapAirFinal(false)" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg text-sm font-semibold">↩ Buka kembali</button>` : ''}
+                <button onclick="lapAirCetak()" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg text-sm font-semibold">🖨 Cetak / PDF</button>
+                <button onclick="lapAirExcel()" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg text-sm font-semibold">📊 Excel</button>
+                ${state.profile?.role === 'admin' ? `<button onclick="openKpiTarget()" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg text-sm font-semibold">⚙️ Target KPI</button>` : ''}
+              </div>
+              ${!Object.keys(real).length && !final ? '<div class="mt-3 text-xs bg-cyan-50 border border-cyan-200 text-cyan-900 rounded p-2">Belum ada angka untuk bulan ini. Klik <b>🔄 Hitung KPI otomatis</b>, lalu isi KPI manual dan SAMBAL untuk KPI yang tidak tercapai.</div>' : ''}
+              ${sambalKurang.length && !final ? `<div class="mt-3 text-xs bg-red-50 border border-red-200 text-red-800 rounded p-2">⚠️ ${sambalKurang.length} KPI tidak tercapai belum punya SAMBAL lengkap — laporan belum bisa difinalkan.</div>` : ''}
+            </div>
+
+            <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+              <div class="overflow-x-auto"><table class="w-full">
+                <thead class="bg-slate-50"><tr class="text-left text-xs font-bold text-slate-600">
+                  <th class="px-2 py-2">Kelompok KPI</th><th class="px-2 py-2">KPI</th><th class="px-2 py-2 text-right">Target</th><th class="px-2 py-2 text-right">Realisasi</th><th class="px-2 py-2">Status</th><th class="px-2 py-2"></th>
+                </tr></thead>
+                <tbody>${rows}</tbody>
+              </table></div>
+            </div>
+
+            <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+              <h4 class="font-bold text-navy text-sm uppercase tracking-wider mb-1">Ringkasan Kondisi Aset</h4>
+              <div class="text-[11px] text-slate-400 mb-3">Kondisi saat ini (bukan per akhir bulan) — untuk pelengkap laporan.</div>
+              <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+                ${dist.map(([s, n]) => `<div class="rounded-lg p-2 text-center ${AIR_INTEG[s].cls}"><div class="text-xl font-bold">${n}</div><div class="text-[11px]">${AIR_INTEG[s].label} (${AIR_INTEG[s].warna})</div></div>`).join('')}
+              </div>
+              <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
+                <div class="border border-slate-200 rounded-lg p-2"><div class="text-xs text-slate-500">Unit vital bermasalah</div><div class="text-lg font-bold ${vitalBermasalah.length ? 'text-red-700' : 'text-green-700'}">${vitalBermasalah.length}</div></div>
+                <div class="border border-slate-200 rounded-lg p-2"><div class="text-xs text-slate-500">Izin kedaluwarsa / ≤60 hr</div><div class="text-lg font-bold ${izinExp ? 'text-red-700' : 'text-slate-800'}">${izinExp} / ${izinSoon}</div></div>
+                <div class="border border-slate-200 rounded-lg p-2"><div class="text-xs text-slate-500">RCA terbuka</div><div class="text-lg font-bold">${(rcaRes.data || []).length}</div></div>
+                <div class="border border-slate-200 rounded-lg p-2"><div class="text-xs text-slate-500">Spare part Vital habis</div><div class="text-lg font-bold ${spRes.count ? 'text-red-700' : 'text-green-700'}">${spRes.count || 0}</div></div>
+              </div>
+              ${vitalBermasalah.length ? `<div class="mt-3 text-xs text-slate-600"><b>Unit vital bermasalah:</b> ${vitalBermasalah.map(e => `${escapeHtml(e.tag_number)} (${AIR_INTEG[e.status_integrity].label})`).join(', ')}</div>` : ''}
+            </div>
+          </div>`;
+      } catch (err) {
+        host.innerHTML = `<div class="bg-red-50 text-red-700 p-4 rounded-xl text-sm">Gagal memuat laporan AIR: ${escapeHtml(err.message)}<br><small>⚠️ Pastikan <b>fase39_air_tahap4c.sql</b> sudah dijalankan.</small></div>`;
+      }
+    }
+    window.renderLaporanAir = renderLaporanAir;
+
+    async function lapAirHitung() {
+      const per = state.lapAirPeriode;
+      const { data, error } = await state.supabase.rpc('air_kpi_isi_otomatis', { p_periode: per });
+      if (error) { toast('Gagal hitung: ' + error.message, 'error'); return; }
+      toast(`${data} KPI otomatis dihitung untuk ${lapAirLabel(per)}.`, 'success');
+      renderLaporanAir();
+    }
+    window.lapAirHitung = lapAirHitung;
+    async function lapAirSetManual(kode, val) {
+      const per = state.lapAirPeriode;
+      await state.supabase.from('laporan_air_bulanan').upsert({ periode: per }, { onConflict: 'periode', ignoreDuplicates: true });
+      const { error } = await state.supabase.from('kpi_air_realisasi')
+        .upsert({ periode: per, kpi_kode: kode, nilai: val === '' ? null : Number(val), updated_by: state.user.id }, { onConflict: 'periode,kpi_kode' });
+      if (error) { toast('Gagal simpan: ' + error.message, 'error'); return; }
+      renderLaporanAir();
+    }
+    window.lapAirSetManual = lapAirSetManual;
+    function openSambal(kode) {
+      const { kpis, real, lap } = state.__lapAir || {};
+      const k = kpis.find(x => x.kode === kode); const r = real[kode] || {};
+      const ro = lap.status === 'FINAL' || !lapAirCanEdit();
+      const inp = 'w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy';
+      openModal({
+        title: `SAMBAL — ${k.nama}`,
+        maxWidth: 'max-w-xl',
+        body: `
+          <div class="space-y-3">
+            <div class="text-xs bg-red-50 border border-red-200 rounded p-2 text-red-800">Target ${k.arah === 'MIN' ? '≥' : '≤'} ${kpiFmt(r.target_saat_itu ?? k.target, k.satuan)} · realisasi <b>${kpiFmt(r.nilai, k.satuan)}</b> — tidak tercapai.</div>
+            ${SAMBAL_FIELDS.map(([f, l, ph]) => `<label class="block"><span class="text-xs font-semibold text-slate-600">${l} *</span>
+              <textarea id="sb-${f}" rows="2" placeholder="${ph}" class="${inp}" ${ro ? 'disabled' : ''}>${escapeHtml(r[f] || '')}</textarea></label>`).join('')}
+            <label class="block"><span class="text-xs font-semibold text-slate-600">Catatan</span><textarea id="sb-catatan" rows="2" class="${inp}" ${ro ? 'disabled' : ''}>${escapeHtml(r.catatan || '')}</textarea></label>
+          </div>`,
+        footer: `<button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Tutup</button>
+          ${ro ? '' : `<button onclick="saveSambal('${kode}')" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy/80 text-white text-sm font-semibold">Simpan</button>`}`,
+      });
+    }
+    window.openSambal = openSambal;
+    async function saveSambal(kode) {
+      const upd = { catatan: (document.getElementById('sb-catatan')?.value || '').trim() || null, updated_by: state.user.id };
+      SAMBAL_FIELDS.forEach(([f]) => { upd[f] = (document.getElementById('sb-' + f)?.value || '').trim() || null; });
+      const { error } = await state.supabase.from('kpi_air_realisasi').update(upd).eq('periode', state.lapAirPeriode).eq('kpi_kode', kode);
+      if (error) { toast('Gagal simpan: ' + error.message, 'error'); return; }
+      closeModal();
+      toast(sambalLengkap(upd) ? 'SAMBAL lengkap tersimpan.' : 'Tersimpan — SAMBAL belum lengkap (5 bagian wajib).', sambalLengkap(upd) ? 'success' : 'warn');
+      renderLaporanAir();
+    }
+    window.saveSambal = saveSambal;
+    async function lapAirFinal(jadiFinal) {
+      const per = state.lapAirPeriode;
+      const ok = await confirmDialog({ title: jadiFinal ? 'Finalkan laporan' : 'Buka kembali laporan',
+        message: jadiFinal ? `Finalkan laporan AIR ${lapAirLabel(per)}? Angka akan terkunci.` : `Buka kembali laporan ${lapAirLabel(per)} untuk diubah?`, confirmText: jadiFinal ? 'Finalkan' : 'Buka' });
+      if (!ok) return;
+      await state.supabase.from('laporan_air_bulanan').upsert({ periode: per }, { onConflict: 'periode', ignoreDuplicates: true });
+      const { error } = await state.supabase.from('laporan_air_bulanan')
+        .update({ status: jadiFinal ? 'FINAL' : 'DRAFT', difinalkan_oleh: jadiFinal ? (state.profile?.full_name || state.profile?.email) : null }).eq('periode', per);
+      if (error) { toast(error.message, 'error'); return; }
+      logActivity(jadiFinal ? 'finalized' : 'reopened', 'laporan_air_bulanan', null, lapAirLabel(per));
+      toast(jadiFinal ? 'Laporan difinalkan.' : 'Laporan dibuka kembali.', 'success');
+      renderLaporanAir();
+    }
+    window.lapAirFinal = lapAirFinal;
+
+    function lapAirCetak() {
+      const { per, kpis, real, lap } = state.__lapAir || {};
+      const R = state.__lapAirRingkas || {};
+      if (!kpis) return;
+      const td = 'border:1px solid #cbd5e1;padding:4px 6px;font-size:11px;vertical-align:top';
+      const rows = kpis.map(k => { const r = real[k.kode] || {}; const tgt = r.target_saat_itu ?? k.target;
+        return `<tr><td style="${td}">${escapeHtml(k.kategori_pedoman || '')}</td><td style="${td}">${escapeHtml(k.nama)}</td>
+          <td style="${td};text-align:right">${tgt == null ? 'info' : (k.arah === 'MIN' ? '≥ ' : '≤ ') + kpiFmt(tgt, k.satuan)}</td>
+          <td style="${td};text-align:right"><b>${kpiFmt(r.nilai, k.satuan)}</b></td>
+          <td style="${td};text-align:center">${r.tercapai === true ? 'Tercapai' : r.tercapai === false ? '<b style="color:#dc2626">Tidak</b>' : '—'}</td></tr>`; }).join('');
+      const sambal = kpis.filter(k => real[k.kode]?.tercapai === false).map(k => { const r = real[k.kode];
+        return `<div style="margin:8px 0;font-size:11px"><b>${escapeHtml(k.nama)}</b> — realisasi ${kpiFmt(r.nilai, k.satuan)}, target ${k.arah === 'MIN' ? '≥' : '≤'} ${kpiFmt(r.target_saat_itu ?? k.target, k.satuan)}
+          <table style="width:100%;border-collapse:collapse;margin-top:3px">${SAMBAL_FIELDS.map(([f, l]) => `<tr><td style="${td};width:90px"><b>${l}</b></td><td style="${td}">${escapeHtml(r[f] || '—')}</td></tr>`).join('')}</table></div>`; }).join('');
+      const bodyHtml = `
+        <p style="font-size:12px">Periode: <b>${lapAirLabel(per)}</b> · Status: <b>${lap.status}</b> · Equipment dalam lingkup AIR: <b>${R.scope ?? '-'}</b></p>
+        <h4 style="margin:10px 0 4px">A. Capaian KPI AIR</h4>
+        <table style="width:100%;border-collapse:collapse"><thead><tr style="background:#f1f5f9">
+          <th style="${td}">Kelompok</th><th style="${td}">KPI</th><th style="${td}">Target</th><th style="${td}">Realisasi</th><th style="${td}">Status</th></tr></thead><tbody>${rows}</tbody></table>
+        <h4 style="margin:12px 0 4px">B. Penjelasan SAMBAL (KPI tidak tercapai)</h4>
+        ${sambal || '<p style="font-size:11px">Semua KPI bertarget tercapai.</p>'}
+        <h4 style="margin:12px 0 4px">C. Ringkasan Kondisi Aset</h4>
+        <p style="font-size:11px">Status integrity: ${(R.dist || []).map(([s, n]) => `${AIR_INTEG[s].label} (${AIR_INTEG[s].warna}) ${n}`).join(' · ')}<br>
+          Unit vital bermasalah: <b>${(R.vitalBermasalah || []).length}</b>${(R.vitalBermasalah || []).length ? ' — ' + R.vitalBermasalah.map(e => escapeHtml(e.tag_number)).join(', ') : ''}<br>
+          Izin operasi kedaluwarsa: <b>${R.izinExp ?? 0}</b>, akan habis ≤60 hari: <b>${R.izinSoon ?? 0}</b> · RCA terbuka: <b>${R.rca ?? 0}</b> · Spare part Vital habis: <b>${R.spVital ?? 0}</b></p>`;
+      const nTidak = kpis.filter(k => real[k.kode]?.tercapai === false).length;
+      const nNilai = kpis.filter(k => real[k.kode]?.tercapai != null).length;
+      openSignDialog({ title: `Laporan Kinerja AIR — ${lapAirLabel(per)}`, type: 'AIR', bodyHtml,
+        kesimpulan: `Dari ${nNilai} KPI bertarget, ${nNilai - nTidak} tercapai dan ${nTidak} tidak tercapai${nTidak ? ' (penjelasan SAMBAL terlampir)' : ''}. Laporan disiapkan sesuai Pedoman AIR A4-009/PHE23000/2026-S9 untuk pengiriman ke SHU paling lambat tanggal 12.` });
+    }
+    window.lapAirCetak = lapAirCetak;
+    function lapAirExcel() {
+      const { per, kpis, real } = state.__lapAir || {};
+      if (!kpis) return;
+      const rows = kpis.map(k => { const r = real[k.kode] || {};
+        return { 'Periode': lapAirLabel(per), 'Kelompok KPI': k.kategori_pedoman, 'KPI': k.nama, 'Satuan': k.satuan, 'Arah': k.arah === 'MIN' ? '≥' : '≤',
+          'Target': r.target_saat_itu ?? k.target, 'Realisasi': r.nilai, 'Tercapai': r.tercapai == null ? '' : (r.tercapai ? 'Ya' : 'Tidak'),
+          'Siapa': r.sambal_siapa || '', 'Apa': r.sambal_apa || '', 'Mengapa': r.sambal_mengapa || '', 'Bagaimana': r.sambal_bagaimana || '', 'Aksi Lanjut': r.sambal_aksi_lanjut || '', 'Catatan': r.catatan || '' }; });
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'KPI AIR');
+      XLSX.writeFile(wb, `Laporan_AIR_${per.slice(0, 7)}.xlsx`);
+    }
+    window.lapAirExcel = lapAirExcel;
+
+    async function openKpiTarget() {
+      const { data } = await state.supabase.from('kpi_air').select('*').order('urutan');
+      const c = 'border border-slate-300 rounded px-2 py-1 text-xs';
+      openModal({
+        title: '⚙️ Target KPI AIR',
+        maxWidth: 'max-w-3xl',
+        body: `
+          <div class="text-xs text-slate-500 mb-2">Target adalah <b>usulan</b> — sesuaikan dengan target yang ditetapkan Regional/SHU. Kosongkan target = KPI hanya informasi. Perubahan berlaku untuk laporan yang belum dihitung ulang; laporan yang sudah dihitung menyimpan target saat itu.</div>
+          <table class="w-full text-sm"><thead><tr class="text-left text-xs text-slate-500 border-b"><th class="py-1">KPI</th><th class="py-1">Arah</th><th class="py-1">Target</th><th class="py-1">Aktif</th></tr></thead>
+          <tbody>${(data || []).map(k => `
+            <tr class="border-b border-slate-100" data-kode="${k.kode}">
+              <td class="py-1.5"><div class="font-semibold">${escapeHtml(k.nama)}</div><div class="text-[11px] text-slate-400">${escapeHtml(k.kategori_pedoman || '')} · ${k.sumber === 'OTOMATIS' ? 'otomatis' : 'manual'} · ${escapeHtml(k.satuan || '')}</div></td>
+              <td class="py-1.5"><select class="${c} kt-arah"><option value="MIN" ${k.arah === 'MIN' ? 'selected' : ''}>≥ (makin tinggi makin baik)</option><option value="MAX" ${k.arah === 'MAX' ? 'selected' : ''}>≤ (makin rendah makin baik)</option></select></td>
+              <td class="py-1.5"><input type="number" step="any" value="${k.target ?? ''}" class="${c} w-24 kt-target"></td>
+              <td class="py-1.5 text-center"><input type="checkbox" class="kt-aktif" ${k.aktif ? 'checked' : ''}></td>
+            </tr>`).join('')}</tbody></table>`,
+        footer: `<button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
+                 <button onclick="saveKpiTarget()" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy/80 text-white text-sm font-semibold">Simpan</button>`,
+      });
+    }
+    window.openKpiTarget = openKpiTarget;
+    async function saveKpiTarget() {
+      const rows = [...document.querySelectorAll('#modal-overlay tr[data-kode]')];
+      for (const tr of rows) {
+        const t = tr.querySelector('.kt-target').value;
+        const { error } = await state.supabase.from('kpi_air').update({
+          arah: tr.querySelector('.kt-arah').value, target: t === '' ? null : Number(t), aktif: tr.querySelector('.kt-aktif').checked,
+        }).eq('kode', tr.dataset.kode);
+        if (error) { toast('Gagal: ' + error.message, 'error'); return; }
+      }
+      closeModal();
+      toast('Target KPI tersimpan.', 'success');
+      renderLaporanAir();
+    }
+    window.saveKpiTarget = saveKpiTarget;
 
     function airOpenPanduan() {
       closeModal();
@@ -16761,6 +17054,7 @@
       const div = document.createElement('div');
       div.className = 'page space-y-4';
       const pillars = [['reliability', '🛡️ Reliability'], ['availability', '🟢 Availability'], ['trend', '📈 Trend RAM'], ['maintenance', '🛠️ Maintenance'], ['kelayakan', '📋 Kelayakan'], ['air', '🧭 AIR']];
+      if (['admin', 'spv', 'sr_spv', 'astmen'].includes(state.profile?.role)) pillars.push(['lapair', '📊 Laporan AIR']);
       if (state.profile?.role === 'admin') pillars.push(['laporan', '📝 Laporan Harian'], ['analisa', '📊 Analisa Laporan'], ['plo', '📄 Laporan PLO']);
       div.innerHTML = `
         <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -16782,6 +17076,7 @@
       if (t === 'maintenance') { host.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat…</div>'; renderRamMaintenance(host); return; }
       if (t === 'kelayakan') { host.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat…</div>'; renderKelayakanPage(host); return; }
       if (t === 'air') { host.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat…</div>'; renderAirDashboard(host); return; }
+      if (t === 'lapair') { host.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat…</div>'; renderLaporanAir(host); return; }
       if (t === 'laporan') { host.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat…</div>'; renderLaporanHarianPage(host); return; }
       if (t === 'analisa') { host.innerHTML = '<div class="text-slate-400 text-sm py-8 text-center">Memuat…</div>'; renderAnalisaLaporanPage(host); return; }
       if (t === 'plo') { renderPloReportPage(host); return; }
@@ -24131,6 +24426,14 @@
             <li><b>Biaya pemeliharaan per tahun</b> (dari Input Harian Logbook) tampil di sebelahnya — bahan pertimbangan repair vs replace (LCCA) dan usulan penggantian di RKAP.</li>
             <li><b>Decommissioning</b> (admin): tab 🧭 AIR → <b>🗄️ Decommission unit ini</b>. Sistem menolak kalau masih ada downtime terbuka, RCA belum Closed, WO Logbook terbuka, reservasi aktif, tindak lanjut RLA, atau komponen yang masih aktif. Wajib nomor dokumen persetujuan. Data <b>tidak dihapus</b> — tombol Hapus equipment hanya untuk unit salah input tanpa riwayat.</li>
           </ul>
+          <p class="font-bold text-slate-800 mt-3">Langkah 10 — Laporan Kinerja AIR bulanan (RAM → 📊 Laporan AIR)</p>
+          <ol class="list-decimal pl-5 space-y-0.5">
+            <li>Pilih bulan (default: bulan lalu), klik <b>🔄 Hitung KPI otomatis</b> — penilaian aset, peralatan vital kondisi baik, izin berlaku, Availability (Ao), MTBF, MTTR, kelengkapan pencatatan kegagalan, tindak lanjut RCA terlambat, spare part Vital habis. Kondisi dihitung <b>per akhir bulan</b> dari riwayat penilaian.</li>
+            <li>Isi <b>KPI manual</b>: realisasi anggaran, pembenahan SAP, PM sesuai jadwal, insiden keselamatan & lingkungan.</li>
+            <li>Untuk KPI ❌ tidak tercapai, isi <b>SAMBAL</b>: Siapa, Apa, Mengapa, Bagaimana, Aksi Lanjut (wajib lengkap).</li>
+            <li>Klik <b>✅ Finalkan</b> (angka terkunci), lalu <b>🖨 Cetak / PDF</b> berkop surat atau <b>📊 Excel</b> untuk dikirim ke SHU paling lambat <b>tanggal 12</b>. Pengingat muncul di Daftar Kerja & Dashboard sampai laporan bulan lalu final.</li>
+          </ol>
+          <p class="text-xs text-slate-500">Target KPI adalah usulan — admin bisa menyesuaikan lewat <b>⚙️ Target KPI</b>.</p>
           <p class="bg-cyan-50 border border-cyan-200 rounded p-2 text-xs"><b>Urutan kerja yang disarankan:</b> mulai dari <b>BOP System</b> & <b>Well Control System</b> → <b>Mobile Rig, Carrier, Hoisting, Mast</b> → <b>Circulating System, Generator Set</b> → sisanya. Salah input? Admin bisa <b>Hapus</b> di tabel riwayat — status unit otomatis kembali ke penilaian sebelumnya.</p>
           <p class="text-xs text-slate-500"><b>Beda dengan Risk Assessment (CoF/PoF) lama:</b> CoF & Risk Level dari pedoman PEP 2023 masih tampil berdampingan. Criticality AIR adalah klasifikasi resmi pedoman yang baru.</p>`)}
         </div>
