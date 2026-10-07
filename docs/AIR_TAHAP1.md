@@ -60,3 +60,15 @@ Catatan teknis:
 1. Pemetaan skor ECA ke criticality (`air_config.eca_mapping`), dibaca dari warna Gambar 5.
 2. Prioritas di `matriks_tindak_lanjut_air` (usulan).
 3. Hasil pemetaan kategori: query verifikasi (b) di bagian 12 file migration. Kategori NULL perlu diisi manual.
+
+## Koreksi pemetaan kategori (`fase35b_air_pemetaan_kategori.sql`, 2026-10-07)
+
+Nama kategori di DB live berbeda dari file SQL lama, sehingga 15 kategori (159 unit) kosong dan 3 kategori salah petakan. Keputusan Maman:
+- Carrier → WIN (bagian bawah rig: axle, drivetrain)
+- Alat berat (Backhoe, Bulldozer, Compactor, Excavator, Motor Grader) → GSP
+- SCM (alat pendukung operasi gudang) → GSP
+- Fire Pump Portable dan Damkar → SNE
+- Auxilary System → AUX
+- Koreksi: Well Control System → STA, Generator (Slickline) → ELE, Powerpack (Slickline) → ROT
+
+Pola di `fase35_air_tahap1.sql` ikut dibetulkan. Hasilnya: ke-41 kategori live terpetakan benar, baik di environment baru maupun lewat 35b. Equipment yang kategori AIR-nya sudah diubah manual tidak disentuh.
