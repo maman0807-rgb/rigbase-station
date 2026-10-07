@@ -2,7 +2,7 @@
 
 **User manual operasional** untuk Reliability, Availability, Maintainability fleet Hoist & Heavy Equipment Pertamina EP via aplikasi eRAMHoist.
 
-- **Versi:** 1.0 (2026-05-27, pasca-restruktur hierarki & Fase 6 photo upload)
+- **Versi:** 2.0 (2026-10-08, + penerapan Pedoman AIR — lihat [bab 10](#10-penerapan-pedoman-air-asset-integrity--reliability))
 - **Untuk:** Sr Mekanik · SPV · Sr SPV · Astmen · Admin
 - **App URL:** https://eramhoist.vercel.app
 - **Referensi angka OEM:** [PANDUAN_INTERVAL_HM.md](./PANDUAN_INTERVAL_HM.md)
@@ -268,21 +268,23 @@ Lihat [RIGBASE_INSPECTION_PROMPT.md](./RIGBASE_INSPECTION_PROMPT.md) untuk detai
 
 ### Saat equipment rusak
 
-1. **Catat Downtime baru** segera (real-time) + foto kondisi rusak
+1. **Catat Downtime baru** segera (real-time) + foto kondisi rusak + **failure mode** (wajib untuk Breakdown/Troubleshoot)
 2. Kalau perbaikan multi-day: edit & update foto tiap milestone (part datang, dst)
-3. Setelah selesai: isi tanggal Selesai + foto after
+3. Setelah selesai: isi tanggal Selesai + foto after + **failure cause** (wajib saat ditutup)
 
 ### Weekly review (Sr Mekanik)
 
 1. RAM → **Kelayakan** → cek unit 🔴 / 🟡 — ada yg jadi watchlist?
 2. RAM → **Availability** → cek MTTR/MTBF trend
 3. RAM → **Reliability** → cek pattern kerusakan per equipment
+4. RAM → **🧭 AIR** → Daftar Kerja, RCA aktif, repetitive failure, spare part Vital
 
 ### Monthly (atasan)
 
 1. Print report RAM via tombol Cetak per tab
 2. Print riwayat equipment via History tab → Print PDF
-3. Review CSPP (📦 Critical Spare Parts) — stok kritis OK?
+3. Review CSPP (📦 Critical Spare Parts) — stok kritis OK? Part **Vital** habis = 0?
+4. **Tgl 1–12:** RAM → 📊 **Laporan AIR** bulan lalu → hitung KPI, SAMBAL, finalkan, kirim ke SHU
 
 ---
 
@@ -313,18 +315,97 @@ RLS `equipment`: write **admin only**. Edit lewat Logbook **gagal diam-diam tanp
 
 ---
 
-## 10. Sumber & Cross-reference
+## 10. Penerapan Pedoman AIR (Asset Integrity & Reliability)
+
+Pedoman AIR PHE No. **A4-009/PHE23000/2026-S9 Rev.0** (berlaku 26 Juni 2026) menggantikan A4-002/2021 dan A4-005/2023 (MRMS). eRAMHoist menjadi **alat bantu lapangan dan monitoring**. Register resmi tetap di **SAP**, dan nomor equipment/WO/notification/reservasi SAP bisa dicatat di eRAMHoist.
+
+Detail teknis dan keputusan per tahap ada di [docs/AIR_TAHAP1.md](./docs/AIR_TAHAP1.md) sampai [AIR_TAHAP4C.md](./docs/AIR_TAHAP4C.md). Panduan langkah demi langkah ada di aplikasi: menu **📖 Panduan → 🧭 AIR** (langkah 1–10).
+
+### 10.1 Mulai dari Daftar Kerja AIR
+
+Dashboard (admin & manager) dan **RAM → 🧭 AIR** menampilkan **📋 Daftar Kerja AIR**, berisi daftar pekerjaan berurutan lengkap dengan progress dan tombol "Kerjakan →":
+
+1. Nilai **criticality**. Mulai dari BOP System & Well Control System (STA), lalu rig (WIN).
+2. Nilai **status integrity**.
+3. Tentukan **strategi pemeliharaan**.
+4. **Petakan part Critical** ke equipment (CSPP → Kelola Part Kritis).
+5. Isi **safety stock** part Vital (Gudang Logbook).
+6. **Klasifikasi failure mode** downtime 12 bulan terakhir.
+7. **Perpanjang izin** yang kedaluwarsa.
+8. **Finalkan Laporan AIR** bulan lalu, paling lambat tanggal 12.
+
+### 10.2 Klasifikasi aset & criticality (tab 🧭 AIR per equipment)
+
+- **Kategori aset** terisi otomatis dari kategori eRAMHoist: WIN (rig, carrier, mast, hoisting), STA (BOP, well control, tank, manifold), ROT (circulating, pompa, powerpack), ELE (genset), ICC, LFT (handling tools, manlift), TRK (primover, truk), SNE (fire pump, damkar), GSP (alat berat, SCM), AUX. Ubah per unit lewat ✏ Edit → bagian J.
+- **Criticality** diisi lewat wizard Q1–Q5, yang berhenti otomatis begitu hasil ditemukan. Hasilnya **SECE / PCE** (= Vital ★), **Important**, atau **Secondary**. Contoh: BOP → Q2 Ya → SECE. Mobile Rig → Q4 Ya → PCE.
+- Metode lain: **ECA** (matriks dampak × probabilitas) dan **PHA** (wajib nomor dokumen).
+- Hasil metode kualitatif **wajib divalidasi ulang ≤ 2 tahun**. Peringatan muncul 60 hari sebelumnya.
+
+### 10.3 Status integrity & tindak lanjut
+
+- Wizard S1–S3 menghasilkan ⚫ Breakdown / 🔴 Low / 🟡 Medium / 🟢 High.
+- Tindak lanjut dan prioritas (P1 = Vital + Breakdown) muncul otomatis dari matriks Tabel 7 pedoman.
+- Dashboard RAM → 🧭 AIR menampilkan heatmap criticality × integrity (klik sel untuk melihat unitnya), daftar prioritas, validasi ulang, dan unit yang belum dinilai.
+
+### 10.4 Strategi pemeliharaan & pencatatan kegagalan ISO 14224
+
+- **Strategi** (wizard M1–M4): Reactive / CBM-Predictive / Preventive / Redesign, berdasarkan IOM atau data pabrikan.
+- **Catat Downtime** kategori Breakdown/Troubleshoot:
+  - **failure mode wajib saat dicatat** (VIB, ELU, FTS, FTC, OHE, STD, …),
+  - **failure cause wajib saat ditutup** (3.4 aus wajar, 3.3 kesalahan pemeliharaan, 2.2 salah pasang, …),
+  - komponen yang gagal (child equipment) dan jenis corrective.
+- Tombol **Selesai** membuka form kalau isian belum lengkap. Eskalasi gejala juga langsung meminta failure mode.
+
+### 10.5 RCA (aturan AIR)
+
+- **Otomatis:** ≥ 3 failure dengan **failure mode sama** pada equipment **sejenis** (kategori sama) dalam 12 bulan membuat RCA **DRAFT**. Peringatan dini muncul di 2×. Aturan lama ">1× per unit" sudah diganti.
+- **LPO** (lapor PROPAR & SKK Migas bila ≥ 3.000 BOPD / ≥ 30 MMSCFD / ≥ 10% produksi WK) dan **manual**.
+- Alur: Draft → Analisis → Verifikasi → Tindak Lanjut → Monitoring → Closed. Syarat tiap langkah dicek otomatis. Tindak lanjut ditulis dalam format **SMART** (PIC, ukuran keberhasilan, due date).
+
+### 10.6 Spare part VIS (RAM → Reliability → 📦 CSPP)
+
+- **V (Vital)** = part peralatan SECE/PCE. **Zero stock tidak berlaku**, jadi wajib ada di gudang. **I (Important)** dan **S (Secondary)**. Kelas dihitung otomatis dari criticality equipment yang terkait.
+- Status **🤝 Dipinjam**: stok 0 karena Peminjaman Part yang belum kembali. Status ini bukan "habis" dan tidak memicu alert.
+- **Usia simpan FIFO**: batas Lubricant 24, Consumable 36, dan lainnya 60 bulan.
+- **📈 Rekomendasi 2 Tahun**: pemakaian 24 bulan × 24 + stok minimum − stok, bisa diekspor ke Excel. **No. reservasi SAP** dicatat per part.
+
+### 10.7 Izin operasi, umur layan & decommissioning
+
+- **Izin operasi** dikelola di tab 📜 Sertifikasi: SKPI, PLO, COI, KHI, COC, Load Test, NDT. Saat izin diperpanjang, izin lama tersimpan sebagai riwayat. Alert H-60/H-30 dan Telegram harian tetap jalan.
+- **RLA** (tab 🧭 AIR → Catat RLA) mencatat kesimpulan, batas layan baru, jadwal RLA berikutnya, dan tindak lanjut. Hasil *Layak dengan syarat* / *Tidak layak* membuat usulan penilaian integrity (DRAFT). Alert H-90.
+- **Biaya pemeliharaan per tahun** diambil dari Input Harian Logbook, sebagai bahan pertimbangan repair vs replace.
+- **Decommissioning** (admin) memerlukan dokumen persetujuan dan tidak boleh ada item terbuka. **Data diarsip, tidak dihapus.** Tombol Hapus equipment hanya untuk unit salah input yang belum punya riwayat.
+
+### 10.8 Laporan kinerja AIR bulanan (RAM → 📊 Laporan AIR)
+
+1. Pilih bulan (default bulan lalu), lalu klik **🔄 Hitung KPI otomatis**. Angka dihitung per akhir bulan dari riwayat penilaian.
+2. Isi KPI manual: anggaran, pembenahan SAP, PM sesuai jadwal, insiden keselamatan & lingkungan.
+3. Untuk KPI yang tidak tercapai, isi **SAMBAL**: Siapa, Apa, Mengapa, Bagaimana, Aksi Lanjut.
+4. Klik **✅ Finalkan**, lalu **🖨 Cetak berkop** atau **📊 Excel**, dan kirim ke SHU **≤ tanggal 12**.
+
+Target KPI masih usulan dan bisa disesuaikan admin lewat ⚙️ Target KPI.
+
+### 10.9 Belum diterapkan (di-hold)
+
+- **Penundaan PM** (unit vital butuh kajian risiko + persetujuan Risk Owner) dan **MOC**. Keduanya di-hold karena aplikasi masih dipakai sebatas fungsi sendiri.
+- **Sertifikasi personil AIR.**
+- **Reminder Telegram** laporan bulanan. Untuk sementara pengingat lewat Dashboard.
+
+---
+
+## 11. Sumber & Cross-reference
 
 - **OEM tier intervals**: [PANDUAN_INTERVAL_HM.md](./PANDUAN_INTERVAL_HM.md)
 - **Inspeksi flow**: [RIGBASE_INSPECTION_PROMPT.md](./RIGBASE_INSPECTION_PROMPT.md)
 - **Setup teknis**: [SETUP.md](./SETUP.md)
+- **Pedoman AIR (keputusan & teknis)**: [docs/AIR_TAHAP1.md](./docs/AIR_TAHAP1.md) · [2](./docs/AIR_TAHAP2.md) · [3](./docs/AIR_TAHAP3.md) · [4A](./docs/AIR_TAHAP4A.md) · [4C](./docs/AIR_TAHAP4C.md)
 - **App spec internal**: [PROMPT.md](./PROMPT.md)
 - **README publik**: [README.md](./README.md)
 - **Supabase project**: `olmowzrlokajhniqijfq` ([dashboard](https://supabase.com/dashboard/project/olmowzrlokajhniqijfq))
 
 ---
 
-## 11. Roadmap / Pekerjaan lanjutan
+## 12. Roadmap / Pekerjaan lanjutan
 
 - [ ] **PM-km flow di Logbook** — supaya mekanik bisa catat odometer kendaraan harian
 - [ ] **Edit foto** (caption/phase/date) setelah upload — sekarang cuma delete+re-upload

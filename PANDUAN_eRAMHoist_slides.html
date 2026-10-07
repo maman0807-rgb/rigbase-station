@@ -59,7 +59,7 @@
   </div>
   <h1>Panduan e<span class="brand-ram">RAM</span>Hoist</h1>
   <p class="small">User manual operasional untuk fleet Hoist &amp; Heavy Equipment<br>Pertamina EP — Sr Mekanik &amp; up</p>
-  <p class="smaller" style="margin-top:2em;">Versi 1.0 · 2026-05-27 · pasca-restruktur hierarki &amp; Fase 6 photo upload</p>
+  <p class="smaller" style="margin-top:2em;">Versi 2.0 · 2026-10-08 · + penerapan Pedoman AIR (A4-009/PHE23000/2026-S9)</p>
 </section>
 
 <!-- ====== Slide 2: Apa itu RAM ====== -->
@@ -163,7 +163,7 @@
   <ol style="font-size:0.65em;">
     <li>RAM → <b>Availability</b> → klik <b>+ Catat Downtime</b></li>
     <li>Isi: Equipment, Mulai Down (sekarang), <b>Selesai (kosongkan — masih down)</b></li>
-    <li>Penyebab: Breakdown / Troubleshoot</li>
+    <li>Penyebab: Breakdown / Troubleshoot → kotak merah <b>🧭 Detail Kegagalan</b>: <b>failure mode wajib</b> (mis. ELU bocor oli) + komponen yang gagal</li>
     <li><b>Catatan:</b> deskripsi singkat ("Engine knocking, dugaan turbo bocor")</li>
     <li>Section 📸 FOTO PENDUKUNG:<br>
       &nbsp;&nbsp;• Fase: <span class="pill pill-red">Sebelum / Bukti Kerusakan</span><br>
@@ -201,7 +201,7 @@
   <h3 style="color:var(--green);">Aksi di app</h3>
   <ol style="font-size:0.65em;">
     <li>Edit record yang sama lagi</li>
-    <li><b>Isi Selesai = 31 Mei 2026, 17:00</b></li>
+    <li><b>Isi Selesai = 31 Mei 2026, 17:00</b> + <b>failure cause</b> (mis. 3.4 aus wajar) — wajib saat ditutup</li>
     <li>Section 📸 FOTO PENDUKUNG:<br>
       &nbsp;&nbsp;• Fase: <span class="pill pill-green">Sesudah / Bukti Perbaikan</span><br>
       &nbsp;&nbsp;• Tgl kejadian: hari ini<br>
@@ -263,12 +263,14 @@
   </ol>
   <h3>Saat equipment rusak</h3>
   <ol style="font-size:0.6em;">
-    <li><b>Catat Downtime baru</b> segera (real-time) + foto kondisi rusak</li>
+    <li><b>Catat Downtime baru</b> segera (real-time) + foto kondisi rusak + <b>failure mode</b></li>
     <li>Multi-day repair: edit &amp; update foto tiap milestone (part datang, dst)</li>
-    <li>Setelah selesai: isi tanggal Selesai + foto after</li>
+    <li>Setelah selesai: isi tanggal Selesai + foto after + <b>failure cause</b></li>
   </ol>
   <h3>Weekly review (Sr Mekanik)</h3>
-  <p class="small">Kelayakan: cek unit 🔴/🟡 watchlist · Availability: trend MTTR/MTBF · Reliability: pattern kerusakan</p>
+  <p class="small">Kelayakan: cek unit 🔴/🟡 watchlist · Availability: trend MTTR/MTBF · Reliability: pattern kerusakan · 🧭 AIR: Daftar Kerja, RCA aktif, spare part Vital</p>
+  <h3>Bulanan (tgl 1–12)</h3>
+  <p class="small">RAM → 📊 <b>Laporan AIR</b> bulan lalu: hitung KPI, isi KPI manual &amp; SAMBAL, finalkan, kirim ke SHU ≤ tgl 12</p>
 </section>
 
 <!-- ====== Slide 13: Pitfalls ====== -->
@@ -288,6 +290,200 @@
   </div>
 </section>
 
+<!-- ====== AIR 1: Pengantar ====== -->
+<section class="center">
+  <div class="kop" style="justify-content:center;">
+    <div class="logo">🧭</div>
+    <div>
+      <div class="brand-text">Pedoman AIR di e<span class="brand-ram">RAM</span>Hoist</div>
+      <div class="small" style="color:#64748b;">Asset Integrity &amp; Reliability · A4-009/PHE23000/2026-S9 Rev.0 · berlaku 26 Juni 2026</div>
+    </div>
+  </div>
+  <div class="card-grid" style="grid-template-columns:repeat(3,1fr); font-size:0.6em;">
+    <div class="card blue"><b>🎯 Criticality</b><br>SECE · PCE · Important · Secondary</div>
+    <div class="card amber"><b>🩺 Status Integrity</b><br>⚫ Breakdown · 🔴 Low · 🟡 Medium · 🟢 High</div>
+    <div class="card red"><b>📌 Tindak Lanjut</b><br>Criticality × Integrity → aksi + prioritas (Tabel 7)</div>
+    <div class="card"><b>🏷️ Failure ISO 14224</b><br>Mode + cause di setiap downtime → RCA otomatis</div>
+    <div class="card green"><b>📦 Spare Part VIS</b><br>Vital wajib ada stok · Important · Secondary</div>
+    <div class="card"><b>📊 Laporan Bulanan</b><br>KPI + SAMBAL, kirim ke SHU ≤ tgl 12</div>
+  </div>
+  <p class="small">eRAMHoist = alat bantu lapangan &amp; monitoring. Register resmi tetap di <b>SAP</b> (No. equipment, WO, notification, reservasi bisa dicatat).</p>
+  <p class="smaller">Mulai dari <b>📋 Daftar Kerja AIR</b> di Dashboard — urutan pekerjaan &amp; progress otomatis.</p>
+</section>
+
+<!-- ====== AIR 2: Klasifikasi & Criticality ====== -->
+<section>
+  <h2>13. Klasifikasi Aset &amp; Criticality</h2>
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:18px;">
+    <div>
+      <h3>Kategori aset (otomatis)</h3>
+      <table style="font-size:0.42em;">
+        <thead><tr><th>Kode</th><th>Contoh di kita</th><th>Pendekatan</th></tr></thead>
+        <tbody>
+          <tr><td>WIN</td><td>Mobile Rig, Carrier, Mast, Hoisting, MTU</td><td>Reliability</td></tr>
+          <tr><td>STA</td><td>BOP System, Well Control (accumulator)</td><td>Integrity</td></tr>
+          <tr><td>ROT</td><td>Circulating System, Pompa, Powerpack</td><td>Reliability</td></tr>
+          <tr><td>ELE / ICC</td><td>Generator Set / Control &amp; Instrumentation</td><td>Reliability</td></tr>
+          <tr><td>LFT / TRK</td><td>Handling Tools, Manlift / Primover, Dump Truck</td><td>Reliability</td></tr>
+          <tr><td>SNE / GSP / AUX</td><td>Fire Pump, Damkar / Alat berat, SCM / Auxilary</td><td>—</td></tr>
+        </tbody>
+      </table>
+      <p class="smaller" style="font-size:0.4em;">Ubah per unit: ✏ Edit → bagian J. Klasifikasi AIR.</p>
+    </div>
+    <div>
+      <h3>Criticality — wizard Q1–Q5</h3>
+      <table style="font-size:0.42em;">
+        <thead><tr><th>#</th><th>Pertanyaan</th><th>Ya →</th></tr></thead>
+        <tbody>
+          <tr><td>Q1</td><td>Menampung bahan mudah terbakar penyebab MAH?</td><td><b>SECE</b></td></tr>
+          <tr><td>Q2</td><td>Dirancang mencegah/memitigasi MAH?</td><td><b>SECE</b></td></tr>
+          <tr><td>Q3</td><td>Kegagalannya bisa menyebabkan MAH?</td><td><b>SECE</b></td></tr>
+          <tr><td>Q4</td><td>Kegagalannya berdampak ke produksi?</td><td><b>PCE</b></td></tr>
+          <tr><td>Q5</td><td>Menampung bahan mudah terbakar?</td><td>Important / Secondary</td></tr>
+        </tbody>
+      </table>
+      <p class="smaller" style="font-size:0.4em;">Contoh: BOP → Q2 Ya → <span class="pill pill-red">SECE ★</span> · Mobile Rig → Q4 Ya → <span class="pill pill-amber">PCE ★</span><br>★ Vital = SECE + PCE · Hasil kualitatif <b>wajib validasi ulang ≤ 2 tahun</b>.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ====== AIR 3: Integrity & Tindak lanjut ====== -->
+<section>
+  <h2>14. Status Integrity &amp; Tindak Lanjut</h2>
+  <div style="display:grid; grid-template-columns:1fr 1.3fr; gap:18px;">
+    <div>
+      <h3>Wizard S1–S3</h3>
+      <table>
+        <tbody>
+          <tr><td>S1</td><td>Sudah gagal fungsi/kinerja?</td><td>⚫ <b>Breakdown</b></td></tr>
+          <tr><td>S2</td><td>Anomali, <b>tidak</b> memenuhi performance standard?</td><td>🔴 <b>Low</b></td></tr>
+          <tr><td>S3</td><td>Memenuhi standard <b>namun</b> ada anomali?</td><td>🟡 <b>Medium</b></td></tr>
+          <tr><td>—</td><td>Semua tidak</td><td>🟢 <b>High</b></td></tr>
+        </tbody>
+      </table>
+      <p class="smaller">Nilai ulang setiap kondisi berubah — mis. setelah perbaikan selesai.</p>
+    </div>
+    <div>
+      <h3>Matriks Tabel 7 (otomatis)</h3>
+      <table>
+        <thead><tr><th></th><th>⚫ Breakdown</th><th>🔴 Low</th><th>🟡 Medium</th><th>🟢 High</th></tr></thead>
+        <tbody>
+          <tr><td><b>SECE/PCE ★</b></td><td>Immediate Repair / Replace <b>P1</b></td><td>Immediate Repair / Adjust <b>P2</b></td><td>Close monitor, interval naik <b>P5</b></td><td>Standard</td></tr>
+          <tr><td><b>Important</b></td><td>Repair / Replace <b>P3</b></td><td>Repair / Adjust <b>P4</b></td><td>Close monitor <b>P7</b></td><td>Standard</td></tr>
+          <tr><td><b>Secondary</b></td><td>Repair / Replace <b>P6</b></td><td>—</td><td>—</td><td>—</td></tr>
+        </tbody>
+      </table>
+      <p class="smaller">Dashboard <b>RAM → 🧭 AIR</b>: heatmap 4×4 (klik sel = daftar unit), daftar prioritas, validasi ulang, unit belum dinilai.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ====== AIR 4: Strategi & Failure recording ====== -->
+<section>
+  <h2>15. Strategi Pemeliharaan &amp; Failure ISO 14224</h2>
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:18px;">
+    <div>
+      <h3>Strategi — wizard M1–M4</h3>
+      <table style="font-size:0.42em;">
+        <tbody>
+          <tr><td>M1</td><td>Dampak signifikan ke K3L?</td><td>Ya → M3 · Tidak → M2</td></tr>
+          <tr><td>M2</td><td>Dampak signifikan ke produksi &amp; biaya?</td><td>Ya → M3 · Tidak → <b>Reactive</b></td></tr>
+          <tr><td>M3</td><td>Bisa dipantau &amp; diperkirakan?</td><td>Ya → <b>CBM / Predictive</b></td></tr>
+          <tr><td>M4</td><td>Ada pendekatan interval?</td><td>Ya → <b>Preventive</b> · Tidak → <b>Redesign</b></td></tr>
+        </tbody>
+      </table>
+      <p class="smaller" style="font-size:0.4em;">Contoh: engine Mobile Rig — produksi (M2 Ya), oli bisa dipantau SOS (M3 Ya) → CBM/Predictive.</p>
+    </div>
+    <div>
+      <h3>Catat Downtime Breakdown/Troubleshoot</h3>
+      <div class="card red" style="font-size:0.62em;">
+        <b>Failure mode — wajib saat dicatat</b><br><span class="small">VIB getaran · ELU bocor oli/hidrolik · FTS tidak mau start · FTC BOP tidak menutup · OHE overheat · STD struktur retak …</span><br><br>
+        <b>Failure cause — wajib saat ditutup</b><br><span class="small">3.4 aus wajar · 3.3 kesalahan pemeliharaan · 3.2 kesalahan operasi · 2.2 salah pasang · 1.2 material tidak sesuai …</span><br><br>
+        <span class="small">+ komponen yang gagal (child equipment), jenis corrective, No. WO &amp; notification SAP</span>
+      </div>
+      <p class="smaller" style="font-size:0.4em;">Downtime lama → antrian <b>"belum diklasifikasi"</b> di dashboard AIR.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ====== AIR 5: RCA ====== -->
+<section>
+  <h2>16. RCA — Aturan Pedoman AIR</h2>
+  <div class="card-grid" style="grid-template-columns:repeat(3,1fr); font-size:0.6em;">
+    <div class="card red"><b>🔁 Repetitive (otomatis)</b><br><b>3×</b> failure mode sama pada peralatan <b>sejenis</b> dalam 12 bulan → RCA <b>DRAFT</b> dibuat sistem. Peringatan dini di 2×.</div>
+    <div class="card amber"><b>📉 LPO</b><br>Unplanned LPO. ≥ 3.000 BOPD / ≥ 30 MMSCFD / ≥ 10% produksi WK → lapor PROPAR &amp; SKK Migas.</div>
+    <div class="card"><b>✍️ Manual</b><br>Atas kebutuhan fungsi.</div>
+  </div>
+  <p style="font-size:0.6em;"><b>Alur status</b> (tombol hijau → status berikutnya, syarat dicek otomatis):</p>
+  <p style="text-align:center;">
+    <span class="pill pill-navy">Draft</span> → <span class="pill pill-red">Analisis</span><span class="smaller"> root cause</span> →
+    <span class="pill pill-amber">Verifikasi</span><span class="smaller"> pejabat + aksi</span> → <span class="pill pill-amber">Tindak Lanjut</span><span class="smaller"> aksi SMART selesai</span> →
+    <span class="pill pill-blue">Monitoring</span><span class="smaller"> efektivitas</span> → <span class="pill pill-green">Closed</span>
+  </p>
+  <blockquote>Deteksi otomatis hanya menghitung downtime yang sudah diisi <b>failure mode</b> — klasifikasikan downtime lama dulu.</blockquote>
+</section>
+
+<!-- ====== AIR 6: Spare part VIS ====== -->
+<section>
+  <h2>17. Spare Part VIS (RAM → Reliability → 📦 CSPP)</h2>
+  <table>
+    <thead><tr><th>Kelas</th><th>Arti (Tabel 1 pedoman)</th><th>Otomatis dari</th></tr></thead>
+    <tbody>
+      <tr><td><span class="pill pill-red">V — Vital</span></td><td>Part peralatan SECE/PCE. <b>Zero stock tidak berlaku — wajib ada di gudang.</b></td><td>Terkait equipment SECE/PCE</td></tr>
+      <tr><td><span class="pill pill-amber">I — Important</span></td><td>Tidak ada → produksi jalan, kapasitas turun</td><td>Terkait equipment Important</td></tr>
+      <tr><td><span class="pill" style="background:#e2e8f0;">S — Secondary</span></td><td>Part pendukung</td><td>Lainnya / belum dipetakan</td></tr>
+    </tbody>
+  </table>
+  <div class="card-grid" style="font-size:0.6em;">
+    <div class="card"><b>🤝 Dipinjam ≠ Habis</b><br>Stok 0 karena Peminjaman Part (belum ada stok masuk sesudahnya) tidak memicu alert Vital habis.</div>
+    <div class="card"><b>⏳ Usia simpan (FIFO)</b><br>Lubricant 24 · Consumable 36 · lainnya 60 bulan.</div>
+    <div class="card green"><b>📈 Rekomendasi 2 Tahun</b><br>Pemakaian 24 bln × 24 + stok minimum − stok → Excel usulan pengadaan.</div>
+    <div class="card amber"><b>🔗 Petakan part Critical</b><br>Kelola Part Kritis → hubungkan part ke equipment, supaya kelas V/I bekerja.</div>
+  </div>
+</section>
+
+<!-- ====== AIR 7: Siklus hidup ====== -->
+<section>
+  <h2>18. Izin Operasi, Umur Layan &amp; Decommissioning</h2>
+  <div class="card-grid" style="grid-template-columns:repeat(3,1fr); font-size:0.6em;">
+    <div class="card blue"><b>📜 Izin operasi</b><br>Tab <b>Sertifikasi</b>: SKPI, PLO, COI, KHI, COC, Load Test, NDT. <b>+ Perpanjang</b> → izin lama jadi riwayat. Alert H-60 &amp; H-30 — Telegram tetap jalan.</div>
+    <div class="card amber"><b>⏳ RLA &amp; biaya</b><br>Tab 🧭 AIR → <b>Catat RLA</b>: kesimpulan, batas layan baru, RLA berikutnya, tindak lanjut. Alert H-90. Biaya pemeliharaan per tahun dari Input Harian = bahan repair vs replace.</div>
+    <div class="card red"><b>🗄️ Decommissioning</b><br>Admin. Ditolak kalau masih ada downtime/RCA/WO/reservasi/tindak lanjut terbuka atau komponen aktif. Wajib dokumen persetujuan. <b>Data diarsip, tidak dihapus.</b></div>
+  </div>
+  <blockquote>Tombol <b>Hapus</b> equipment hanya untuk salah input tanpa riwayat — unit yang punya riwayat diarahkan ke Decommission.</blockquote>
+</section>
+
+<!-- ====== AIR 8: Laporan bulanan ====== -->
+<section>
+  <h2>19. Laporan Kinerja AIR Bulanan (RAM → 📊 Laporan AIR)</h2>
+  <ol style="font-size:0.62em;">
+    <li>Pilih bulan (default bulan lalu) → <b>🔄 Hitung KPI otomatis</b>: penilaian aset, vital kondisi baik, izin berlaku, Ao, MTBF, MTTR, kelengkapan failure recording, tindak lanjut RCA telat, spare part Vital habis — <b>per akhir bulan</b>.</li>
+    <li>Isi <b>KPI manual</b>: anggaran, pembenahan SAP, PM sesuai jadwal, insiden keselamatan &amp; lingkungan.</li>
+    <li>KPI ❌ tidak tercapai → <b>SAMBAL</b>: <b>S</b>iapa · <b>A</b>pa · <b>M</b>engapa · <b>B</b>agaimana · <b>A</b>ksi <b>L</b>anjut (wajib lengkap).</li>
+    <li><b>✅ Finalkan</b> (angka terkunci) → <b>🖨 Cetak berkop</b> / <b>📊 Excel</b> → kirim ke SHU paling lambat <b>tanggal 12</b>.</li>
+  </ol>
+  <p class="smaller">Pengingat muncul di Daftar Kerja &amp; Dashboard sampai laporan bulan lalu final (merah kalau terlambat). Target KPI = usulan, admin ubah lewat ⚙️ Target KPI.</p>
+</section>
+
+<!-- ====== AIR 9: Urutan kerja ====== -->
+<section>
+  <h2>20. Urutan Kerja Penerapan AIR</h2>
+  <table>
+    <thead><tr><th>#</th><th>Pekerjaan</th><th>Di mana</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>Nilai <b>criticality</b> — mulai BOP System &amp; Well Control (STA), lalu rig (WIN)</td><td>Equipment → tab 🧭 AIR</td></tr>
+      <tr><td>2</td><td>Nilai <b>status integrity</b></td><td>Equipment → tab 🧭 AIR</td></tr>
+      <tr><td>3</td><td>Tentukan <b>strategi pemeliharaan</b></td><td>Equipment → tab 🧭 AIR</td></tr>
+      <tr><td>4</td><td>Petakan <b>part Critical</b> ke equipment</td><td>CSPP → Kelola Part Kritis</td></tr>
+      <tr><td>5</td><td>Isi <b>safety stock</b> part Vital</td><td>Gudang Logbook</td></tr>
+      <tr><td>6</td><td>Klasifikasi <b>failure mode</b> downtime 12 bulan</td><td>RAM → 🧭 AIR</td></tr>
+      <tr><td>7</td><td>Perpanjang <b>izin kedaluwarsa</b></td><td>Equipment → tab 📜 Sertifikasi</td></tr>
+      <tr><td>8</td><td>Finalkan <b>Laporan AIR</b> bulan lalu (≤ tgl 12)</td><td>RAM → 📊 Laporan AIR</td></tr>
+    </tbody>
+  </table>
+  <p class="smaller">Semua item ini tampil sebagai <b>📋 Daftar Kerja AIR</b> dengan progress &amp; tombol "Kerjakan →". Panduan lengkap: menu 📖 Panduan → bagian 🧭 AIR (langkah 1–10).</p>
+</section>
+
 <!-- ====== Slide 14: Reference + Closing ====== -->
 <section class="center">
   <h2 style="border:none;">Referensi &amp; Akhir</h2>
@@ -298,6 +494,7 @@
       <tr><td>PANDUAN_INTERVAL_HM.md</td><td>Angka OEM tier per merek + audit trail rename</td></tr>
       <tr><td>RIGBASE_INSPECTION_PROMPT.md</td><td>Flow Inspeksi Cat3 / Cat4</td></tr>
       <tr><td>SETUP.md</td><td>Setup teknis &amp; database</td></tr>
+      <tr><td>docs/AIR_TAHAP1–4C.md</td><td>Penerapan Pedoman AIR — keputusan &amp; detail teknis per tahap</td></tr>
     </tbody>
   </table>
   <p class="small" style="margin-top:1.5em;">Semua tersimpan di repo GitHub<br>
