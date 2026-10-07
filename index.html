@@ -7911,6 +7911,13 @@
       } catch (e) { toast('Gagal memuat ulang: ' + e.message, 'error'); }
     }
 
+    function airOpenPanduan() {
+      closeModal();
+      navigate('panduan');
+      setTimeout(() => document.getElementById('panduan-air')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150);
+    }
+    window.airOpenPanduan = airOpenPanduan;
+
     // ---------- Tab AIR di detail equipment ----------
     async function renderAirTab(eq, container) {
       try {
@@ -7992,7 +7999,10 @@
 
         container.innerHTML = `
           <div class="space-y-4">
-            <div class="text-xs text-slate-500">Pedoman AIR No. A4-009/PHE23000/2026-S9 Rev.0 — eRAMHoist alat bantu lapangan; register resmi tetap di SAP.</div>
+            <div class="flex items-center justify-between gap-2 flex-wrap">
+              <div class="text-xs text-slate-500">Pedoman AIR No. A4-009/PHE23000/2026-S9 Rev.0 — eRAMHoist alat bantu lapangan; register resmi tetap di SAP.</div>
+              <button onclick="airOpenPanduan()" class="px-2.5 py-1 bg-cyan-50 hover:bg-cyan-100 text-cyan-800 border border-cyan-200 rounded text-xs font-semibold">📖 Cara pakai</button>
+            </div>
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
               ${card('Criticality', `
                 <div class="mb-2">${critBadge(eq.criticality)}</div>
@@ -8342,11 +8352,26 @@
               <h3 class="font-bold text-slate-800">🧭 Asset Integrity & Reliability (AIR)</h3>
               <p class="text-xs text-slate-500">Pedoman A4-009/PHE23000/2026-S9 — criticality × status integrity → tindak lanjut (Tabel 7)</p>
             </div>
+            <div class="flex gap-2 items-center flex-wrap">
+            <button onclick="airOpenPanduan()" class="px-3 py-1.5 bg-cyan-50 hover:bg-cyan-100 text-cyan-800 border border-cyan-200 rounded-lg text-sm font-semibold">📖 Cara pakai</button>
             <div class="flex gap-1 bg-slate-100 rounded-lg p-1 text-sm">
               <button onclick="state.airScope='lingkup'; state.airCell=null; airPaintDashboard()" class="px-3 py-1 rounded-md font-semibold ${state.airScope === 'lingkup' ? 'bg-white shadow text-navy' : 'text-slate-500'}">Dalam lingkup AIR</button>
               <button onclick="state.airScope='semua'; state.airCell=null; airPaintDashboard()" class="px-3 py-1 rounded-md font-semibold ${state.airScope === 'semua' ? 'bg-white shadow text-navy' : 'text-slate-500'}">Semua</button>
             </div>
+            </div>
           </div>
+
+          ${rows.length && belum.length / rows.length > 0.5 ? `
+          <div class="bg-cyan-50 border border-cyan-200 rounded-xl p-4 text-sm text-cyan-900">
+            <div class="font-bold mb-1">🚀 Mulai dari sini — ${belum.length} dari ${rows.length} unit belum dinilai lengkap</div>
+            <ol class="list-decimal pl-5 space-y-0.5 text-xs">
+              <li>Buka <b>Equipment</b> → pilih unit (mulai dari <b>BOP System</b> & <b>Well Control System</b>) → tab <b>🧭 AIR</b>.</li>
+              <li>Klik <b>+ Nilai</b> di kartu <b>Criticality</b> → jawab Q1–Q5 (berhenti otomatis) → Simpan.</li>
+              <li>Klik <b>+ Nilai</b> di kartu <b>Status Integrity</b> → jawab S1–S3 → Simpan.</li>
+              <li>Tindak lanjut & prioritas muncul otomatis, dan unit masuk heatmap di halaman ini.</li>
+            </ol>
+            <button onclick="airOpenPanduan()" class="mt-2 text-xs font-semibold text-cyan-800 underline">Baca panduan lengkap + contoh →</button>
+          </div>` : ''}
 
           <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
             ${stat('Equipment', rows.length)}
@@ -22757,6 +22782,69 @@
             ['Why 5', 'Kenapa tidak ada di checklist?', 'SOP penggantian part ini belum didokumentasikan formal'],
           ])}
           <p class="bg-emerald-50 border border-emerald-200 rounded p-2 text-xs"><b>Root Cause:</b> SOP alignment coupling belum ada — bukan "part-nya jelek".<br><b>Corrective Action:</b> Buat SOP wajib cek alignment pakai dial indicator setiap ganti spider coupling, tambahkan ke checklist PM.</p>`)}
+
+        <div id="panduan-air">
+        ${sec('#0e7490', '🧭', 'AIR — Asset Integrity & Reliability (Pedoman A4-009/PHE23000/2026-S9)', `
+          <p>Pedoman AIR PHE (berlaku 26 Juni 2026) mewajibkan setiap peralatan punya <b>klasifikasi</b>, <b>criticality</b>, dan <b>status integrity</b>. Gabungan criticality × status integrity menentukan <b>tindak lanjut</b> yang wajib dilakukan. eRAMHoist adalah alat bantu lapangan; register resmi tetap di SAP (No. Equipment SAP bisa dicatat di eRAMHoist).</p>
+          <p><b>Siapa yang bisa menilai?</b> Admin dan manager (Spv / Sr Spv / Astmen). User lain bisa melihat hasilnya.</p>
+
+          <p class="font-bold text-slate-800 mt-3">Langkah 1 — Cek klasifikasi aset (sudah otomatis)</p>
+          <p>Setiap unit sudah otomatis dapat <b>Kategori Aset AIR</b> mengikuti kategori eRAMHoist-nya (mis. BOP System → STA, Mobile Rig → WIN). Cek di <b>Equipment → pilih unit → tab 🧭 AIR</b>. Kalau perlu diubah: <b>✏ Edit → bagian J. Klasifikasi AIR</b>.</p>
+          ${tbl(['Kode', 'Arti', 'Contoh di kita', 'Pendekatan'], [
+            ['WIN', 'Well Intervention', 'Mobile Rig, Carrier, Mast, Hoisting System, MTU', 'Reliability'],
+            ['ROT', 'Rotating', 'Circulating System, Pompa, Powerpack', 'Reliability'],
+            ['STA', 'Static', 'BOP System, Well Control System (accumulator), Tank, Manifold', 'Integrity'],
+            ['ELE / ICC', 'Electrical / Instrument', 'Generator Set, Tower Light / Control & Instrumentation', 'Reliability'],
+            ['LFT / TRK', 'Lifting / Truck Fleet', 'Handling Tools, Manlift / Primover, Dump Truck', 'Reliability'],
+            ['SNE / GSP / AUX', 'Safety / General Support / Auxiliaries', 'Fire Pump, Damkar / Alat berat, SCM / Auxilary System', '—'],
+          ])}
+          <p>Isi <b>"Di Luar Lingkup AIR karena"</b> hanya untuk aset yang dikecualikan pedoman: kendaraan dinas (non-operasi), unit sewa, Well Integrity, BOT, KSO, atau yang dikelola General Services. Unit ini tetap tercatat, tapi tidak dihitung di dashboard AIR (filter "Dalam lingkup AIR").</p>
+
+          <p class="font-bold text-slate-800 mt-3">Langkah 2 — Nilai Criticality (tombol "+ Nilai" di kartu Criticality)</p>
+          <p>Pakai metode <b>Kualitatif</b> (paling mudah). Jawab Ya/Tidak berurutan — wizard <b>berhenti otomatis</b> begitu hasilnya ketemu. <i>Barrier</i> = peralatan yang mencegah/menahan bahaya.</p>
+          ${tbl(['#', 'Pertanyaan', 'Jika YA', 'Jika TIDAK'], [
+            ['Q1', 'Menampung bahan mudah terbakar yang bisa menyebabkan MAH (Major Accident Hazard: blowout, kebakaran besar, ledakan)?', 'SECE', 'lanjut Q2'],
+            ['Q2', 'Dirancang untuk mencegah/memitigasi MAH?', 'SECE', 'lanjut Q3'],
+            ['Q3', 'Kegagalannya bisa menyebabkan MAH?', 'SECE', 'lanjut Q4'],
+            ['Q4', 'Kegagalannya berdampak pada produksi?', 'PCE', 'lanjut Q5'],
+            ['Q5', 'Menampung bahan mudah terbakar?', 'IMPORTANT', 'SECONDARY'],
+          ])}
+          ${tbl(['Contoh unit', 'Jawaban', 'Hasil'], [
+            ['BOP System / Well Control System', 'Q1 Tidak → <b>Q2 Ya</b> (dirancang mencegah blowout)', '<b>SECE</b> ★ Vital'],
+            ['Mobile Rig, Circulating System', 'Q1–Q3 Tidak → <b>Q4 Ya</b> (rig berhenti = produksi berhenti)', '<b>PCE</b> ★ Vital'],
+            ['Tank BBM pendukung', 'Q1–Q4 Tidak → <b>Q5 Ya</b>', '<b>IMPORTANT</b>'],
+            ['Tower Light, alat bantu', 'Semua Tidak', '<b>SECONDARY</b>'],
+          ])}
+          <p class="bg-amber-50 border border-amber-200 rounded p-2 text-xs">Contoh di atas hanya ilustrasi — keputusan akhir tetap penilaian tim (SECE ditetapkan bersama HSSE & Risk Owner). Hasil metode <b>Kualitatif wajib divalidasi ulang paling lambat 2 tahun</b>; tanggalnya dihitung otomatis dan muncul peringatan 60 hari sebelumnya.</p>
+          <p><b>Metode lain:</b> <b>ECA</b> = pilih Dampak × Probabilitas di matriks 5×5 (skor ≥15 PCE, ≥5 Important — dampak Catastrophic ditandai kandidat SECE). <b>PHA</b> = isi hasil dari laporan PHA, wajib cantumkan nomor dokumen.</p>
+
+          <p class="font-bold text-slate-800 mt-3">Langkah 3 — Nilai Status Integrity (tombol "+ Nilai" di kartu Status Integrity)</p>
+          ${tbl(['#', 'Pertanyaan', 'Jika YA'], [
+            ['S1', 'Sudah mengalami kegagalan fungsi/kinerja?', '⚫ <b>BREAKDOWN</b> (Hitam)'],
+            ['S2', 'Ada anomaly/penurunan fungsi yang <b>tidak memenuhi</b> performance standard?', '🔴 <b>LOW</b> (Merah)'],
+            ['S3', '<b>Memenuhi</b> performance standard, <b>namun</b> ada anomaly/penurunan fungsi?', '🟡 <b>MEDIUM</b> (Kuning)'],
+            ['—', 'Semua Tidak', '🟢 <b>HIGH</b> (Hijau)'],
+          ])}
+          <p>Contoh: accumulator tekanan precharge drop di bawah batas → S2 Ya → <b>LOW</b>. Pompa udara bunyi kasar tapi tekanan masih sesuai standar → S3 Ya → <b>MEDIUM</b>. Isi juga <b>Sumber</b> (Inspeksi/PM/Laporan Harian/SOS) dan <b>Temuan</b>. <b>Nilai ulang setiap kondisi berubah</b> — misalnya setelah perbaikan selesai, nilai lagi supaya kembali HIGH.</p>
+
+          <p class="font-bold text-slate-800 mt-3">Langkah 4 — Baca tindak lanjut (otomatis, Tabel 7 pedoman)</p>
+          ${tbl(['Criticality', '⚫ Breakdown', '🔴 Low', '🟡 Medium', '🟢 High'], [
+            ['SECE / PCE ★', 'Immediate Repair / Replacement', 'Immediate Repair / Replacement / Adjustment', 'Close Monitor / Interval Inspection & Maintenance / Adjustment, Minor Repair', 'Standard Inspection & Maintenance'],
+            ['IMPORTANT', 'Repair / Replacement', 'Repair / Replacement / Adjustment', 'Close Monitor / Interval Inspection & Maintenance / Adjustment', 'Standard Inspection & Maintenance'],
+            ['SECONDARY', 'Repair / Replacement', '—', '—', '—'],
+          ])}
+          <p>Kartu <b>Tindak Lanjut</b> di tab AIR menampilkan aksi + nomor <b>prioritas</b> (P1 paling mendesak: Vital+Breakdown). Urutan prioritas adalah usulan dan bisa disesuaikan.</p>
+
+          <p class="font-bold text-slate-800 mt-3">Langkah 5 — Pantau di dashboard (RAM → tab 🧭 AIR)</p>
+          <ul class="list-disc pl-5 space-y-0.5">
+            <li><b>Heatmap 4×4</b> — jumlah unit per kombinasi criticality × status. Klik sel untuk melihat unitnya.</li>
+            <li><b>Daftar Prioritas Tindak Lanjut</b> — unit yang perlu aksi, urut P1 → P7. Klik baris untuk buka unitnya.</li>
+            <li><b>Validasi ulang</b> — criticality kualitatif yang jatuh tempo ≤ 60 hari.</li>
+            <li><b>Belum dinilai lengkap</b> — unit yang criticality atau integrity-nya masih kosong.</li>
+          </ul>
+          <p class="bg-cyan-50 border border-cyan-200 rounded p-2 text-xs"><b>Urutan kerja yang disarankan:</b> mulai dari <b>BOP System</b> & <b>Well Control System</b> → <b>Mobile Rig, Carrier, Hoisting, Mast</b> → <b>Circulating System, Generator Set</b> → sisanya. Salah input? Admin bisa <b>Hapus</b> di tabel riwayat — status unit otomatis kembali ke penilaian sebelumnya.</p>
+          <p class="text-xs text-slate-500"><b>Beda dengan Risk Assessment (CoF/PoF) lama:</b> CoF & Risk Level dari pedoman PEP 2023 masih tampil berdampingan. Criticality AIR adalah klasifikasi resmi pedoman yang baru.</p>`)}
+        </div>
 
         ${sec('#7c3aed', '⚡', 'Risk Assessment — CoF, PoF & Risk Level', `
           <p>Menentukan <b>prioritas pemeliharaan</b> setiap equipment berdasarkan dua faktor sesuai Pedoman PEP.</p>
