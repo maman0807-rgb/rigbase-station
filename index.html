@@ -405,19 +405,13 @@
         { name: 'last_goh_hours',      label: 'Counter saat GOH Terakhir', type: 'number', min: 0, step: '0.1', placeholder: 'HM atau KM saat GOH' },
         { name: 'last_goh_date',       label: 'Tgl GOH Terakhir',          type: 'date', placeholder: 'isi manual kalau GOH-nya sebelum sistem ini ada (sebelum Mei 2026) — otomatis keisi sendiri kalau GOH dicatat lewat Catat PM Selesai' },
       ]},
-      { section: 'E. Sertifikasi & Refurbish', fields: [
-        { name: 'nomor_skpi',             label: 'Nomor SKPI',             type: 'text' },
-        { name: 'skpi_start_date',        label: 'SKPI Start Date',        type: 'date' },
-        { name: 'skpi_end_date',          label: 'SKPI End Date',          type: 'date' },
-        { name: 'coc_number',             label: 'COC Number',             type: 'text' },
+      // SKPI / COC / sertifikat lain dikelola di tab 📜 Sertifikasi (tabel izin_operasi, Fase 38);
+      // kolom lamanya diisi otomatis dari izin terbaru, jadi tidak diedit dari form ini lagi.
+      { section: 'E. Refurbish & Load Test (izin/SKPI/COC/sertifikat → tab 📜 Sertifikasi)', fields: [
         { name: 'arf_lembaga',            label: 'ARF / Lembaga',          type: 'text' },
         { name: 'refurbish_year',         label: 'Refurbish Year',         type: 'number', min: 1900, max: 2100 },
         { name: 'refurbish_by',           label: 'Refurbish By',           type: 'text' },
         { name: 'load_test_result',       label: 'Load Test Result',       type: 'text' },
-        { name: 'nomor_sertifikat_lain',  label: 'Nomor Sertifikat Lain',  type: 'text' },
-        { name: 'tgl_terbit_sertifikat',  label: 'Tgl Terbit Sertifikat',  type: 'date' },
-        { name: 'tgl_expired_sertifikat', label: 'Tgl Expired Sertifikat', type: 'date' },
-        { name: 'lembaga_penerbit',       label: 'Lembaga Penerbit',       type: 'text' },
       ]},
       { section: 'F. Finansial', fields: [
         { name: 'tgl_pembelian',   label: 'Tgl Pembelian',     type: 'date' },
@@ -7546,8 +7540,16 @@
     window.bulkExportSelected = bulkExportSelected;
 
     async function bulkDeleteSelected() {
-      const ids = Array.from(state.selectedEquipmentIds);
+      let ids = Array.from(state.selectedEquipmentIds);
       if (ids.length === 0) return;
+      // Pedoman AIR: unit yang punya riwayat dilewati (harus di-decommission, bukan dihapus)
+      const riw = await Promise.all(ids.map(airRiwayatEquipment));
+      const skipped = ids.filter((_, i) => riw[i]);
+      if (skipped.length) {
+        ids = ids.filter((_, i) => !riw[i]);
+        toast(`${skipped.length} equipment punya riwayat — tidak dihapus (gunakan Decommission di tab 🧭 AIR).`, 'warn');
+        if (!ids.length) return;
+      }
       const ok = await confirmDialog({
         title: `Hapus ${ids.length} Equipment?`,
         message: `Yakin mau hapus ${ids.length} equipment beserta semua maintenance log, mutasi, dokumen, dan loan terkait? Aksi ini TIDAK BISA di-undo.`,
@@ -8134,12 +8136,13 @@
         }
         return out;
       };
-      const [eqs, strat, parts, dt] = await Promise.all([
+      const [eqs, strat, parts, dt, izinExp] = await Promise.all([
         pageAll('v_equipment_air_status', 'id, tag_number, nama_equipment, kategori_aset, kategori_aset_nama, taxonomy_level, status_aset, dalam_lingkup_air, criticality, status_integrity'),
         pageAll('equipment', 'id, strategi_pemeliharaan').catch(() => null),
         pageAll('v_sparepart_vis', 'id, category, dipetakan, kelas_vis, alert_vital_tanpa_minimum').catch(() => null),
         state.supabase.from('downtime_events').select('id', { count: 'exact', head: true })
           .in('category', ['breakdown', 'troubleshoot']).is('failure_mode', null).gte('start_at', since12.toISOString()),
+        state.supabase.from('v_air_lifecycle_alert').select('equipment_id', { count: 'exact', head: true }).eq('tipe', 'IZIN').eq('status', 'KEDALUWARSA'),
       ]);
       const scope = eqs.filter(e => e.dalam_lingkup_air && e.status_aset !== 'DECOMMISSIONED');
       const stratById = strat ? Object.fromEntries(strat.map(x => [x.id, x.strategi_pemeliharaan])) : null;
@@ -8153,6 +8156,7 @@
         partCritBelumMap: crit ? crit.filter(p => !p.dipetakan).length : null,
         vitalTanpaMin: parts ? parts.filter(p => p.alert_vital_tanpa_minimum).length : null,
         dtBelumKlas: dt.count ?? null,
+        izinKedaluwarsa: izinExp?.error ? null : (izinExp?.count ?? null),
       };
     }
     function airWorklistItems(d) {
@@ -8170,6 +8174,8 @@
         ket: 'Part yang belum terhubung ke equipment selalu jadi kelas S — tidak akan pernah memicu alert Vital.', aksi: `goCsppPreset('critunmapped')` });
       if (d.vitalTanpaMin) items.push({ key: 'min', ico: '📏', judul: 'Isi safety stock part Vital', sisa: d.vitalTanpaMin, total: null,
         ket: 'Part Vital tanpa stok minimum — alert "≤ minimum" tidak bisa bekerja.', aksi: `goCsppPreset('vitaltanpamin')` });
+      if (d.izinKedaluwarsa) items.push({ key: 'izin', ico: '📜', judul: 'Perpanjang izin operasi yang kedaluwarsa', sisa: d.izinKedaluwarsa, total: null,
+        ket: 'Izin aktif (SKPI/COI/PLO/…) sudah lewat masa berlaku. Kalau sebenarnya sudah diperpanjang, catat izin barunya di tab 📜 Sertifikasi.', aksi: `airGoDashboard('life')` });
       if (d.dtBelumKlas) items.push({ key: 'dt', ico: '🏷️', judul: 'Klasifikasi failure mode downtime 12 bulan', sisa: d.dtBelumKlas, total: null,
         ket: 'Belum ikut dihitung deteksi repetitive failure / RCA otomatis.', aksi: `airGoDashboard('dt')` });
       return items;
@@ -8263,6 +8269,353 @@
       } catch { host.innerHTML = ''; }
     }
 
+    // ============================================================
+    // AIR Tahap 4A — Izin Operasi, RLA + biaya historis, Decommissioning (Fase 38)
+    // ============================================================
+    const IZIN_STATUS = {
+      KEDALUWARSA: ['⚠ Kedaluwarsa', 'bg-red-100 text-red-700'],
+      AKAN_HABIS:  ['⏰ Akan habis', 'bg-amber-100 text-amber-800'],
+      BERLAKU:     ['✓ Berlaku', 'bg-green-100 text-green-700'],
+      TANPA_BATAS: ['Tanpa batas', 'bg-slate-100 text-slate-600'],
+    };
+    const RLA_KESIMPULAN = {
+      LAYAK_LANJUT:        ['Layak lanjut', 'bg-green-100 text-green-700'],
+      LAYAK_DENGAN_SYARAT: ['Layak dengan syarat', 'bg-amber-100 text-amber-800'],
+      TIDAK_LAYAK:         ['Tidak layak', 'bg-red-100 text-red-700'],
+    };
+    const pill = ([l, c]) => `<span class="px-2 py-0.5 rounded-full text-xs font-semibold ${c}">${l}</span>`;
+    function airCanLifecycle() { return ['admin', 'spv', 'sr_spv', 'astmen'].includes(state.profile?.role); }
+    let __jenisIzin = null;
+    async function airJenisIzin() {
+      if (__jenisIzin) return __jenisIzin;
+      const { data } = await state.supabase.from('ref_jenis_izin').select('*').eq('aktif', true).order('urutan');
+      if (data?.length) __jenisIzin = data;
+      return data || [];
+    }
+
+    // ---------- Tab Sertifikasi = Izin Operasi ----------
+    async function renderSertifikasiTab(eq, container) {
+      try {
+        const { data, error } = await state.supabase.from('v_izin_operasi').select('*').eq('equipment_id', eq.id)
+          .order('jenis').order('tgl_terbit', { ascending: false, nullsFirst: false });
+        if (error) throw error;
+        const can = airCanLifecycle();
+        const byJenis = {};
+        (data || []).forEach(i => { (byJenis[i.jenis] = byJenis[i.jenis] || []).push(i); });
+        const cards = Object.values(byJenis).map(list => {
+          const cur = list.find(i => i.terbaru) || list[0];
+          const old = list.filter(i => i.id !== cur.id);
+          const row = (i, muted) => `
+            <div class="flex items-center gap-2 flex-wrap text-sm py-1.5 ${muted ? 'text-slate-400' : ''}">
+              <span class="font-mono font-semibold">${escapeHtml(i.nomor || '(tanpa nomor)')}</span>
+              <span class="text-xs">${i.tgl_terbit ? fmtDate(i.tgl_terbit) : '—'} → ${i.tgl_kedaluwarsa ? fmtDate(i.tgl_kedaluwarsa) : 'tanpa batas'}</span>
+              ${muted ? '<span class="text-xs">(riwayat)</span>' : pill(IZIN_STATUS[i.status])}
+              ${!muted && i.sisa_hari != null && i.sisa_hari >= 0 && i.status !== 'BERLAKU' ? `<span class="text-xs text-amber-700 font-bold">${i.sisa_hari} hari lagi</span>` : ''}
+              ${i.penerbit ? `<span class="text-xs text-slate-500">· ${escapeHtml(i.penerbit)}</span>` : ''}
+              ${i.lampiran ? `<span class="text-xs text-slate-500">· 📎 ${escapeHtml(i.lampiran)}</span>` : ''}
+              ${can ? `<button onclick="openIzinForm('${eq.id}','${i.id}')" class="text-xs text-navy hover:underline ml-auto">Edit</button>` : ''}
+            </div>
+            ${!muted && i.keterangan ? `<div class="text-xs text-slate-500 -mt-1 mb-1">${escapeHtml(i.keterangan)}</div>` : ''}`;
+          return `
+            <div class="bg-white border ${cur.status === 'KEDALUWARSA' ? 'border-red-300' : cur.status === 'AKAN_HABIS' ? 'border-amber-300' : 'border-slate-200'} rounded-lg p-4">
+              <div class="flex items-center justify-between gap-2 mb-1">
+                <h4 class="font-bold text-navy text-sm uppercase tracking-wider">${escapeHtml(cur.jenis_nama)}</h4>
+                ${can ? `<button onclick="openIzinForm('${eq.id}', null, '${cur.jenis}')" class="text-xs bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded font-semibold">+ Perpanjang / baru</button>` : ''}
+              </div>
+              ${row(cur, false)}
+              ${old.length ? `<details class="mt-1"><summary class="text-xs text-slate-500 cursor-pointer">Riwayat (${old.length})</summary>${old.map(i => row(i, true)).join('')}</details>` : ''}
+            </div>`;
+        }).join('');
+        container.innerHTML = `
+          <div class="space-y-4">
+            <div class="flex items-center justify-between flex-wrap gap-2">
+              <div>
+                <h4 class="font-bold text-slate-800">📜 Izin Operasi & Sertifikat</h4>
+                <p class="text-xs text-slate-500">Pedoman AIR: COI/KHI, PLO (Permen ESDM 32/2021), SKPI, dll. Alert H-60 & H-30 sebelum kedaluwarsa.</p>
+              </div>
+              ${can ? `<button onclick="openIzinForm('${eq.id}', null)" class="bg-safety hover:bg-safety/90 text-white px-4 py-2 rounded-lg text-sm font-semibold">+ Tambah Izin</button>` : ''}
+            </div>
+            ${cards || '<div class="bg-white border border-slate-200 rounded-lg p-6 text-center text-sm text-slate-400">Belum ada izin operasi / sertifikat.</div>'}
+            <div>
+              <h4 class="font-bold text-navy text-sm uppercase tracking-wider mb-2">Refurbish & Load Test</h4>
+              <div class="bg-white border border-slate-200 rounded-lg p-4">
+                ${infoRow('ARF / Lembaga', escapeHtml(eq.arf_lembaga || '') || null)}
+                ${infoRow('Refurbish Year', eq.refurbish_year)}
+                ${infoRow('Refurbish By', escapeHtml(eq.refurbish_by || '') || null)}
+                ${infoRow('Load Test Result', escapeHtml(eq.load_test_result || '') || null)}
+              </div>
+            </div>
+          </div>`;
+      } catch (err) {
+        // fase38 belum dijalankan → tampilan lama
+        container.innerHTML = renderSertifikasiTabLama(eq);
+      }
+    }
+
+    async function openIzinForm(eqId, izinId, jenisDefault) {
+      const jenis = await airJenisIzin();
+      let r = { jenis: jenisDefault || 'SKPI', tgl_terbit: new Date().toISOString().slice(0, 10) };
+      if (izinId) {
+        const { data } = await state.supabase.from('izin_operasi').select('*').eq('id', izinId).single();
+        if (data) r = data;
+      }
+      const inp = 'w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-navy';
+      openModal({
+        title: izinId ? 'Edit Izin Operasi' : (jenisDefault ? 'Perpanjang / Izin Baru' : 'Tambah Izin Operasi'),
+        maxWidth: 'max-w-lg',
+        body: `
+          <div class="space-y-3">
+            ${!izinId && jenisDefault ? '<div class="text-xs text-slate-500 bg-slate-50 rounded p-2">Izin lama tetap tersimpan sebagai riwayat. Izin dengan tanggal terbit terbaru jadi izin aktif.</div>' : ''}
+            <label class="block"><span class="text-xs font-semibold text-slate-600">Jenis *</span>
+              <select id="iz-jenis" class="${inp}">${jenis.map(j => `<option value="${j.kode}" ${r.jenis === j.kode ? 'selected' : ''}>${escapeHtml(j.nama)}${j.keterangan ? ' — ' + escapeHtml(j.keterangan) : ''}</option>`).join('')}</select></label>
+            <div class="grid grid-cols-2 gap-3">
+              <label class="block"><span class="text-xs font-semibold text-slate-600">Nomor</span><input id="iz-nomor" value="${escapeHtml(r.nomor || '')}" class="${inp}"></label>
+              <label class="block"><span class="text-xs font-semibold text-slate-600">Penerbit</span><input id="iz-penerbit" value="${escapeHtml(r.penerbit || '')}" class="${inp}"></label>
+              <label class="block"><span class="text-xs font-semibold text-slate-600">Tgl terbit</span><input id="iz-terbit" type="date" value="${r.tgl_terbit || ''}" class="${inp}"></label>
+              <label class="block"><span class="text-xs font-semibold text-slate-600">Tgl kedaluwarsa</span><input id="iz-exp" type="date" value="${r.tgl_kedaluwarsa || ''}" class="${inp}"></label>
+            </div>
+            <label class="block"><span class="text-xs font-semibold text-slate-600">Lampiran (nama file di tab Dokumen / link)</span><input id="iz-lampiran" value="${escapeHtml(r.lampiran || '')}" class="${inp}"></label>
+            <label class="block"><span class="text-xs font-semibold text-slate-600">Keterangan</span><textarea id="iz-ket" rows="2" class="${inp}">${escapeHtml(r.keterangan || '')}</textarea></label>
+          </div>`,
+        footer: `${izinId ? `<button onclick="deleteIzin('${eqId}','${izinId}')" class="px-4 py-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 text-sm font-medium mr-auto">Hapus</button>` : ''}
+          <button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
+          <button onclick="saveIzin('${eqId}','${izinId || ''}')" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy/80 text-white text-sm font-semibold">Simpan</button>`,
+      });
+    }
+    window.openIzinForm = openIzinForm;
+    async function saveIzin(eqId, izinId) {
+      const v = id => (document.getElementById(id)?.value || '').trim() || null;
+      const row = { equipment_id: eqId, jenis: v('iz-jenis'), nomor: v('iz-nomor'), penerbit: v('iz-penerbit'),
+        tgl_terbit: v('iz-terbit'), tgl_kedaluwarsa: v('iz-exp'), lampiran: v('iz-lampiran'), keterangan: v('iz-ket') };
+      if (!row.nomor && !row.tgl_kedaluwarsa) { toast('Isi nomor atau tanggal kedaluwarsa.', 'warn'); return; }
+      if (row.tgl_terbit && row.tgl_kedaluwarsa && row.tgl_kedaluwarsa < row.tgl_terbit) { toast('Tgl kedaluwarsa sebelum tgl terbit.', 'warn'); return; }
+      const q = izinId ? state.supabase.from('izin_operasi').update(row).eq('id', izinId)
+                       : state.supabase.from('izin_operasi').insert({ ...row, created_by: state.user.id });
+      const { error } = await q;
+      if (error) { toast('Gagal simpan: ' + error.message, 'error'); return; }
+      logActivity(izinId ? 'updated' : 'created', 'izin_operasi', eqId, window.__currentEq?.tag_number, { jenis: row.jenis, nomor: row.nomor });
+      closeModal();
+      toast('Izin tersimpan.', 'success');
+      airReloadCurrentEq(eqId);
+    }
+    window.saveIzin = saveIzin;
+    async function deleteIzin(eqId, izinId) {
+      const ok = await confirmDialog({ title: 'Hapus izin', message: 'Hapus izin ini? Kalau ini salah input silakan hapus; kalau izin lama yang sudah diperpanjang, biarkan sebagai riwayat.', confirmText: 'Hapus', danger: true });
+      if (!ok) return;
+      const { error } = await state.supabase.from('izin_operasi').delete().eq('id', izinId);
+      if (error) { toast('Gagal: ' + error.message, 'error'); return; }
+      toast('Izin dihapus.', 'success');
+      airReloadCurrentEq(eqId);
+    }
+    window.deleteIzin = deleteIzin;
+
+    // ---------- RLA + biaya historis (kartu di tab AIR) ----------
+    async function airLifecycleCardsHtml(eq) {
+      const [rlaRes, biayaRes, izinRes] = await Promise.all([
+        state.supabase.from('rla_assessment').select('*').eq('equipment_id', eq.id).order('tanggal', { ascending: false }),
+        state.supabase.from('v_biaya_pemeliharaan_tahunan').select('*').eq('equipment_id', eq.id).order('tahun', { ascending: false }),
+        state.supabase.from('v_izin_operasi').select('jenis_nama, nomor, tgl_kedaluwarsa, status, sisa_hari').eq('equipment_id', eq.id).eq('terbaru', true),
+      ]);
+      if (rlaRes.error) return '';   // fase38 belum dijalankan
+      const rlas = rlaRes.data || [];
+      const last = rlas[0];
+      let tind = [];
+      if (rlas.length) {
+        const { data } = await state.supabase.from('rla_tindakan').select('*').in('rla_id', rlas.map(r => r.id)).order('created_at');
+        tind = data || [];
+      }
+      const can = airCanLifecycle();
+      const isAdmin = state.profile?.role === 'admin';
+      const fmtRp = v => 'Rp ' + Math.round(Number(v) || 0).toLocaleString('id-ID');
+      const izinBad = (izinRes.data || []).filter(i => i.status === 'KEDALUWARSA' || i.status === 'AKAN_HABIS');
+      const days = d => d ? Math.round((new Date(d) - new Date(new Date().toISOString().slice(0, 10))) / 86400000) : null;
+      const sisaLayan = days(eq.sisa_umur_layan_sampai);
+      const decom = eq.status_aset === 'DECOMMISSIONED';
+      return `
+        ${decom ? `<div class="bg-slate-800 text-white rounded-lg p-4 text-sm">🗄️ <b>Unit ini sudah DECOMMISSIONED</b> sejak ${fmtDate(eq.decommission_tgl)} — dokumen: <b>${escapeHtml(eq.decommission_ref || '—')}</b>${eq.decommission_catatan ? ` · ${escapeHtml(eq.decommission_catatan)}` : ''}. Data tetap tersimpan sebagai arsip.</div>` : ''}
+        ${izinBad.length ? `<div class="bg-red-50 border border-red-300 rounded-lg p-3 text-sm text-red-800">📜 <b>Izin operasi bermasalah:</b> ${izinBad.map(i => `${escapeHtml(i.jenis_nama)} ${escapeHtml(i.nomor || '')} — ${i.status === 'KEDALUWARSA' ? `<b>kedaluwarsa ${-i.sisa_hari} hari</b>` : `habis ${i.sisa_hari} hari lagi`}`).join(' · ')}
+          <button onclick="state.equipmentDetailTab='sertifikasi'; renderDetailTab(window.__currentEq)" class="underline ml-1">kelola →</button></div>` : ''}
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div class="bg-white border border-slate-200 rounded-lg p-4">
+            <div class="flex items-center justify-between gap-2 mb-3 flex-wrap">
+              <h4 class="font-bold text-navy text-sm uppercase tracking-wider">Umur Layan (RLA)</h4>
+              ${can && !decom ? `<button onclick="openRlaForm('${eq.id}')" class="px-2.5 py-1 bg-navy hover:bg-navy/80 text-white rounded text-xs font-semibold">+ Catat RLA</button>` : ''}
+            </div>
+            ${last ? `
+              <div class="flex items-center gap-2 flex-wrap mb-1">${pill(RLA_KESIMPULAN[last.kesimpulan])}<span class="text-xs text-slate-500">RLA ${fmtDate(last.tanggal)}${last.nomor_laporan ? ' · ' + escapeHtml(last.nomor_laporan) : ''}${last.pelaksana ? ' · ' + escapeHtml(last.pelaksana) : ''}</span></div>
+              <div class="text-xs text-slate-600 space-y-0.5">
+                <div>Batas layan: <b>${eq.sisa_umur_layan_sampai ? fmtDate(eq.sisa_umur_layan_sampai) : '—'}</b> ${sisaLayan != null ? (sisaLayan < 0 ? `<span class="text-red-700 font-bold">lewat ${-sisaLayan} hari</span>` : sisaLayan <= 90 ? `<span class="text-amber-700 font-bold">${sisaLayan} hari lagi</span>` : '') : ''}</div>
+                <div>RLA berikutnya: <b>${eq.rla_tgl_berikutnya ? fmtDate(eq.rla_tgl_berikutnya) : '—'}</b></div>
+                ${last.sisa_umur_tahun != null || last.sisa_umur_jam != null ? `<div>Sisa umur: <b>${[last.sisa_umur_tahun != null ? last.sisa_umur_tahun + ' th' : '', last.sisa_umur_jam != null ? fmtNumber(last.sisa_umur_jam, ' jam') : ''].filter(Boolean).join(' / ')}</b></div>` : ''}
+                ${last.syarat_rekomendasi ? `<div>Syarat/rekomendasi: ${escapeHtml(last.syarat_rekomendasi)}</div>` : ''}
+              </div>
+              ${tind.length ? `<div class="mt-2 space-y-1">${tind.map(t => `
+                <div class="text-xs flex items-center gap-2 flex-wrap ${t.status !== 'OPEN' ? 'text-slate-400 line-through' : ''}">
+                  ${t.status === 'OPEN' && can ? `<input type="checkbox" onchange="rlaTindakDone('${t.id}','${eq.id}')">` : (t.status === 'SELESAI' ? '✅' : '✖')}
+                  <span>${escapeHtml(t.aksi)}</span>${t.pic ? `<span class="text-slate-500">· ${escapeHtml(t.pic)}</span>` : ''}${t.due_date ? `<span class="${t.status === 'OPEN' && t.due_date < new Date().toISOString().slice(0, 10) ? 'text-red-700 font-bold' : 'text-slate-500'}">· ${fmtDate(t.due_date)}</span>` : ''}
+                </div>`).join('')}</div>` : ''}
+              ${rlas.length > 1 ? `<details class="mt-2"><summary class="text-xs text-slate-500 cursor-pointer">Riwayat RLA (${rlas.length})</summary>${rlas.map(r => `<div class="text-xs py-0.5 flex gap-2 items-center">${fmtDate(r.tanggal)} ${pill(RLA_KESIMPULAN[r.kesimpulan])} ${escapeHtml(r.nomor_laporan || '')}
+                ${isAdmin ? `<button onclick="airDeleteAssessment('rla_assessment','${r.id}','${eq.id}')" class="text-red-600 hover:underline">Hapus</button>` : ''}</div>`).join('')}</details>` : ''}
+            ` : '<div class="text-sm text-slate-400 italic">Belum ada hasil RLA.</div>'}
+          </div>
+          <div class="bg-white border border-slate-200 rounded-lg p-4">
+            <h4 class="font-bold text-navy text-sm uppercase tracking-wider mb-1">Biaya Pemeliharaan per Tahun</h4>
+            <div class="text-[11px] text-slate-400 mb-2">Dari Input Harian Logbook (manpower + part + transport + vendor). Bahan LCCA: repair vs replace.</div>
+            ${(biayaRes.data || []).length ? `<div class="overflow-x-auto"><table class="w-full text-xs">
+              <thead><tr class="text-left text-slate-500 border-b"><th class="py-1">Tahun</th><th class="py-1 text-right">Kegiatan</th><th class="py-1 text-right">Part</th><th class="py-1 text-right">Total</th></tr></thead>
+              <tbody>${biayaRes.data.map(b => `<tr class="border-b border-slate-100"><td class="py-1">${b.tahun}</td><td class="py-1 text-right">${b.jumlah_kegiatan}</td><td class="py-1 text-right">${fmtRp(b.biaya_part)}</td><td class="py-1 text-right font-semibold">${fmtRp(b.biaya_total)}</td></tr>`).join('')}</tbody>
+            </table></div>
+            ${eq.harga_perolehan ? `<div class="text-[11px] text-slate-500 mt-2">Harga perolehan: ${fmtRp(eq.harga_perolehan)} · total biaya pemeliharaan tercatat: <b>${fmtRp(biayaRes.data.reduce((s, b) => s + (Number(b.biaya_total) || 0), 0))}</b></div>` : ''}`
+            : '<div class="text-sm text-slate-400 italic">Belum ada biaya tercatat di Input Harian.</div>'}
+          </div>
+        </div>
+        ${state.profile?.role === 'admin' && !decom ? `
+        <div class="text-right"><button onclick="openDecommission('${eq.id}')" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold">🗄️ Decommission unit ini…</button></div>` : ''}`;
+    }
+
+    function openRlaForm(eqId) {
+      const eq = window.__currentEq;
+      const inp = 'w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-navy';
+      const f = (id, lbl, type = 'text', val = '') => `<label class="block"><span class="text-xs font-semibold text-slate-600">${lbl}</span><input id="${id}" type="${type}" value="${val}" class="${inp}"></label>`;
+      window.__rlaTind = [];
+      openModal({
+        title: `Catat Hasil RLA — ${eq?.tag_number || ''}`,
+        maxWidth: 'max-w-2xl',
+        body: `
+          <div class="space-y-3">
+            <div class="text-xs text-slate-500">Remaining Life Assessment — mencatat hasil RLA yang sudah dilakukan (internal/vendor/lembaga). Perpanjangan umur layan mengacu Kepmen ESDM 183.K/HK.02/DMT/2024.</div>
+            <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
+              ${f('rla-tgl', 'Tanggal RLA *', 'date', new Date().toISOString().slice(0, 10))}
+              ${f('rla-pelaksana', 'Pelaksana')}
+              ${f('rla-nomor', 'Nomor laporan')}
+              ${f('rla-metode', 'Metode')}
+              ${f('rla-ud-th', 'Umur desain (tahun)', 'number')}
+              ${f('rla-ud-jam', 'Umur desain (jam)', 'number')}
+              ${f('rla-uo-th', 'Umur operasi (tahun)', 'number')}
+              ${f('rla-uo-jam', 'Umur operasi (jam)', 'number', eq?.running_hours ?? '')}
+              ${f('rla-sisa-th', 'Sisa umur (tahun)', 'number')}
+              ${f('rla-sisa-jam', 'Sisa umur (jam)', 'number')}
+              ${f('rla-batas', 'Batas layan baru', 'date')}
+              ${f('rla-next', 'Jadwal RLA berikutnya', 'date')}
+            </div>
+            <label class="block"><span class="text-xs font-semibold text-slate-600">Kesimpulan *</span>
+              <select id="rla-kes" class="${inp}">${Object.entries(RLA_KESIMPULAN).map(([k, [l]]) => `<option value="${k}">${l}</option>`).join('')}</select></label>
+            <div class="text-[11px] text-amber-700">Kesimpulan "Layak dengan syarat" / "Tidak layak" otomatis membuat usulan penilaian integrity (DRAFT Medium/Low) untuk dikonfirmasi.</div>
+            <label class="block"><span class="text-xs font-semibold text-slate-600">Syarat / rekomendasi</span><textarea id="rla-syarat" rows="2" class="${inp}"></textarea></label>
+            <div class="border border-slate-200 rounded-lg p-3">
+              <div class="text-xs font-bold text-slate-600 uppercase mb-1">Tindak lanjut rekomendasi</div>
+              <div id="rla-tind-list" class="space-y-1"></div>
+              <button type="button" onclick="rlaTindAdd()" class="mt-1 px-3 py-1 bg-slate-100 hover:bg-slate-200 rounded text-xs font-semibold">+ Tambah</button>
+            </div>
+            <label class="flex items-center gap-2 text-sm"><input id="rla-izin" type="checkbox"> Terkait perpanjangan izin operasi</label>
+            ${f('rla-lampiran', 'Lampiran (nama file di tab Dokumen / link)')}
+          </div>`,
+        footer: `<button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
+                 <button id="rla-save" onclick="saveRla('${eqId}')" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy/80 text-white text-sm font-semibold">Simpan</button>`,
+      });
+      rlaTindRender();
+    }
+    window.openRlaForm = openRlaForm;
+    function rlaTindRender() {
+      const host = document.getElementById('rla-tind-list'); if (!host) return;
+      const c = 'border border-slate-300 rounded px-2 py-1 text-xs';
+      host.innerHTML = (window.__rlaTind || []).map((t, i) => `
+        <div class="grid grid-cols-12 gap-1">
+          <input placeholder="Aksi" value="${escapeHtml(t.aksi || '')}" oninput="window.__rlaTind[${i}].aksi=this.value" class="${c} col-span-6">
+          <input placeholder="PIC" value="${escapeHtml(t.pic || '')}" oninput="window.__rlaTind[${i}].pic=this.value" class="${c} col-span-3">
+          <input type="date" value="${t.due_date || ''}" onchange="window.__rlaTind[${i}].due_date=this.value||null" class="${c} col-span-2">
+          <button type="button" onclick="window.__rlaTind.splice(${i},1); rlaTindRender()" class="text-red-600 text-xs col-span-1">✕</button>
+        </div>`).join('') || '<div class="text-xs text-slate-400 italic">Belum ada.</div>';
+    }
+    window.rlaTindRender = rlaTindRender;
+    window.rlaTindAdd = () => { window.__rlaTind.push({ aksi: '' }); rlaTindRender(); };
+    async function saveRla(eqId) {
+      const v = id => (document.getElementById(id)?.value || '').trim() || null;
+      const num = id => { const x = v(id); return x == null ? null : Number(x); };
+      const row = {
+        equipment_id: eqId, tanggal: v('rla-tgl'), pelaksana: v('rla-pelaksana'), nomor_laporan: v('rla-nomor'), metode: v('rla-metode'),
+        umur_desain_tahun: num('rla-ud-th'), umur_desain_jam: num('rla-ud-jam'), umur_operasi_tahun: num('rla-uo-th'), umur_operasi_jam: num('rla-uo-jam'),
+        sisa_umur_tahun: num('rla-sisa-th'), sisa_umur_jam: num('rla-sisa-jam'), batas_layan_baru: v('rla-batas'), tgl_rla_berikutnya: v('rla-next'),
+        kesimpulan: v('rla-kes'), syarat_rekomendasi: v('rla-syarat'), terkait_perpanjangan_izin: !!document.getElementById('rla-izin')?.checked,
+        lampiran: v('rla-lampiran'), created_by: state.user.id,
+      };
+      if (!row.tanggal || !row.kesimpulan) { toast('Tanggal & kesimpulan wajib.', 'warn'); return; }
+      const btn = document.getElementById('rla-save'); if (btn) { btn.disabled = true; btn.textContent = 'Menyimpan…'; }
+      const { data, error } = await state.supabase.from('rla_assessment').insert(row).select('id').single();
+      if (error) { toast('Gagal: ' + error.message, 'error'); if (btn) { btn.disabled = false; btn.textContent = 'Simpan'; } return; }
+      const tind = (window.__rlaTind || []).filter(t => (t.aksi || '').trim()).map(t => ({ rla_id: data.id, aksi: t.aksi.trim(), pic: t.pic || null, due_date: t.due_date || null }));
+      if (tind.length) {
+        const { error: e2 } = await state.supabase.from('rla_tindakan').insert(tind);
+        if (e2) toast('RLA tersimpan, tapi tindak lanjut gagal: ' + e2.message, 'error');
+      }
+      logActivity('created', 'rla_assessment', eqId, window.__currentEq?.tag_number, { kesimpulan: row.kesimpulan });
+      closeModal();
+      toast(row.kesimpulan === 'LAYAK_LANJUT' ? 'RLA tersimpan.' : 'RLA tersimpan — usulan penilaian integrity (DRAFT) dibuat, konfirmasi di riwayat integrity.', 'success');
+      airReloadCurrentEq(eqId);
+    }
+    window.saveRla = saveRla;
+    async function rlaTindakDone(id, eqId) {
+      const { error } = await state.supabase.from('rla_tindakan').update({ status: 'SELESAI', tgl_selesai: new Date().toISOString().slice(0, 10) }).eq('id', id);
+      if (error) { toast('Gagal: ' + error.message, 'error'); return; }
+      airReloadCurrentEq(eqId);
+    }
+    window.rlaTindakDone = rlaTindakDone;
+
+    // ---------- Decommissioning ----------
+    async function openDecommission(eqId) {
+      const eq = window.__currentEq;
+      const { data: blockers, error } = await state.supabase.rpc('air_decommission_blockers', { p_equipment_id: eqId });
+      if (error) { toast('Gagal cek: ' + error.message, 'error'); return; }
+      const inp = 'w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-navy';
+      const blocked = (blockers || []).length > 0;
+      openModal({
+        title: `🗄️ Decommission — ${eq?.tag_number || ''}`,
+        maxWidth: 'max-w-lg',
+        body: `
+          <div class="space-y-3 text-sm">
+            <div class="text-xs text-slate-600 bg-slate-50 rounded p-2">Pedoman AIR: data <b>tidak dihapus</b>, hanya diarsip. Semua work order, tindak lanjut, dan pekerjaan terbuka harus ditutup dulu, dan wajib ada dokumen persetujuan. Status operasi otomatis menjadi <b>Scrap</b>.</div>
+            ${blocked ? `
+              <div class="bg-red-50 border border-red-300 rounded-lg p-3">
+                <div class="font-bold text-red-800 mb-1">Belum bisa — masih ada yang terbuka:</div>
+                ${blockers.map(b => `<div class="text-xs text-red-700">• <b>${escapeHtml(b.jenis)}</b> (${b.jumlah}) — ${escapeHtml(b.keterangan)}</div>`).join('')}
+              </div>` : `
+              <div class="bg-green-50 border border-green-300 rounded-lg p-2 text-xs text-green-800">✓ Tidak ada item terbuka.</div>
+              <label class="block"><span class="text-xs font-semibold text-slate-600">Referensi dokumen persetujuan *</span><input id="dc-ref" placeholder="mis. Nota Dinas No. …" class="${inp}"></label>
+              <label class="block"><span class="text-xs font-semibold text-slate-600">Tanggal</span><input id="dc-tgl" type="date" value="${new Date().toISOString().slice(0, 10)}" class="${inp}"></label>
+              <label class="block"><span class="text-xs font-semibold text-slate-600">Catatan</span><textarea id="dc-cat" rows="2" class="${inp}"></textarea></label>`}
+          </div>`,
+        footer: `<button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Tutup</button>
+          ${blocked ? '' : `<button onclick="saveDecommission('${eqId}')" class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-900 text-white text-sm font-semibold">Decommission</button>`}`,
+      });
+    }
+    window.openDecommission = openDecommission;
+    async function saveDecommission(eqId) {
+      const ref = (document.getElementById('dc-ref')?.value || '').trim();
+      if (!ref) { toast('Referensi dokumen persetujuan wajib diisi.', 'warn'); return; }
+      const ok = await confirmDialog({ title: 'Decommission unit', message: 'Unit akan diarsip (status aset DECOMMISSIONED, status operasi Scrap). Lanjutkan?', confirmText: 'Decommission', danger: true });
+      if (!ok) return;
+      const { error } = await state.supabase.from('equipment').update({
+        status_aset: 'DECOMMISSIONED', decommission_ref: ref,
+        decommission_tgl: document.getElementById('dc-tgl')?.value || null,
+        decommission_catatan: (document.getElementById('dc-cat')?.value || '').trim() || null,
+      }).eq('id', eqId);
+      if (error) { toast('Gagal: ' + error.message, 'error'); return; }
+      logActivity('decommissioned', 'equipment', eqId, window.__currentEq?.tag_number, { ref });
+      closeModal();
+      toast('Unit di-decommission (diarsip).', 'success');
+      airReloadCurrentEq(eqId);
+    }
+    window.saveDecommission = saveDecommission;
+    // Dipanggil sebelum hapus equipment: unit yang punya riwayat diarahkan ke Decommissioning.
+    // Mengembalikan teks riwayat (string) kalau tidak boleh dihapus, null kalau boleh / fungsi belum ada.
+    async function airRiwayatEquipment(id) {
+      try {
+        const { data, error } = await state.supabase.rpc('air_equipment_punya_riwayat', { p_equipment_id: id });
+        if (error) return null;
+        return data || null;
+      } catch { return null; }
+    }
+
     function airOpenPanduan() {
       closeModal();
       navigate('panduan');
@@ -8288,6 +8641,7 @@
         if (critRes.error) throw critRes.error;
         const strats = stratRes?.data || [];
         const lastStrat = strats[0];
+        const lifecycleHtml = await airLifecycleCardsHtml(eq).catch(() => '');
         if (integRes.error) throw integRes.error;
         const crits = critRes.data || [];
         const integs = integRes.data || [];
@@ -8383,6 +8737,8 @@
                 <div class="mt-1 space-y-1">${strats.map(x => `<div class="text-xs flex items-center gap-2">${fmtDate(x.tanggal)} ${stratBadge(x.hasil)} <span class="text-slate-500">${escapeHtml(x.penilai || '')}</span>
                   ${isAdmin ? `<button onclick="airDeleteAssessment('maintenance_strategy_assessment','${x.id}','${eq.id}')" class="text-red-600 hover:underline">Hapus</button>` : ''}</div>`).join('')}</div></details>` : ''}`,
               can ? `<button onclick="openStrategiWizard('${eq.id}')" class="px-2.5 py-1 bg-navy hover:bg-navy/80 text-white rounded text-xs font-semibold">${eq.strategi_pemeliharaan ? '↻ Nilai Ulang' : '+ Tentukan'}</button>` : '')}
+
+            ${lifecycleHtml}
 
             ${card('Klasifikasi Aset', `
               ${infoRow('Kategori Aset', eq.kategori_aset ? `${escapeHtml(eq.kategori_aset)} — ${escapeHtml(airKategoriNama(eq.kategori_aset) || '')}` : '<span class="text-amber-700 text-sm">Belum diklasifikasi</span>')}
@@ -8644,22 +9000,23 @@
         if (error) throw error;
         state.__airAll = data || [];
         const since12 = new Date(); since12.setFullYear(since12.getFullYear() - 1);
-        const [kand, rcaAktif, belumKlas, spVital] = await Promise.all([
+        const [kand, rcaAktif, belumKlas, spVital, life] = await Promise.all([
           state.supabase.from('v_air_repetitive_kandidat').select('*').order('jumlah', { ascending: false }),
           state.supabase.from('rca_records').select('id, equipment_id, failure_date, failure_description, status, pemicu').neq('status', 'CLOSED').order('failure_date', { ascending: false }),
           state.supabase.from('downtime_events').select('id, equipment_id, equipment_tag, equipment_name, start_at, end_at, category, notes')
             .in('category', AIR_FAILURE_CATS).is('failure_mode', null).gte('start_at', since12.toISOString()).order('start_at', { ascending: false }).limit(300),
           state.supabase.from('v_sparepart_vis').select('id, part_number, description, stok, stok_minimum, status_stok, alert_vital_habis, alert_vital_rendah')
             .or('alert_vital_habis.eq.true,alert_vital_rendah.eq.true').order('part_number'),
+          state.supabase.from('v_air_lifecycle_alert').select('*').order('tanggal'),
         ]);
-        state.__airExtra = { kandidat: kand.data || [], rca: rcaAktif.data || [], belumKlas: belumKlas.data || [], spVital: spVital.data || [] };
+        state.__airExtra = { kandidat: kand.data || [], rca: rcaAktif.data || [], belumKlas: belumKlas.data || [], spVital: spVital.data || [], life: life.data || [] };
         state.__airWork = await airWorklistData().catch(() => null);
         if (state.airScope == null) state.airScope = 'lingkup';
         state.airCell = null;
         airPaintDashboard(host);
-        if (window.__airScrollTo === 'dt') {
-          const el = document.getElementById('air-sec-dt');
-          if (el) { el.open = true; setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100); }
+        if (window.__airScrollTo) {
+          const el = document.getElementById('air-sec-' + window.__airScrollTo);
+          if (el) { if ('open' in el) el.open = true; setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100); }
         }
         window.__airScrollTo = null;
       } catch (err) {
@@ -8842,7 +9199,23 @@
               <td class="px-2 py-1.5 text-xs font-semibold ${r.alert_vital_habis ? 'text-red-700' : 'text-amber-700'}">${r.alert_vital_habis ? '🔴 Habis' : '🟠 ≤ minimum'}</td>
             </tr>`).join('')}</tbody></table></div>` : '<div class="text-sm text-slate-400 italic">Semua spare part Vital aman. 👍</div>'}
         </div>`;
+      const lf = x.life || [];
+      const lfLabel = { IZIN: '📜 Izin', BATAS_LAYAN: '⏳ Batas layan', RLA_BERIKUTNYA: '🔁 RLA' };
+      const lfHtml = `
+        <div id="air-sec-life" class="bg-white border ${lf.some(r => r.status === 'KEDALUWARSA' || r.status === 'LEWAT') ? 'border-red-300' : 'border-slate-200'} rounded-xl p-4">
+          <h4 class="font-bold text-navy text-sm uppercase tracking-wider mb-1">📜 Izin Operasi & Umur Layan (${lf.length})</h4>
+          <div class="text-[11px] text-slate-400 mb-2">Izin kedaluwarsa / habis ≤ 60 hari, batas layan RLA & jadwal RLA ≤ 90 hari. Unit vital ditandai ★.</div>
+          ${lf.length ? `<div class="overflow-x-auto"><table class="w-full text-sm">${th(['Jenis', 'Unit', 'Item', 'Tanggal', 'Status'])}<tbody>${lf.map(r => `
+            <tr class="border-b border-slate-100 hover:bg-slate-50 cursor-pointer" onclick="setEquipmentView('detail','${r.equipment_id}','${r.tipe === 'IZIN' ? 'sertifikasi' : 'air'}')">
+              <td class="px-2 py-1.5 text-xs whitespace-nowrap">${lfLabel[r.tipe]}</td>
+              <td class="px-2 py-1.5 font-semibold text-navy whitespace-nowrap">${escapeHtml(r.tag_number)}${r.is_vital ? ' <span class="text-red-700">★</span>' : ''}</td>
+              <td class="px-2 py-1.5 text-xs">${escapeHtml(r.item || '')}</td>
+              <td class="px-2 py-1.5 text-xs whitespace-nowrap">${fmtDate(r.tanggal)}</td>
+              <td class="px-2 py-1.5 text-xs font-semibold whitespace-nowrap ${r.sisa_hari < 0 ? 'text-red-700' : 'text-amber-700'}">${r.sisa_hari < 0 ? `lewat ${-r.sisa_hari} hari` : `${r.sisa_hari} hari lagi`}</td>
+            </tr>`).join('')}</tbody></table></div>` : '<div class="text-sm text-slate-400 italic">Tidak ada izin / umur layan yang mendekati batas. 👍</div>'}
+        </div>`;
       return `
+        ${lfHtml}
         ${spHtml}
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div class="bg-white border border-slate-200 rounded-xl p-4">
@@ -8877,7 +9250,7 @@
       switch (state.equipmentDetailTab) {
         case 'info':        c.innerHTML = renderInfoTab(eq); break;
         case 'air':         c.innerHTML = '<div class="text-slate-400">Memuat…</div>'; renderAirTab(eq, c); break;
-        case 'sertifikasi': c.innerHTML = renderSertifikasiTab(eq); break;
+        case 'sertifikasi': c.innerHTML = '<div class="text-slate-400">Memuat…</div>'; renderSertifikasiTab(eq, c); break;
         case 'maintenance': c.innerHTML = '<div class="text-slate-400">Memuat…</div>'; renderMaintenanceTab(eq, c); break;
         case 'sos':         c.innerHTML = '<div class="text-slate-400">Memuat…</div>'; renderSosTab(eq, c); break;
         case 'dokumen':     c.innerHTML = '<div class="text-slate-400">Memuat…</div>'; renderDokumenTab(eq, c); break;
@@ -9044,7 +9417,7 @@
       return allSectionsHtml + riskSectionHtml;
     }
 
-    function renderSertifikasiTab(eq) {
+    function renderSertifikasiTabLama(eq) {
       const skpiDays = daysUntil(eq.skpi_end_date);
       const sertDays = daysUntil(eq.tgl_expired_sertifikat);
       const skpiAlert = skpiDays != null
@@ -10976,6 +11349,21 @@
     // 9g. DELETE / MUTASI / MAINTENANCE / DOCUMENT ACTIONS
     // ============================================================
     async function confirmDeleteEquipment(id, tag) {
+      // Pedoman AIR: unit yang punya riwayat tidak dihapus, tapi di-decommission (arsip)
+      const riwayat = await airRiwayatEquipment(id);
+      if (riwayat) {
+        openModal({
+          title: '🗄️ Tidak bisa dihapus',
+          maxWidth: 'max-w-md',
+          body: `<div class="text-sm text-slate-700 space-y-2">
+            <p><b>${escapeHtml(tag)}</b> sudah punya riwayat: <b>${escapeHtml(riwayat)}</b>.</p>
+            <p>Sesuai Pedoman AIR, data historis tidak dihapus. Gunakan <b>Decommission</b> (tab 🧭 AIR) untuk mengarsipkan unit ini.</p>
+            <p class="text-xs text-slate-500">Hapus hanya untuk unit salah input yang belum punya riwayat apa pun.</p></div>`,
+          footer: `<button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Tutup</button>
+            <button onclick="closeModal(); state.equipmentDetailTab='air'; renderDetailTab(window.__currentEq); openDecommission('${id}')" class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-900 text-white text-sm font-semibold">Buka Decommission</button>`,
+        });
+        return;
+      }
       const ok = await confirmDialog({
         title: 'Hapus Equipment?',
         message: `Yakin mau hapus "${tag}"? Semua maintenance log, mutasi, dan dokumen terkait ikut terhapus. Aksi ini tidak bisa di-undo.`,
@@ -23735,6 +24123,13 @@
             <li>Stok <b>0 karena dipinjamkan</b> (Peminjaman Part di Input Harian, belum ada stok masuk sesudahnya) tampil <b>🤝 Dipinjam</b>, bukan Habis — tidak memicu alert Vital habis.</li>
             <li><b>Usia simpan</b> dihitung FIFO dari catatan stok masuk Gudang (tanda ± = perkiraan dari tgl masuk). Batas: Lubricant 24 bln, Consumable 36 bln, lainnya 60 bln.</li>
             <li><b>📈 Rekomendasi 2 Tahun</b> = pemakaian rata-rata 24 bulan terakhir × 24 + stok minimum − stok sekarang. Bisa diekspor ke Excel untuk usulan pengadaan.</li>
+          </ul>
+          <p class="font-bold text-slate-800 mt-3">Langkah 9 — Izin operasi, umur layan (RLA) & decommissioning</p>
+          <ul class="list-disc pl-5 space-y-0.5">
+            <li><b>Izin operasi</b> (SKPI, PLO, COI, KHI, COC, Load Test, NDT) dikelola di tab <b>📜 Sertifikasi</b>. Saat izin diperpanjang, klik <b>+ Perpanjang / baru</b> — izin lama tetap tersimpan sebagai riwayat. Data SKPI/sertifikat lama sudah dipindahkan otomatis (sertifikat lain masuk jenis "Sertifikat lainnya" — ubah jenisnya bila perlu). Alert dashboard & Telegram tetap jalan seperti biasa.</li>
+            <li><b>RLA</b> — catat hasil RLA di tab 🧭 AIR → kartu <b>Umur Layan</b>: kesimpulan, batas layan baru, jadwal RLA berikutnya, dan tindak lanjut rekomendasi. Kesimpulan <i>Layak dengan syarat</i> / <i>Tidak layak</i> otomatis membuat usulan penilaian integrity (DRAFT) untuk dikonfirmasi. Alert H-90 sebelum batas layan.</li>
+            <li><b>Biaya pemeliharaan per tahun</b> (dari Input Harian Logbook) tampil di sebelahnya — bahan pertimbangan repair vs replace (LCCA) dan usulan penggantian di RKAP.</li>
+            <li><b>Decommissioning</b> (admin): tab 🧭 AIR → <b>🗄️ Decommission unit ini</b>. Sistem menolak kalau masih ada downtime terbuka, RCA belum Closed, WO Logbook terbuka, reservasi aktif, tindak lanjut RLA, atau komponen yang masih aktif. Wajib nomor dokumen persetujuan. Data <b>tidak dihapus</b> — tombol Hapus equipment hanya untuk unit salah input tanpa riwayat.</li>
           </ul>
           <p class="bg-cyan-50 border border-cyan-200 rounded p-2 text-xs"><b>Urutan kerja yang disarankan:</b> mulai dari <b>BOP System</b> & <b>Well Control System</b> → <b>Mobile Rig, Carrier, Hoisting, Mast</b> → <b>Circulating System, Generator Set</b> → sisanya. Salah input? Admin bisa <b>Hapus</b> di tabel riwayat — status unit otomatis kembali ke penilaian sebelumnya.</p>
           <p class="text-xs text-slate-500"><b>Beda dengan Risk Assessment (CoF/PoF) lama:</b> CoF & Risk Level dari pedoman PEP 2023 masih tampil berdampingan. Criticality AIR adalah klasifikasi resmi pedoman yang baru.</p>`)}
