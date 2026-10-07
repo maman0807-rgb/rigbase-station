@@ -7911,6 +7911,208 @@
       } catch (e) { toast('Gagal memuat ulang: ' + e.message, 'error'); }
     }
 
+    // ---------- AIR Tahap 2: referensi failure (ISO 14224) ----------
+    const AIR_FAILURE_CATS = ['breakdown', 'troubleshoot'];
+    const AIR_JENIS_CORR = [['IMMEDIATE', 'Immediate — langsung diperbaiki'], ['DEFERRED', 'Deferred — ditunda / dijadwalkan'], ['REACTIVE', 'Reactive — setelah rusak total']];
+    const AIR_CAUSE_GROUP = { DESIGN: 'Desain', FABRICATION: 'Pabrikasi / Instalasi', OPERATION: 'Operasi', MAINTENANCE: 'Pemeliharaan', MANAGEMENT: 'Manajemen', MISC: 'Lain-lain' };
+    let __airRefs = null;
+    async function airRefs() {
+      if (__airRefs) return __airRefs;
+      try {
+        const [m, c] = await Promise.all([
+          state.supabase.from('ref_failure_mode').select('*').eq('aktif', true).order('urutan'),
+          state.supabase.from('ref_failure_cause').select('*').eq('aktif', true).order('kode'),
+        ]);
+        if (m.error || c.error) throw (m.error || c.error);
+        __airRefs = { modes: m.data || [], causes: c.data || [] };
+      } catch { return { modes: [], causes: [] }; }   // tidak di-cache → dicoba lagi lain kali
+      return __airRefs;
+    }
+
+    // Bagian "Detail Kegagalan" di form Catat/Edit Downtime
+    function airFailureSectionHtml(e, refs) {
+      const inp = 'w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-navy';
+      const causeOpts = Object.entries(AIR_CAUSE_GROUP).map(([g, gl]) => {
+        const items = refs.causes.filter(c => c.kelompok === g);
+        return items.length ? `<optgroup label="${gl}">${items.map(c => `<option value="${c.kode}" ${e.failure_cause === c.kode ? 'selected' : ''}>${c.kode} ${escapeHtml(c.nama)} — ${escapeHtml(c.deskripsi || '')}</option>`).join('')}</optgroup>` : '';
+      }).join('');
+      return `
+        <div id="dt-failure" class="border-2 border-red-200 bg-red-50/40 rounded-lg p-3 space-y-2" hidden>
+          <div class="text-xs font-bold text-red-800 uppercase">🧭 Detail Kegagalan (ISO 14224 — wajib, Pedoman AIR)</div>
+          <div><label class="text-xs text-slate-600 font-semibold">Failure mode * <span class="font-normal text-slate-400">— gejala kegagalan yang terlihat</span></label>
+            <select id="dt-fmode" class="${inp}">
+              <option value="">— pilih failure mode —</option>
+              ${refs.modes.map(m => `<option value="${m.kode}" ${e.failure_mode === m.kode ? 'selected' : ''}>${m.kode} — ${escapeHtml(m.nama)} (${escapeHtml(m.deskripsi || '')})</option>`).join('')}
+            </select></div>
+          <div><label class="text-xs text-slate-600 font-semibold">Komponen / sub-unit yang gagal</label>
+            <select id="dt-komponen" class="${inp}"><option value="">— unit itu sendiri —</option></select>
+            <p class="text-[11px] text-slate-400 mt-0.5">Daftar diambil dari komponen (child equipment) unit ini, mis. Carrier, Engine, Transmisi.</p></div>
+          <div><label class="text-xs text-slate-600 font-semibold">Failure cause <span class="font-normal text-red-700">* wajib saat downtime ditutup (jam selesai diisi)</span></label>
+            <select id="dt-fcause" class="${inp}"><option value="">— belum diketahui —</option>${causeOpts}</select></div>
+          <div class="grid grid-cols-2 gap-2">
+            <div><label class="text-xs text-slate-600 font-semibold">Jenis corrective</label>
+              <select id="dt-jcorr" class="${inp}">
+                <option value="">— otomatis dari kategori —</option>
+                ${AIR_JENIS_CORR.map(([k, l]) => `<option value="${k}" ${e.jenis_corrective === k ? 'selected' : ''}>${l}</option>`).join('')}
+              </select></div>
+            <div><label class="text-xs text-slate-600 font-semibold">Failure code (opsional)</label>
+              <input id="dt-fcode" value="${escapeHtml(e.failure_code || '')}" placeholder="kode internal / SAP damage code" class="${inp}"></div>
+          </div>
+        </div>`;
+    }
+    function airToggleFailureSection() {
+      const sec = document.getElementById('dt-failure');
+      if (sec) sec.hidden = !AIR_FAILURE_CATS.includes(document.getElementById('dt-cat')?.value);
+    }
+    window.airToggleFailureSection = airToggleFailureSection;
+    async function airLoadKomponen(eqId, selectedId) {
+      const sel = document.getElementById('dt-komponen');
+      if (!sel) return;
+      const keep = selectedId !== undefined ? selectedId : sel.value;
+      sel.innerHTML = '<option value="">— unit itu sendiri —</option>';
+      if (!eqId) return;
+      const { data } = await state.supabase.from('equipment').select('id, tag_number, nama_equipment').eq('parent_equipment_id', eqId).order('tag_number');
+      sel.innerHTML += (data || []).map(c => `<option value="${c.id}" ${keep === c.id ? 'selected' : ''}>${escapeHtml(c.tag_number)} — ${escapeHtml(c.nama_equipment || '')}</option>`).join('');
+    }
+    window.airLoadKomponen = airLoadKomponen;
+    // Validasi + payload failure. Kalau referensi gagal dimuat, field failure tidak disentuh (jangan blokir input lapangan).
+    function airCollectFailure() {
+      const v = id => (document.getElementById(id)?.value || '').trim() || null;
+      const base = document.getElementById('dt-sapnotif') ? { sap_notification_no: v('dt-sapnotif') } : {};
+      if (!document.getElementById('dt-fmode') || !__airRefs?.modes?.length) return { ok: true, payload: base };
+      const cat = v('dt-cat');
+      if (!AIR_FAILURE_CATS.includes(cat)) {
+        return { ok: true, payload: { ...base, failure_mode: null, failure_cause: null, failure_code: null, komponen_id: null, jenis_corrective: null } };
+      }
+      const p = { ...base, failure_mode: v('dt-fmode'), failure_cause: v('dt-fcause'), failure_code: v('dt-fcode'), komponen_id: v('dt-komponen'), jenis_corrective: v('dt-jcorr') };
+      if (!p.failure_mode) return { ok: false, msg: 'Failure mode wajib diisi untuk Breakdown/Troubleshoot (Pedoman AIR).' };
+      if (v('dt-end') && !p.failure_cause) return { ok: false, msg: 'Downtime ditutup (jam selesai diisi): failure cause wajib diisi.' };
+      return { ok: true, payload: p };
+    }
+    function airAfterDowntimeSave() {
+      const host = document.getElementById('ram-content');
+      if (state.ramTab === 'air' && host) renderAirDashboard(host);
+      else renderAvailabilityPage(host);
+    }
+
+    // ---------- Strategi pemeliharaan (Gambar 7) ----------
+    const AIR_STRAT = {
+      REACTIVE:       { label: 'Reactive',       cls: 'bg-slate-200 text-slate-700',   ket: 'Perbaiki setelah rusak (run to failure)' },
+      CBM_PREDICTIVE: { label: 'CBM / Predictive', cls: 'bg-blue-600 text-white',     ket: 'Pantau kondisi (SOS, vibrasi, inspeksi), perbaiki sebelum gagal' },
+      PREVENTIVE:     { label: 'Preventive',     cls: 'bg-green-600 text-white',       ket: 'Pemeliharaan periodik berbasis interval (HM / kalender)' },
+      REDESIGN:       { label: 'Redesign',       cls: 'bg-purple-600 text-white',      ket: 'Tidak ada strategi efektif — perlu modifikasi/desain ulang' },
+    };
+    // ya/tidak: kunci pertanyaan berikutnya, atau '=HASIL'
+    const AIR_M = {
+      m1: { t: 'Apakah kegagalan berdampak signifikan terhadap keselamatan, kesehatan, dan lingkungan?', ya: 'm3', tidak: 'm2' },
+      m2: { t: 'Apakah kegagalan berdampak signifikan terhadap produksi dan menimbulkan biaya signifikan?', ya: 'm3', tidak: '=REACTIVE' },
+      m3: { t: 'Apakah kegagalan dapat dipantau dan diperkirakan kapan terjadinya?', ya: '=CBM_PREDICTIVE', tidak: 'm4' },
+      m4: { t: 'Apakah ada pendekatan interval (periodik) yang dapat mengatasi kegagalan?', ya: '=PREVENTIVE', tidak: '=REDESIGN' },
+    };
+    const AIR_DASAR = [['IOM', 'IOM (Instruction & Operation Manual)'], ['DATA_PABRIKAN', 'Data pabrikan / OEM'], ['FMEA', 'FMEA'], ['RCM', 'RCM'], ['PENGALAMAN', 'Pengalaman lapangan / data historis'], ['LAINNYA', 'Lainnya']];
+    function stratBadge(s) {
+      const m = AIR_STRAT[s];
+      return m ? `<span class="inline-block px-2 py-0.5 rounded text-xs font-bold ${m.cls}">${m.label}</span>` : '<span class="text-slate-300 text-xs">—</span>';
+    }
+    function airStratPath(ans) {
+      const path = []; let k = 'm1'; let hasil = null;
+      while (k) {
+        path.push(k);
+        const a = ans[k];
+        if (a == null) break;
+        const nx = a ? AIR_M[k].ya : AIR_M[k].tidak;
+        if (nx.startsWith('=')) { hasil = nx.slice(1); break; }
+        k = nx;
+      }
+      return { path, hasil };
+    }
+    function openStrategiWizard(eqId) {
+      const eq = window.__currentEq;
+      window.__airWiz = {
+        kind: 'strat', eqId, ans: {}, dasar: 'IOM', referensi_dokumen: '',
+        tanggal: new Date().toISOString().slice(0, 10),
+        penilai: state.profile?.full_name || state.profile?.email || '', catatan: '', tag: eq?.tag_number || '',
+      };
+      openModal({
+        title: `Strategi Pemeliharaan — ${eq?.tag_number || ''}`,
+        maxWidth: 'max-w-2xl',
+        body: '<div id="air-wiz-body"></div>',
+        footer: `<button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
+                 <button id="air-wiz-save" onclick="airSaveStrategi()" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy/80 text-white text-sm font-semibold">Simpan</button>`,
+      });
+      airRenderStratWizard();
+    }
+    window.openStrategiWizard = openStrategiWizard;
+    function airRenderStratWizard() {
+      const w = window.__airWiz;
+      const host = document.getElementById('air-wiz-body');
+      if (!host || !w) return;
+      const { path, hasil } = airStratPath(w.ans);
+      w.hasilPreview = hasil;
+      const inp = 'w-full px-3 py-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-navy text-sm bg-white';
+      host.innerHTML = `
+        <div class="text-xs text-slate-500 mb-2">Gambar 7 pedoman. Jawab berdasarkan <b>mode kegagalan dominan</b> unit ini. Data pendukung: IOM & data pabrikan.</div>
+        <div class="space-y-2">
+          ${path.map(k => {
+            const a = w.ans[k];
+            const lbl = v => v.startsWith('=') ? AIR_STRAT[v.slice(1)].label : 'lanjut ' + v.toUpperCase();
+            return `
+            <div class="border ${a == null ? 'border-navy bg-navy/5' : 'border-slate-200'} rounded-lg p-3">
+              <div class="text-sm text-slate-800"><b>${k.toUpperCase()}.</b> ${escapeHtml(AIR_M[k].t)}</div>
+              <div class="flex gap-2 mt-2 flex-wrap">
+                <button onclick="airStratAnswer('${k}',true)" class="px-3 py-1 rounded text-sm font-semibold ${a === true ? 'bg-navy text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}">Ya</button>
+                <button onclick="airStratAnswer('${k}',false)" class="px-3 py-1 rounded text-sm font-semibold ${a === false ? 'bg-navy text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}">Tidak</button>
+                <span class="text-xs text-slate-400 self-center">Ya → ${lbl(AIR_M[k].ya)} · Tidak → ${lbl(AIR_M[k].tidak)}</span>
+              </div>
+            </div>`;
+          }).join('')}
+        </div>
+        <div class="mt-4 p-3 rounded-lg bg-slate-50 border border-slate-200 text-sm">
+          Hasil: ${hasil ? `${stratBadge(hasil)} <span class="text-xs text-slate-600 ml-1">${AIR_STRAT[hasil].ket}</span>` : '<span class="text-slate-400">belum lengkap</span>'}
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4 pt-4 border-t border-slate-200">
+          <label class="text-sm"><span class="text-slate-600 font-medium">Dasar penilaian</span>
+            <select onchange="window.__airWiz.dasar=this.value" class="${inp} mt-1">${AIR_DASAR.map(([k, l]) => `<option value="${k}" ${w.dasar === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+          <label class="text-sm"><span class="text-slate-600 font-medium">Referensi dokumen (IOM / manual)</span>
+            <input value="${escapeHtml(w.referensi_dokumen)}" oninput="window.__airWiz.referensi_dokumen=this.value" placeholder="mis. CAT C15 O&M Manual SEBU…" class="${inp} mt-1"></label>
+          <label class="text-sm"><span class="text-slate-600 font-medium">Tanggal</span>
+            <input type="date" value="${w.tanggal}" onchange="window.__airWiz.tanggal=this.value" class="${inp} mt-1"></label>
+          <label class="text-sm"><span class="text-slate-600 font-medium">Penilai</span>
+            <input value="${escapeHtml(w.penilai)}" oninput="window.__airWiz.penilai=this.value" class="${inp} mt-1"></label>
+          <label class="text-sm md:col-span-2"><span class="text-slate-600 font-medium">Catatan</span>
+            <textarea rows="2" oninput="window.__airWiz.catatan=this.value" class="${inp} mt-1">${escapeHtml(w.catatan)}</textarea></label>
+        </div>`;
+    }
+    window.airStratAnswer = (k, v) => {
+      const w = window.__airWiz;
+      w.ans[k] = v;
+      const { path } = airStratPath(w.ans);
+      Object.keys(w.ans).forEach(x => { if (!path.includes(x)) delete w.ans[x]; });
+      airRenderStratWizard();
+    };
+    async function airSaveStrategi() {
+      const w = window.__airWiz;
+      if (!w?.hasilPreview) { toast('Penilaian belum lengkap.', 'warn'); return; }
+      const row = {
+        equipment_id: w.eqId, tanggal: w.tanggal, m1: w.ans.m1 ?? null, m2: w.ans.m2 ?? null, m3: w.ans.m3 ?? null, m4: w.ans.m4 ?? null,
+        dasar: w.dasar, referensi_dokumen: w.referensi_dokumen || null, penilai: w.penilai || null, catatan: w.catatan || null,
+        created_by: state.user.id,
+      };
+      const btn = document.getElementById('air-wiz-save');
+      if (btn) { btn.disabled = true; btn.textContent = 'Menyimpan…'; }
+      const { data, error } = await state.supabase.from('maintenance_strategy_assessment').insert(row).select().single();
+      if (error) {
+        toast('Gagal simpan: ' + error.message, 'error');
+        if (btn) { btn.disabled = false; btn.textContent = 'Simpan'; }
+        return;
+      }
+      logActivity('created', 'maintenance_strategy_assessment', w.eqId, w.tag, { hasil: data.hasil });
+      closeModal();
+      toast(`Strategi tersimpan: ${AIR_STRAT[data.hasil].label}`, 'success');
+      airReloadCurrentEq(w.eqId);
+    }
+    window.airSaveStrategi = airSaveStrategi;
+
     function airOpenPanduan() {
       closeModal();
       navigate('panduan');
@@ -7921,7 +8123,7 @@
     // ---------- Tab AIR di detail equipment ----------
     async function renderAirTab(eq, container) {
       try {
-        const [critRes, integRes, matRes] = await Promise.all([
+        const [critRes, integRes, matRes, stratRes] = await Promise.all([
           state.supabase.from('criticality_assessment').select('*').eq('equipment_id', eq.id)
             .order('tanggal', { ascending: false }).order('created_at', { ascending: false }),
           state.supabase.from('integrity_assessment').select('*').eq('equipment_id', eq.id)
@@ -7930,8 +8132,12 @@
             ? state.supabase.from('matriks_tindak_lanjut_air').select('*')
                 .eq('criticality', eq.criticality).eq('status_integrity', eq.status_integrity).maybeSingle()
             : Promise.resolve({ data: null }),
+          state.supabase.from('maintenance_strategy_assessment').select('*').eq('equipment_id', eq.id)
+            .order('tanggal', { ascending: false }).order('created_at', { ascending: false }),
         ]);
         if (critRes.error) throw critRes.error;
+        const strats = stratRes?.data || [];
+        const lastStrat = strats[0];
         if (integRes.error) throw integRes.error;
         const crits = critRes.data || [];
         const integs = integRes.data || [];
@@ -8018,6 +8224,15 @@
                 can ? `<button onclick="openIntegrityWizard('${eq.id}')" class="px-2.5 py-1 bg-navy hover:bg-navy/80 text-white rounded text-xs font-semibold">${eq.status_integrity ? '↻ Nilai Ulang' : '+ Nilai'}</button>` : '')}
               ${card('Tindak Lanjut (Tabel 7)', tindakLanjut)}
             </div>
+
+            ${card('Strategi Pemeliharaan (Gambar 7)', `
+              <div class="flex items-center gap-2 flex-wrap mb-1">${stratBadge(eq.strategi_pemeliharaan)}
+                ${eq.strategi_pemeliharaan ? `<span class="text-xs text-slate-600">${AIR_STRAT[eq.strategi_pemeliharaan]?.ket || ''}</span>` : '<span class="text-xs text-slate-400">Belum ditentukan</span>'}</div>
+              ${lastStrat ? `<div class="text-xs text-slate-500">Dinilai ${fmtDate(lastStrat.tanggal)}${lastStrat.penilai ? ' oleh ' + escapeHtml(lastStrat.penilai) : ''} · dasar: ${escapeHtml((AIR_DASAR.find(([k]) => k === lastStrat.dasar) || [])[1] || lastStrat.dasar || '—')}${lastStrat.referensi_dokumen ? ' · ' + escapeHtml(lastStrat.referensi_dokumen) : ''}</div>` : ''}
+              ${strats.length > 1 ? `<details class="mt-2"><summary class="text-xs text-slate-500 cursor-pointer">Riwayat (${strats.length})</summary>
+                <div class="mt-1 space-y-1">${strats.map(x => `<div class="text-xs flex items-center gap-2">${fmtDate(x.tanggal)} ${stratBadge(x.hasil)} <span class="text-slate-500">${escapeHtml(x.penilai || '')}</span>
+                  ${isAdmin ? `<button onclick="airDeleteAssessment('maintenance_strategy_assessment','${x.id}','${eq.id}')" class="text-red-600 hover:underline">Hapus</button>` : ''}</div>`).join('')}</div></details>` : ''}`,
+              can ? `<button onclick="openStrategiWizard('${eq.id}')" class="px-2.5 py-1 bg-navy hover:bg-navy/80 text-white rounded text-xs font-semibold">${eq.strategi_pemeliharaan ? '↻ Nilai Ulang' : '+ Tentukan'}</button>` : '')}
 
             ${card('Klasifikasi Aset', `
               ${infoRow('Kategori Aset', eq.kategori_aset ? `${escapeHtml(eq.kategori_aset)} — ${escapeHtml(airKategoriNama(eq.kategori_aset) || '')}` : '<span class="text-amber-700 text-sm">Belum diklasifikasi</span>')}
@@ -8278,6 +8493,14 @@
         const { data, error } = await state.supabase.from('v_equipment_air_status').select('*').order('tag_number');
         if (error) throw error;
         state.__airAll = data || [];
+        const since12 = new Date(); since12.setFullYear(since12.getFullYear() - 1);
+        const [kand, rcaAktif, belumKlas] = await Promise.all([
+          state.supabase.from('v_air_repetitive_kandidat').select('*').order('jumlah', { ascending: false }),
+          state.supabase.from('rca_records').select('id, equipment_id, failure_date, failure_description, status, pemicu').neq('status', 'CLOSED').order('failure_date', { ascending: false }),
+          state.supabase.from('downtime_events').select('id, equipment_id, equipment_tag, equipment_name, start_at, end_at, category, notes')
+            .in('category', AIR_FAILURE_CATS).is('failure_mode', null).gte('start_at', since12.toISOString()).order('start_at', { ascending: false }).limit(300),
+        ]);
+        state.__airExtra = { kandidat: kand.data || [], rca: rcaAktif.data || [], belumKlas: belumKlas.data || [] };
         if (state.airScope == null) state.airScope = 'lingkup';
         state.airCell = null;
         airPaintDashboard(host);
@@ -8410,6 +8633,8 @@
             ${tableOf(prioritas)}
           </div>
 
+          ${airTahap2Sections()}
+
           ${validasi.length ? `
           <div class="bg-amber-50 border border-amber-200 rounded-xl p-4">
             <h4 class="font-bold text-amber-800 text-sm mb-2">⏰ Criticality kualitatif perlu validasi ulang (${validasi.length})</h4>
@@ -8423,6 +8648,54 @@
         </div>`;
     }
     window.airPaintDashboard = airPaintDashboard;
+
+    function airTahap2Sections() {
+      const x = state.__airExtra || { kandidat: [], rca: [], belumKlas: [] };
+      const tagOf = id => (state.__airAll || []).find(r => r.id === id)?.tag_number || '—';
+      const kandRows = x.kandidat.map(k => `
+        <tr class="border-b border-slate-100 ${k.rca_id ? 'cursor-pointer hover:bg-slate-50' : ''}" ${k.rca_id ? `onclick="openRcaForm('', '${k.rca_id}')"` : ''}>
+          <td class="px-2 py-1.5">${escapeHtml(k.kategori_nama)}</td>
+          <td class="px-2 py-1.5"><b>${escapeHtml(k.failure_mode)}</b> ${escapeHtml(k.failure_mode_nama)}</td>
+          <td class="px-2 py-1.5 text-center"><b class="${k.jumlah >= k.n_min ? 'text-red-700' : 'text-amber-600'}">${k.jumlah}</b>/${k.n_min}</td>
+          <td class="px-2 py-1.5 text-center">${k.jumlah_unit}</td>
+          <td class="px-2 py-1.5 text-xs">${k.rca_id ? '<span class="text-green-700 font-semibold">RCA dibuat →</span>' : (k.jumlah >= k.n_min ? '<span class="text-red-700 font-semibold">wajib RCA</span>' : 'peringatan dini')}</td>
+        </tr>`).join('');
+      const rcaRows = x.rca.map(r => `
+        <tr class="border-b border-slate-100 hover:bg-slate-50 cursor-pointer" onclick="setEquipmentView('detail','${r.equipment_id}','rca')">
+          <td class="px-2 py-1.5 whitespace-nowrap">${fmtDate(r.failure_date)}</td>
+          <td class="px-2 py-1.5 font-semibold text-navy whitespace-nowrap">${escapeHtml(tagOf(r.equipment_id))}</td>
+          <td class="px-2 py-1.5">${escapeHtml((r.failure_description || '').slice(0, 90))}</td>
+          <td class="px-2 py-1.5 text-xs whitespace-nowrap">${RCA_PEMICU[r.pemicu] || ''}</td>
+          <td class="px-2 py-1.5">${rcaStatusBadge(r.status)}</td>
+        </tr>`).join('');
+      const klasRows = x.belumKlas.map(d => `
+        <tr class="border-b border-slate-100">
+          <td class="px-2 py-1.5 whitespace-nowrap">${fmtDate((d.start_at || '').slice(0, 10))}</td>
+          <td class="px-2 py-1.5 font-semibold text-navy whitespace-nowrap">${escapeHtml(d.equipment_tag || tagOf(d.equipment_id))}</td>
+          <td class="px-2 py-1.5 text-xs">${d.category === 'breakdown' ? 'Breakdown' : 'Troubleshoot'}${d.end_at ? '' : ' <span class="text-red-600">(masih down)</span>'}</td>
+          <td class="px-2 py-1.5 text-xs text-slate-600">${escapeHtml((d.notes || '').slice(0, 120))}</td>
+          <td class="px-2 py-1.5 text-right">${isSrMekanikOrAbove() ? `<button onclick="openDowntimeEdit('${d.id}')" class="px-2 py-1 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded text-xs font-semibold whitespace-nowrap">Klasifikasi</button>` : ''}</td>
+        </tr>`).join('');
+      const th = cols => `<thead><tr class="text-left text-xs text-slate-500 border-b">${cols.map(c => `<th class="px-2 py-1">${c}</th>`).join('')}</tr></thead>`;
+      return `
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div class="bg-white border border-slate-200 rounded-xl p-4">
+            <h4 class="font-bold text-navy text-sm uppercase tracking-wider mb-1">🔁 Repetitive Failure (${x.kandidat.length})</h4>
+            <div class="text-[11px] text-slate-400 mb-2">Kategori equipment + failure mode sama, 12 bulan terakhir. ≥3× → RCA DRAFT dibuat otomatis.</div>
+            ${x.kandidat.length ? `<div class="overflow-x-auto"><table class="w-full text-sm">${th(['Kategori', 'Failure mode', 'Jml', 'Unit', ''])}<tbody>${kandRows}</tbody></table></div>` : '<div class="text-sm text-slate-400 italic">Belum ada failure berulang (yang sudah diklasifikasi).</div>'}
+          </div>
+          <div class="bg-white border border-slate-200 rounded-xl p-4">
+            <h4 class="font-bold text-navy text-sm uppercase tracking-wider mb-2">🔎 RCA Aktif (${x.rca.length})</h4>
+            ${x.rca.length ? `<div class="overflow-x-auto"><table class="w-full text-sm">${th(['Tgl', 'Unit', 'Deskripsi', 'Pemicu', 'Status'])}<tbody>${rcaRows}</tbody></table></div>` : '<div class="text-sm text-slate-400 italic">Tidak ada RCA terbuka.</div>'}
+          </div>
+        </div>
+        <details class="bg-white border ${x.belumKlas.length ? 'border-amber-300' : 'border-slate-200'} rounded-xl p-4" ${x.belumKlas.length && x.belumKlas.length <= 15 ? 'open' : ''}>
+          <summary class="font-bold text-navy text-sm cursor-pointer">🏷️ Downtime belum diklasifikasi failure mode — 12 bulan (${x.belumKlas.length})
+            ${x.belumKlas.length ? '<span class="font-normal text-xs text-amber-700 ml-1">belum ikut dihitung repetitive failure</span>' : ''}</summary>
+          <div class="mt-3">${x.belumKlas.length ? `<div class="overflow-x-auto"><table class="w-full text-sm">${th(['Tgl', 'Unit', 'Kategori', 'Catatan', ''])}<tbody>${klasRows}</tbody></table></div>` : '<div class="text-sm text-slate-400 italic">Semua sudah diklasifikasi. 👍</div>'}</div>
+        </details>`;
+    }
+
 
     function renderDetailTab(eq) {
       const c = document.getElementById('detail-tab-content');
@@ -15333,46 +15606,86 @@
     // Trigger otomatis: failure > 1× dalam 12 bulan pada equipment yang sama
     // Metode: 5-Whys + Corrective Action + Verifikasi
     // ============================================================
+    // RCA — Pedoman AIR A4-009/PHE23000/2026-S9 (Fase 36, Tahap 2)
+    // Pemicu: repetitive failure (>=3x, kategori equipment + failure mode sama, 12 bln) → DRAFT otomatis
+    // oleh trigger DB; LPO; atau manual. Alur status DRAFT → ... → CLOSED.
+    const RCA_STATUS = [
+      ['DRAFT',         'Draft',          'bg-slate-200 text-slate-700'],
+      ['ANALISIS',      'Analisis',       'bg-red-100 text-red-700'],
+      ['VERIFIKASI',    'Verifikasi',     'bg-orange-100 text-orange-700'],
+      ['TINDAK_LANJUT', 'Tindak Lanjut',  'bg-amber-100 text-amber-800'],
+      ['MONITORING',    'Monitoring',     'bg-blue-100 text-blue-700'],
+      ['CLOSED',        'Closed',         'bg-green-100 text-green-700'],
+    ];
+    const RCA_PEMICU = { REPETITIVE: '🔁 Repetitive', LPO: '📉 LPO', MANUAL: '✍️ Manual' };
+    function rcaStatusBadge(s) {
+      const m = RCA_STATUS.find(x => x[0] === s);
+      return `<span class="px-2 py-0.5 rounded-full text-xs font-bold ${m ? m[2] : 'bg-slate-100 text-slate-600'}">${escapeHtml(m ? m[1] : (s || '—'))}</span>`;
+    }
+    // Syarat pindah ke status berikutnya (kembali ke status sebelumnya selalu boleh lewat Edit)
+    function rcaNextCheck(r, tindakan) {
+      const idx = RCA_STATUS.findIndex(x => x[0] === r.status);
+      const next = RCA_STATUS[idx + 1]?.[0];
+      if (!next) return { next: null };
+      if (next === 'VERIFIKASI' && !r.root_cause) return { next, err: 'Isi Root Cause dulu (hasil analisis 5-Whys/RCFA).' };
+      if (next === 'TINDAK_LANJUT' && !r.diverifikasi_oleh) return { next, err: 'Isi "Diverifikasi oleh" (Pejabat Berwenang) dulu.' };
+      if (next === 'TINDAK_LANJUT' && !tindakan.length) return { next, err: 'Tambahkan minimal 1 rencana tindak lanjut (SMART).' };
+      if (next === 'MONITORING' && tindakan.some(t => t.status === 'OPEN')) return { next, err: 'Semua tindak lanjut harus Selesai/Batal dulu.' };
+      if (next === 'CLOSED' && !r.monitoring_efektivitas) return { next, err: 'Isi hasil Monitoring Efektivitas dulu.' };
+      return { next };
+    }
+
     async function renderRcaTab(eq, container) {
       container.innerHTML = '<div class="text-slate-400 text-sm py-4 text-center">Memuat RCA…</div>';
       try {
-        // Cek trigger: failure > 1x dalam 12 bulan
         const since12 = new Date(); since12.setFullYear(since12.getFullYear() - 1);
-        const [rcaRes, dtRes] = await Promise.all([
-          state.supabase.from('rca_records').select('*').eq('equipment_id', eq.id).order('failure_date', { ascending: false }),
-          state.supabase.from('downtime_events').select('id, start_at, end_at, category, notes').eq('equipment_id', eq.id)
+        const [rcaRes, dtRes, kandRes, refs] = await Promise.all([
+          state.supabase.from('rca_records').select('*')
+            .or(`equipment_id.eq.${eq.id},equipment_ids.cs.{${eq.id}}`).order('failure_date', { ascending: false }),
+          state.supabase.from('downtime_events').select('id, start_at, end_at, category, notes, failure_mode, failure_cause').eq('equipment_id', eq.id)
             .in('category', FAILURE_CATS).gte('start_at', since12.toISOString()),
+          eq.kategori_id ? state.supabase.from('v_air_repetitive_kandidat').select('*').eq('kategori_id', eq.kategori_id) : Promise.resolve({ data: [] }),
+          airRefs(),
         ]);
+        if (rcaRes.error) throw rcaRes.error;
         const rcaList    = rcaRes.data || [];
         const recentFail = dtRes.data || [];
-        const needsRca   = recentFail.length > 1;
+        const kandidat   = (kandRes.data || []).sort((a, b) => b.jumlah - a.jumlah);
+        const rcaIds = rcaList.map(r => r.id);
+        let tindakanAll = [];
+        if (rcaIds.length) {
+          const { data } = await state.supabase.from('rca_tindakan').select('*').in('rca_id', rcaIds).order('created_at');
+          tindakanAll = data || [];
+        }
+        const modeName = k => refs.modes.find(m => m.kode === k)?.nama || k;
 
-        const statusBadgeRca = (s) => ({
-          'Open':        '<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-red-100 text-red-700">Open</span>',
-          'In Progress': '<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-700">In Progress</span>',
-          'Verified':    '<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-green-100 text-green-700">✅ Verified</span>',
-        }[s] || s);
-
-        const triggerBanner = needsRca ? `
-          <div class="bg-red-50 border border-red-300 rounded-xl p-4 flex items-start gap-3">
-            <span class="text-2xl">🚨</span>
-            <div>
-              <div class="font-bold text-red-800">RCA Trigger — ${recentFail.length}× failure dalam 12 bulan</div>
-              <div class="text-sm text-red-700 mt-1">Pedoman PEP: failure berulang &gt;1× dalam 1 tahun wajib RCA. Buat RCA baru di bawah.</div>
+        const banners = kandidat.map(k => {
+          const wajib = k.jumlah >= k.n_min;
+          return `
+          <div class="${wajib ? 'bg-red-50 border-red-300' : 'bg-amber-50 border-amber-300'} border rounded-xl p-4 flex items-start gap-3">
+            <span class="text-2xl">${wajib ? '🚨' : '⚠️'}</span>
+            <div class="text-sm">
+              <div class="font-bold ${wajib ? 'text-red-800' : 'text-amber-800'}">${wajib ? 'RCA wajib' : 'Peringatan dini'} — ${escapeHtml(k.failure_mode_nama)} ${k.jumlah}× pada ${escapeHtml(k.kategori_nama)} (${k.jumlah_unit} unit) dalam 12 bulan</div>
+              <div class="${wajib ? 'text-red-700' : 'text-amber-700'} mt-1">${wajib
+                ? (k.rca_id ? 'RCA repetitive sudah dibuat otomatis — lihat di bawah.' : 'Pedoman AIR: 3× repetitive failure pada peralatan sejenis wajib RCA.')
+                : `Tinggal ${k.n_min - k.jumlah}× lagi sebelum wajib RCA (Pedoman AIR: 3× pada peralatan sejenis).`}</div>
             </div>
-          </div>` : '';
+          </div>`;
+        }).join('');
 
-        // Riwayat kejadian mentah (bukan cuma angka) — biar kelihatan APA yg rusak tiap kali,
-        // karena tiap equipment pola kerusakannya beda-beda (butuh ini buat isi 5-Whys yg akurat).
+        const unclassified = recentFail.filter(f => !f.failure_mode).length;
         const failListHtml = recentFail.length ? `
           <div class="bg-white border border-slate-200 rounded-xl p-4">
-            <div class="font-semibold text-slate-700 text-sm mb-3">📋 Riwayat Kejadian Breakdown/Troubleshoot (12 bulan terakhir)</div>
+            <div class="font-semibold text-slate-700 text-sm mb-3">📋 Riwayat Breakdown/Troubleshoot unit ini (12 bulan terakhir)
+              ${unclassified ? `<span class="ml-2 text-xs font-normal text-amber-700">${unclassified} belum diisi failure mode — tidak ikut dihitung repetitive</span>` : ''}</div>
             <div class="space-y-2">
               ${recentFail.slice().sort((a, b) => new Date(b.start_at) - new Date(a.start_at)).map(f => {
                 const dur = f.end_at ? fmtH((new Date(f.end_at) - new Date(f.start_at)) / 3600000) : 'ongoing';
-                return `<div class="flex items-start gap-2 text-sm border-b border-slate-100 pb-2 last:border-0 last:pb-0">
+                return `<div class="flex items-start gap-2 text-sm border-b border-slate-100 pb-2 last:border-0 last:pb-0 flex-wrap">
                   <span class="text-xs font-mono text-slate-400 whitespace-nowrap pt-0.5">${fmtDate((f.start_at || '').slice(0, 10))}</span>
-                  <span class="px-1.5 py-0.5 rounded text-[10px] font-bold whitespace-nowrap ${f.category === 'breakdown' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}">${f.category === 'breakdown' ? 'Breakdown' : 'Troubleshoot'}</span>
+                  <span class="px-1.5 py-0.5 rounded text-[10px] font-bold whitespace-nowrap ${f.category === 'breakdown' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}">${f.category === 'breakdown' ? 'BREAKDOWN' : 'TROUBLESHOOT'}</span>
+                  ${f.failure_mode ? `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700" title="${escapeHtml(modeName(f.failure_mode))}">${escapeHtml(f.failure_mode)}</span>`
+                    : (isSrMekanikOrAbove() ? `<button onclick="openDowntimeEdit('${f.id}')" class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 hover:bg-amber-200">+ failure mode</button>` : '')}
                   <span class="text-slate-600 flex-1">${escapeHtml((f.notes || '-').slice(0, 200))}</span>
                   <span class="text-xs text-slate-400 whitespace-nowrap pt-0.5">${dur}</span>
                 </div>`;
@@ -15380,22 +15693,29 @@
             </div>
           </div>` : '';
 
-        const rcaRows = rcaList.length ? rcaList.map(r => `
+        const rcaRows = rcaList.length ? rcaList.map(r => {
+          const tind = tindakanAll.filter(t => t.rca_id === r.id);
+          const done = tind.filter(t => t.status !== 'OPEN').length;
+          const chk = rcaNextCheck(r, tind);
+          const nextLbl = chk.next ? RCA_STATUS.find(x => x[0] === chk.next)[1] : null;
+          return `
           <div class="bg-white border border-slate-200 rounded-xl p-4">
-            <div class="flex items-start justify-between gap-2 mb-3">
+            <div class="flex items-start justify-between gap-2 mb-2 flex-wrap">
               <div>
                 <div class="font-bold text-slate-800">${fmtDate(r.failure_date)} — ${escapeHtml(r.failure_description || '—')}</div>
-                <div class="text-xs text-slate-500 mt-0.5">Dibuat: ${fmtDate(r.created_at?.slice(0,10))} · PIC: ${escapeHtml(r.pic_action || '—')}</div>
+                <div class="text-xs text-slate-500 mt-0.5">${RCA_PEMICU[r.pemicu] || ''}${r.failure_mode ? ` · ${escapeHtml(modeName(r.failure_mode))}` : ''}${(r.equipment_ids || []).length > 1 ? ` · ${r.equipment_ids.length} unit` : ''}${(r.downtime_event_ids || []).length ? ` · ${r.downtime_event_ids.length} kejadian` : ''}${r.lpo ? ' · <b class="text-red-700">LPO</b>' : ''}</div>
               </div>
-              ${statusBadgeRca(r.status)}
+              ${rcaStatusBadge(r.status)}
             </div>
-            ${r.root_cause ? `<div class="text-sm text-slate-700 mb-2"><b>Root Cause:</b> ${escapeHtml(r.root_cause)}</div>` : ''}
-            ${r.corrective_action ? `<div class="text-sm text-slate-700 mb-2"><b>Corrective Action:</b> ${escapeHtml(r.corrective_action)}</div>` : ''}
-            <div class="flex gap-2 mt-2">
-              ${canWrite() ? `<button onclick="openRcaForm('${eq.id}','${r.id}')" class="px-3 py-1.5 bg-navy text-white rounded-lg text-xs font-semibold">✏ Edit</button>` : ''}
-              ${canWrite() && r.status !== 'Verified' ? `<button onclick="verifyRca('${r.id}','${eq.id}')" class="px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-semibold">✅ Verify</button>` : ''}
+            ${r.root_cause ? `<div class="text-sm text-slate-700 mb-1"><b>Root Cause:</b> ${escapeHtml(r.root_cause)}</div>` : ''}
+            ${r.diverifikasi_oleh ? `<div class="text-xs text-slate-500 mb-1">Diverifikasi: ${escapeHtml(r.diverifikasi_oleh)}${r.actual_verification_date ? ' · ' + fmtDate(r.actual_verification_date) : ''}</div>` : ''}
+            ${tind.length ? `<div class="text-xs text-slate-600 mb-1">Tindak lanjut: <b>${done}/${tind.length}</b> selesai${tind.filter(t => t.status === 'OPEN' && t.due_date && t.due_date < new Date().toISOString().slice(0, 10)).length ? ' · <span class="text-red-700 font-bold">ada yang lewat due date</span>' : ''}</div>` : ''}
+            <div class="flex gap-2 mt-2 flex-wrap">
+              ${canWrite() ? `<button onclick="openRcaForm('${eq.id}','${r.id}')" class="px-3 py-1.5 bg-navy text-white rounded-lg text-xs font-semibold">✏ Buka / Edit</button>` : ''}
+              ${canWrite() && chk.next ? `<button onclick="advanceRca('${r.id}','${eq.id}')" class="px-3 py-1.5 ${chk.err ? 'bg-slate-100 text-slate-500' : 'bg-green-600 text-white'} rounded-lg text-xs font-semibold" title="${escapeHtml(chk.err || '')}">→ ${nextLbl}</button>` : ''}
             </div>
-          </div>`).join('') :
+          </div>`;
+        }).join('') :
           `<div class="text-sm text-slate-400 italic py-4 text-center">Belum ada record RCA untuk equipment ini.</div>`;
 
         container.innerHTML = `
@@ -15403,25 +15723,53 @@
             <div class="flex items-center justify-between flex-wrap gap-2">
               <div>
                 <h4 class="font-bold text-slate-800 text-base">🔎 Root Cause Analysis</h4>
-                <p class="text-xs text-slate-500 mt-0.5">Pedoman PEP: trigger wajib bila failure &gt;1× dalam 12 bulan · Metode: 5-Whys</p>
+                <p class="text-xs text-slate-500 mt-0.5">Pedoman AIR: wajib bila 3× repetitive failure pada peralatan sejenis (dibuat otomatis), LPO, atau atas kebutuhan.</p>
               </div>
-              ${canWrite() ? `<button onclick="openRcaForm('${eq.id}',null)" class="bg-safety hover:bg-safety/90 text-white px-4 py-2 rounded-lg text-sm font-semibold">+ Buat RCA</button>` : '<span class="text-xs text-slate-400 italic">👁 Mode lihat saja</span>'}
+              ${canWrite() ? `<button onclick="openRcaForm('${eq.id}',null)" class="bg-safety hover:bg-safety/90 text-white px-4 py-2 rounded-lg text-sm font-semibold">+ Buat RCA</button>` : '<span class="text-xs text-slate-400">Hanya Sr Mekanik ke atas yang dapat membuat RCA</span>'}
             </div>
-            ${triggerBanner}
+            ${banners}
             ${failListHtml}
             <div class="space-y-3">${rcaRows}</div>
           </div>`;
       } catch(e) {
-        container.innerHTML = `<div class="bg-red-50 text-red-700 p-4 rounded-xl text-sm">Gagal memuat RCA: ${escapeHtml(e.message)}</div>`;
+        container.innerHTML = `<div class="bg-red-50 text-red-700 p-4 rounded-xl text-sm">Gagal memuat RCA: ${escapeHtml(e.message)}<br><small>⚠️ Pastikan <b>fase36_air_tahap2.sql</b> sudah dijalankan.</small></div>`;
       }
     }
     window.renderRcaTab = renderRcaTab;
 
+    function rcaRefreshAfterSave() {
+      const c = document.getElementById('detail-tab-content');
+      if (c && window.__currentEq && state.equipmentDetailTab === 'rca') renderRcaTab(window.__currentEq, c);
+      else if (state.ramTab === 'air' && document.getElementById('ram-content')) renderAirDashboard(document.getElementById('ram-content'));
+    }
+
+    async function advanceRca(rcaId, eqId) {
+      const [{ data: r }, { data: tind }] = await Promise.all([
+        state.supabase.from('rca_records').select('*').eq('id', rcaId).single(),
+        state.supabase.from('rca_tindakan').select('*').eq('rca_id', rcaId),
+      ]);
+      if (!r) return;
+      const chk = rcaNextCheck(r, tind || []);
+      if (!chk.next) return;
+      if (chk.err) { toast(chk.err, 'warn'); openRcaForm(eqId, rcaId); return; }
+      const lbl = RCA_STATUS.find(x => x[0] === chk.next)[1];
+      const ok = await confirmDialog({ title: 'Lanjutkan RCA', message: `Pindahkan status RCA ke "${lbl}"?`, confirmText: 'Lanjut' });
+      if (!ok) return;
+      const upd = { status: chk.next };
+      if (chk.next === 'TINDAK_LANJUT' && !r.actual_verification_date) upd.actual_verification_date = new Date().toISOString().slice(0, 10);
+      if (chk.next === 'CLOSED') upd.tgl_closed = new Date().toISOString().slice(0, 10);
+      const { error } = await state.supabase.from('rca_records').update(upd).eq('id', rcaId);
+      if (error) { toast('Gagal: ' + error.message, 'error'); return; }
+      toast(`RCA → ${lbl}`, 'success');
+      rcaRefreshAfterSave();
+    }
+    window.advanceRca = advanceRca;
+
     function openRcaForm(eqId, rcaId) {
       const isEdit = !!rcaId;
       openModal({
-        title: isEdit ? '✏ Edit RCA' : '+ Buat RCA Baru',
-        maxWidth: 'max-w-2xl',
+        title: isEdit ? '🔎 RCA' : '+ Buat RCA Baru',
+        maxWidth: 'max-w-3xl',
         body: '<div id="rca-form-body"><div class="text-slate-400 text-sm text-center py-4">Memuat…</div></div>',
       });
       loadRcaForm(eqId, rcaId);
@@ -15430,75 +15778,171 @@
 
     async function loadRcaForm(eqId, rcaId) {
       const body = document.getElementById('rca-form-body');
-      let r = { failure_date: new Date().toISOString().slice(0,10), status: 'Open' };
+      const refs = await airRefs();
+      let r = { failure_date: new Date().toISOString().slice(0,10), status: 'ANALISIS', pemicu: 'MANUAL' };
+      let tind = [];
       if (rcaId) {
-        const { data } = await state.supabase.from('rca_records').select('*').eq('id', rcaId).single();
+        const [{ data }, { data: t }] = await Promise.all([
+          state.supabase.from('rca_records').select('*').eq('id', rcaId).single(),
+          state.supabase.from('rca_tindakan').select('*').eq('rca_id', rcaId).order('created_at'),
+        ]);
         if (data) r = data;
+        tind = t || [];
       }
+      window.__rcaTind = tind.map(x => ({ ...x }));
+      window.__rcaTindDeleted = [];
+      const inp = 'w-full border border-slate-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-navy';
       const fld = (lbl, name, type='text', val='', placeholder='') =>
         `<div><label class="block text-xs font-semibold text-slate-600 mb-1">${lbl}</label>
          <${type==='textarea'?'textarea':'input'} name="${name}" ${type!=='textarea'?`type="${type}"`:'rows="2"'}
-           class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-navy"
-           placeholder="${placeholder}" ${type!=='textarea'?`value="${escapeHtml(String(val||''))}"`:''}>
+           class="${inp}" placeholder="${placeholder}" ${type!=='textarea'?`value="${escapeHtml(String(val||''))}"`:''}>
          ${type==='textarea'?escapeHtml(String(val||''))+'</textarea>':''}</div>`;
+      const step = (no, title, html) => `
+        <div class="border border-slate-200 rounded-lg p-3 space-y-2">
+          <div class="text-xs font-bold text-navy uppercase tracking-wider">${no}. ${title}</div>${html}</div>`;
       body.innerHTML = `
-        <form id="rca-form" onsubmit="submitRcaForm(event,'${eqId}','${rcaId||''}')">
-          <div class="grid grid-cols-2 gap-3">
+        <form id="rca-form" onsubmit="submitRcaForm(event,'${eqId}','${rcaId||''}')" class="space-y-3">
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
             ${fld('Tanggal Failure *','failure_date','date', r.failure_date||'')}
             <div><label class="block text-xs font-semibold text-slate-600 mb-1">Status</label>
-              <select name="status" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-navy">
-                ${['Open','In Progress','Verified'].map(s=>`<option ${r.status===s?'selected':''}>${s}</option>`).join('')}
+              <select name="status" class="${inp} bg-white">
+                ${RCA_STATUS.map(([k, l]) => `<option value="${k}" ${r.status===k?'selected':''}>${l}</option>`).join('')}
+              </select></div>
+            <div><label class="block text-xs font-semibold text-slate-600 mb-1">Pemicu</label>
+              <select name="pemicu" class="${inp} bg-white" ${r.pemicu === 'REPETITIVE' ? 'disabled' : ''}>
+                ${Object.entries(RCA_PEMICU).filter(([k]) => k !== 'REPETITIVE' || r.pemicu === 'REPETITIVE').map(([k, l]) => `<option value="${k}" ${r.pemicu===k?'selected':''}>${l}</option>`).join('')}
+              </select></div>
+            <div><label class="block text-xs font-semibold text-slate-600 mb-1">Failure mode</label>
+              <select name="failure_mode" class="${inp} bg-white" ${r.pemicu === 'REPETITIVE' ? 'disabled' : ''}>
+                <option value="">—</option>
+                ${refs.modes.map(m => `<option value="${m.kode}" ${r.failure_mode===m.kode?'selected':''}>${m.kode} — ${escapeHtml(m.nama)}</option>`).join('')}
               </select></div>
           </div>
           ${fld('Deskripsi Failure *','failure_description','textarea', r.failure_description||'','Apa yang terjadi?')}
-          <div class="bg-slate-50 rounded-lg p-3 space-y-2">
-            <div class="text-xs font-bold text-slate-700 uppercase tracking-wider">5-Whys</div>
+
+          ${step(1, 'Ringkasan tindakan penanganan', fld('Penanganan yang sudah dilakukan', 'ringkasan_penanganan', 'textarea', r.ringkasan_penanganan || '', 'mis. ganti seal, unit kembali operasi'))}
+
+          ${step(2, 'Analisis akar penyebab (RCFA — 5-Whys)', `
             ${[1,2,3,4,5].map(i => fld(`Why ${i}`, `why_${i}`, 'textarea', r[`why_${i}`]||'', `Kenapa? (${i}/5)`)).join('')}
-          </div>
-          ${fld('Root Cause','root_cause','textarea', r.root_cause||'','Kesimpulan akar masalah')}
-          ${fld('Corrective Action','corrective_action','textarea', r.corrective_action||'','Tindakan perbaikan')}
-          <div class="grid grid-cols-2 gap-3">
-            ${fld('PIC Action','pic_action','text', r.pic_action||'')}
-            ${fld('Target Verifikasi','target_verification_date','date', r.target_verification_date||'')}
-          </div>
+            ${fld('Root Cause','root_cause','textarea', r.root_cause||'','Kesimpulan akar masalah — yang bisa dikendalikan (SOP, metode, spek part, dll)')}`)}
+
+          ${step(3, 'Verifikasi oleh Pejabat Berwenang', `
+            <div class="grid grid-cols-2 gap-3">
+              ${fld('Diverifikasi oleh','diverifikasi_oleh','text', r.diverifikasi_oleh||'','nama & jabatan')}
+              ${fld('Tanggal verifikasi','actual_verification_date','date', r.actual_verification_date||'')}
+            </div>`)}
+
+          ${step(4, 'Rencana tindak lanjut (SMART)', `
+            <div class="text-[11px] text-slate-500">Specific · Measurable · Achievable · Realistic · Time-bound — tiap aksi punya PIC, ukuran keberhasilan, dan due date.</div>
+            <div id="rca-tind-list" class="space-y-2"></div>
+            <button type="button" onclick="rcaTindAdd()" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs font-semibold">+ Tambah aksi</button>
+            ${r.corrective_action ? `<div class="text-xs text-slate-500 bg-slate-50 rounded p-2"><b>Corrective action (format lama):</b> ${escapeHtml(r.corrective_action)}${r.pic_action ? ` — PIC ${escapeHtml(r.pic_action)}` : ''}</div>` : ''}`)}
+
+          ${step(5, 'Monitoring efektivitas', fld('Hasil monitoring setelah tindak lanjut', 'monitoring_efektivitas', 'textarea', r.monitoring_efektivitas || '', 'mis. 3 bulan setelah SOP baru, tidak ada kerusakan berulang'))}
+
+          <details class="border border-slate-200 rounded-lg p-3" ${r.lpo ? 'open' : ''}>
+            <summary class="text-xs font-bold text-slate-600 uppercase cursor-pointer">LPO (Loss Production Opportunity)</summary>
+            <label class="flex items-center gap-2 text-sm mt-2"><input type="checkbox" name="lpo" ${r.lpo ? 'checked' : ''}> Kejadian ini menyebabkan unplanned LPO</label>
+            <div class="grid grid-cols-3 gap-3 mt-2">
+              ${fld('BOPD','lpo_bopd','number', r.lpo_bopd ?? '')}
+              ${fld('MMSCFD','lpo_mmscfd','number', r.lpo_mmscfd ?? '')}
+              ${fld('% produksi harian WK','lpo_persen_produksi','number', r.lpo_persen_produksi ?? '')}
+            </div>
+            <div class="text-[11px] text-red-700 mt-2">Wajib lapor awal via PROPAR & ke SKK Migas bila ≥ 3.000 BOPD, ≥ 30 MMSCFD, atau ≥ 10% produksi harian WK.</div>
+          </details>
+
           <div class="flex gap-2 justify-end pt-2">
             <button type="button" onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 text-sm font-semibold">Batal</button>
             <button type="submit" class="px-5 py-2 rounded-lg bg-safety text-white text-sm font-semibold hover:bg-safety/90">Simpan RCA</button>
           </div>
         </form>`;
+      rcaTindRender();
     }
     window.loadRcaForm = loadRcaForm;
+
+    function rcaTindRender() {
+      const host = document.getElementById('rca-tind-list');
+      if (!host) return;
+      const list = window.__rcaTind || [];
+      const inp = 'w-full border border-slate-300 rounded px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-navy';
+      host.innerHTML = list.length ? list.map((t, i) => `
+        <div class="grid grid-cols-12 gap-1 items-start bg-slate-50 rounded p-2">
+          <textarea rows="1" placeholder="Aksi (specific)" oninput="window.__rcaTind[${i}].aksi=this.value" class="${inp} col-span-12 md:col-span-4">${escapeHtml(t.aksi || '')}</textarea>
+          <input placeholder="Ukuran keberhasilan" value="${escapeHtml(t.ukuran_keberhasilan || '')}" oninput="window.__rcaTind[${i}].ukuran_keberhasilan=this.value" class="${inp} col-span-6 md:col-span-3">
+          <input placeholder="PIC" value="${escapeHtml(t.pic || '')}" oninput="window.__rcaTind[${i}].pic=this.value" class="${inp} col-span-6 md:col-span-2">
+          <input type="date" value="${t.due_date || ''}" onchange="window.__rcaTind[${i}].due_date=this.value||null" class="${inp} col-span-5 md:col-span-1" title="Due date">
+          <select onchange="window.__rcaTind[${i}].status=this.value" class="${inp} col-span-5 md:col-span-1 bg-white">
+            ${[['OPEN','Open'],['SELESAI','Selesai'],['BATAL','Batal']].map(([k, l]) => `<option value="${k}" ${t.status===k?'selected':''}>${l}</option>`).join('')}
+          </select>
+          <button type="button" onclick="rcaTindRemove(${i})" class="col-span-2 md:col-span-1 text-red-600 text-xs hover:underline">Hapus</button>
+        </div>`).join('') : '<div class="text-xs text-slate-400 italic">Belum ada aksi.</div>';
+    }
+    window.rcaTindAdd = () => { (window.__rcaTind = window.__rcaTind || []).push({ aksi: '', status: 'OPEN' }); rcaTindRender(); };
+    window.rcaTindRemove = (i) => {
+      const t = window.__rcaTind[i];
+      if (t?.id) window.__rcaTindDeleted.push(t.id);
+      window.__rcaTind.splice(i, 1);
+      rcaTindRender();
+    };
 
     async function submitRcaForm(e, eqId, rcaId) {
       e.preventDefault();
       const f = e.target;
       const g = (n) => f.elements[n]?.value?.trim() || null;
+      const num = (n) => { const v = g(n); return v == null ? null : Number(v); };
       const payload = {
         equipment_id: eqId, failure_date: g('failure_date'),
         failure_description: g('failure_description'), status: g('status'),
+        ringkasan_penanganan: g('ringkasan_penanganan'),
         why_1: g('why_1'), why_2: g('why_2'), why_3: g('why_3'), why_4: g('why_4'), why_5: g('why_5'),
-        root_cause: g('root_cause'), corrective_action: g('corrective_action'),
-        pic_action: g('pic_action'), target_verification_date: g('target_verification_date') || null,
-        created_by: state.user?.id,
+        root_cause: g('root_cause'),
+        diverifikasi_oleh: g('diverifikasi_oleh'), actual_verification_date: g('actual_verification_date'),
+        monitoring_efektivitas: g('monitoring_efektivitas'),
+        lpo: !!f.elements.lpo?.checked, lpo_bopd: num('lpo_bopd'), lpo_mmscfd: num('lpo_mmscfd'), lpo_persen_produksi: num('lpo_persen_produksi'),
       };
+      // Pemicu & failure mode RCA repetitive dikunci (dibuat sistem)
+      if (!f.elements.pemicu?.disabled) payload.pemicu = g('pemicu') || 'MANUAL';
+      if (!f.elements.failure_mode?.disabled) payload.failure_mode = g('failure_mode');
+      if (payload.lpo && payload.pemicu === 'MANUAL') payload.pemicu = 'LPO';
+      if (payload.status === 'CLOSED') payload.tgl_closed = new Date().toISOString().slice(0, 10);
       if (!payload.failure_date || !payload.failure_description) { toast('Tanggal & deskripsi wajib diisi','error'); return; }
+      const tind = (window.__rcaTind || []).filter(t => (t.aksi || '').trim());
       if (window.__rcaSaving) return;
       window.__rcaSaving = true;
       const rcaBtn = f.querySelector('button[type="submit"]');
       const rcaBtnOrigText = rcaBtn?.textContent;
       if (rcaBtn) { rcaBtn.disabled = true; rcaBtn.textContent = 'Menyimpan…'; }
       try {
+        let id = rcaId;
         if (rcaId) {
+          delete payload.equipment_id; // RCA repetitive bisa milik unit lain di kategori yang sama
           const { error } = await state.supabase.from('rca_records').update(payload).eq('id', rcaId);
           if (error) throw error;
         } else {
-          const { error } = await state.supabase.from('rca_records').insert(payload);
+          payload.created_by = state.user?.id;
+          payload.equipment_ids = [eqId];
+          const { data, error } = await state.supabase.from('rca_records').insert(payload).select('id').single();
+          if (error) throw error;
+          id = data.id;
+        }
+        if ((window.__rcaTindDeleted || []).length) {
+          const { error } = await state.supabase.from('rca_tindakan').delete().in('id', window.__rcaTindDeleted);
+          if (error) throw error;
+        }
+        for (const t of tind) {
+          const row = {
+            rca_id: id, aksi: t.aksi.trim(), ukuran_keberhasilan: t.ukuran_keberhasilan || null, pic: t.pic || null,
+            due_date: t.due_date || null, status: t.status || 'OPEN',
+            tgl_selesai: t.status === 'SELESAI' ? (t.tgl_selesai || new Date().toISOString().slice(0, 10)) : null,
+          };
+          const q = t.id ? state.supabase.from('rca_tindakan').update(row).eq('id', t.id)
+                         : state.supabase.from('rca_tindakan').insert({ ...row, created_by: state.user?.id });
+          const { error } = await q;
           if (error) throw error;
         }
         closeModal();
         toast('RCA disimpan', 'success');
-        const c = document.getElementById('detail-tab-content');
-        if (c && window.__currentEq) renderRcaTab(window.__currentEq, c);
+        rcaRefreshAfterSave();
       } catch (err) { toast('Gagal: ' + err.message, 'error'); }
       finally {
         window.__rcaSaving = false;
@@ -15506,19 +15950,6 @@
       }
     }
     window.submitRcaForm = submitRcaForm;
-
-    async function verifyRca(rcaId, eqId) {
-      const ok = await confirmDialog({ title: 'Verifikasi RCA', message: 'Tandai RCA ini sebagai Verified?', confirmText: 'Verify' });
-      if (!ok) return;
-      const { error } = await state.supabase.from('rca_records')
-        .update({ status: 'Verified', actual_verification_date: new Date().toISOString().slice(0,10) })
-        .eq('id', rcaId);
-      if (error) { toast('Gagal: ' + error.message, 'error'); return; }
-      toast('RCA diverifikasi', 'success');
-      const c = document.getElementById('detail-tab-content');
-      if (c && window.__currentEq) renderRcaTab(window.__currentEq, c);
-    }
-    window.verifyRca = verifyRca;
 
     // ============================================================
     // 10w. RELIABILITY CENTER — satu menu: Overview + Stress + FMEA + CSPP
@@ -18053,6 +18484,7 @@
       const eqLabel = x => `${x.tag_number} — ${x.nama_equipment || ''}`;
       const dtDatalist = eqs.map(x => `<option value="${escapeHtml(eqLabel(x))}">`).join('');
       const startVal = e.start_at ? toLocalInput(e.start_at) : toLocalInput(new Date().toISOString());
+      const airR = await airRefs();
       const body = `
         <div class="space-y-3">
           <div><label class="text-xs font-semibold text-slate-500 uppercase">Equipment *</label>
@@ -18064,7 +18496,7 @@
             <div><label class="text-xs text-slate-500">Selesai (kosongkan kalau masih down)</label><input id="dt-end" type="datetime-local" value="${e.end_at ? toLocalInput(e.end_at) : ''}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy"></div>
           </div>
           <div><label class="text-xs text-slate-500">Penyebab</label>
-            <select id="dt-cat" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-navy">
+            <select id="dt-cat" onchange="airToggleFailureSection()" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-navy">
               ${Object.entries(DT_CAT).map(([k, l]) => `<option value="${k}" ${e.category === k ? 'selected' : ''}>${l}</option>`).join('')}
             </select>
             <p class="text-[11px] text-slate-400 mt-1">💡 <b>Gejala</b> = alat masih jalan tapi ada tanda-tanda aneh (asap, suara, getaran). Tidak menurunkan availability. Kalau benar-benar rusak → pilih Breakdown / Troubleshoot.</p></div>
@@ -18081,6 +18513,9 @@
           <div><label class="text-xs text-slate-500">No. WO (SAP — dari Team Planner)</label>
             <input id="dt-wo" value="${escapeHtml(e.wo_number || '')}" placeholder="mis. 4500123456" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy">
             <p class="text-[11px] text-slate-400 mt-1">Nomor Work Order yang diterbitkan Planner di SAP untuk perbaikan ini. Isi kalau sudah terbit.</p></div>
+          <div><label class="text-xs text-slate-500">No. Notification (SAP)</label>
+            <input id="dt-sapnotif" value="${escapeHtml(e.sap_notification_no || '')}" placeholder="opsional" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy"></div>
+          ${airFailureSectionHtml(e, airR)}
           <div class="border-t border-slate-200 pt-3">
             <label class="text-xs font-semibold text-slate-600 uppercase">📸 Foto Pendukung (optional)</label>
             <div class="grid grid-cols-2 gap-2 mt-1">
@@ -18107,6 +18542,8 @@
       const footer = `<button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
         <button id="dt-save-btn" onclick="saveDowntime('${existing?.id || ''}')" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy-700 text-white text-sm font-semibold">💾 Simpan</button>`;
       openModal({ title: existing ? 'Edit Downtime' : 'Catat Downtime', body, footer, maxWidth: 'max-w-lg' });
+      airToggleFailureSection();
+      airLoadKomponen(e.equipment_id, e.komponen_id || '');
       // load foto existing kalau edit
       if (existing?.id) loadExistingDowntimePhotos(existing.id);
     }
@@ -18126,6 +18563,7 @@
         toast(`⚠️ ${match.tag_number} statusnya "Down" — equipment ini seharusnya sudah tidak dipakai. Cek lagi kalau ini bukan equipment yang dimaksud.`, 'warn');
       }
       guardScrapEquipment(match);
+      airLoadKomponen(hidden.value, '');
     }
     window.dtEqResolve = dtEqResolve;
     async function openDowntimeEdit(id) {
@@ -18153,6 +18591,8 @@
       if (!startV) { toast('Isi waktu mulai down.', 'warn'); return; }
       const endV = document.getElementById('dt-end')?.value;
       if (endV && new Date(endV) < new Date(startV)) { toast('Waktu selesai tidak boleh sebelum mulai.', 'warn'); return; }
+      const airFail = airCollectFailure();
+      if (!airFail.ok) { toast(airFail.msg, 'warn'); return; }
       window.__dtSaving = true;
       const dtBtn = document.getElementById('dt-save-btn');
       if (dtBtn) { dtBtn.disabled = true; dtBtn.classList.add('opacity-50', 'cursor-not-allowed'); dtBtn.textContent = 'Menyimpan…'; }
@@ -18170,6 +18610,7 @@
         part_order_date: document.getElementById('dt-part-order')?.value || null,
         wo_number: (document.getElementById('dt-wo')?.value || '').trim() || null,
         created_by_name: reporterName,  // PELAPOR (manual), bukan user login
+        ...airFail.payload,
       };
       let savedId = id;
       try {
@@ -18190,7 +18631,7 @@
         }
         await uploadDowntimePhotos(savedId);
         toast('Downtime tersimpan.', 'success'); closeModal();
-        renderAvailabilityPage(document.getElementById('ram-content'));
+        airAfterDowntimeSave();
         // 📲 FASE 1 — Real-time Telegram alert untuk event BARU (tidak edit)
         if (isNewRecord) {
           const cat = payload.category;
@@ -18355,6 +18796,13 @@
     window.viewPhotoFullsize = viewPhotoFullsize;
 
     async function markDowntimeDone(id) {
+      // Pedoman AIR: breakdown/troubleshoot ditutup → failure mode & cause wajib
+      const { data: dRow } = await state.supabase.from('downtime_events').select('category, failure_mode, failure_cause').eq('id', id).maybeSingle();
+      if (dRow && AIR_FAILURE_CATS.includes(dRow.category) && (!dRow.failure_mode || !dRow.failure_cause)) {
+        toast('Lengkapi failure mode & failure cause dulu (Pedoman AIR), lalu isi jam selesai di form.', 'warn');
+        openDowntimeEdit(id);
+        return;
+      }
       const _pr = window.prompt('Catatan penyelesaian (opsional — Enter untuk lewati, Batal untuk membatalkan):');
       if (_pr === null) return;
       const catatan = _pr.trim() || null;
@@ -21885,6 +22333,8 @@
         `🕐 baru saja\n\n` +
         `→ Buka di eRAMHoist`
       );
+      toast('Lengkapi failure mode kejadian ini (Pedoman AIR).', 'warn');
+      openDowntimeEdit(id);
     }
     window.escalateGejala = escalateGejala;
 
@@ -22755,24 +23205,26 @@
 
           <p class="mt-2 text-xs text-slate-500">Detail lengkap & lembar pengesahan: file <code>SOP_PM3_PM4_PM5_PM6.md</code> di GitHub repo. Setelah checklist part difinalkan tim lapangan, isikan ke menu <b>📦 PM Parts</b> sesuai tier masing-masing.</p>`)}
 
-        ${sec('#0f766e', '🔎', 'RCA — Root Cause Analysis (5-Whys)', `
-          <p>Metode investigasi akar masalah menggunakan <b>5-Whys</b> sesuai Pedoman Pemeliharaan PT Pertamina EP No. A04-005/PEP23000/2023-S9.</p>
-          <p><b>Kapan RCA wajib dibuat?</b> Sistem otomatis memunculkan alert 🚨 bila equipment mengalami failure <b>&gt;1× dalam 12 bulan terakhir</b>.</p>
-          <p><b>Cara akses:</b> Equipment → pilih equipment → tab <b>🔎 RCA</b></p>
-          ${tbl(['Langkah', 'Yang dilakukan'], [
-            ['1 — Buka tab RCA', 'Klik tab 🔎 RCA di halaman detail equipment. Sistem cek otomatis apakah ada trigger (failure &gt;1×/tahun).'],
-            ['2 — Klik + Buat RCA', 'Isi tanggal failure, deskripsi singkat kejadian, dan status awal (Open).'],
-            ['3 — Isi 5-Whys', 'Why 1 → Why 2 → … → Why 5. Setiap jawaban jadi pertanyaan berikutnya sampai akar masalah ditemukan.'],
-            ['4 — Tulis Root Cause', 'Kesimpulan akhir dari rangkaian Why. Ini yang dicatat sebagai akar masalah.'],
-            ['5 — Isi Corrective Action', 'Tindakan perbaikan yang diambil + PIC + target tanggal verifikasi.'],
-            ['6 — Verify', 'Setelah tindakan dilaksanakan, klik ✅ Verify. Status berubah Verified + tanggal aktual tercatat.'],
+        ${sec('#0f766e', '🔎', 'RCA — Root Cause Analysis (Pedoman AIR)', `
+          <p>Investigasi akar masalah sesuai <b>Pedoman AIR A4-009/PHE23000/2026-S9</b>. Metode analisis tetap <b>5-Whys</b>.</p>
+          <p><b>Kapan RCA wajib?</b></p>
+          ${tbl(['Pemicu', 'Aturan', 'Cara dibuat'], [
+            ['🔁 Repetitive', '<b>3× failure</b> pada peralatan <b>sejenis</b> (kategori equipment sama) dengan <b>failure mode sama</b> dalam 12 bulan', '<b>Otomatis</b> — sistem membuat RCA berstatus DRAFT'],
+            ['📉 LPO', 'Kejadian menyebabkan unplanned Loss Production Opportunity', 'Manual — centang LPO di form RCA'],
+            ['✍️ Manual', 'Atas kebutuhan fungsi P&P', 'Manual — tombol + Buat RCA'],
           ])}
-          ${tbl(['Status', 'Arti', 'Tindakan selanjutnya'], [
-            ['🔴 Open', 'RCA dibuat, belum ada tindakan', 'Assign PIC, mulai investigasi'],
-            ['🟡 In Progress', 'Sedang dalam proses perbaikan', 'Update progress, tunggu selesai'],
-            ['✅ Verified', 'Tindakan sudah dilaksanakan & diverifikasi', 'Tutup — jadi histori permanen'],
+          <p class="bg-amber-50 border border-amber-200 rounded p-2 text-xs">Deteksi otomatis hanya menghitung downtime yang sudah diisi <b>failure mode</b>. Downtime lama yang belum diklasifikasi bisa dilengkapi di <b>RAM → 🧭 AIR → Downtime belum diklasifikasi</b>.</p>
+          <p><b>Cara akses:</b> Equipment → pilih equipment → tab <b>🔎 RCA</b>, atau daftar <b>RCA Aktif</b> di RAM → 🧭 AIR.</p>
+          ${tbl(['Status', 'Yang dilakukan', 'Syarat lanjut ke status berikutnya'], [
+            ['Draft', 'RCA baru (otomatis/manual)', '—'],
+            ['Analisis', 'Isi ringkasan penanganan + 5-Whys → Root Cause', 'Root Cause terisi'],
+            ['Verifikasi', 'Diverifikasi Pejabat Berwenang', 'Nama verifikator + minimal 1 rencana tindak lanjut'],
+            ['Tindak Lanjut', 'Jalankan aksi SMART (PIC, ukuran keberhasilan, due date)', 'Semua aksi Selesai/Batal'],
+            ['Monitoring', 'Pantau efektivitas (apakah kerusakan berulang lagi)', 'Hasil monitoring terisi'],
+            ['Closed', 'Selesai — jadi histori permanen', '—'],
           ])}
-          <p class="bg-slate-50 border border-slate-200 rounded p-2 text-xs"><b>Tips 5-Whys:</b> Jangan berhenti di Why 1 (gejala). Terus gali sampai ketemu penyebab yang bisa dikendalikan — sesuatu yang bisa Sr Mekanik ubah (SOP, checklist, jadwal PM), bukan "nasib" atau "part-nya emang jelek".</p>
+          <p>Tombol hijau <b>→ (status berikutnya)</b> di kartu RCA memindahkan status. Kalau syarat belum terpenuhi, form RCA terbuka untuk dilengkapi. <b>LPO</b> ≥ 3.000 BOPD / ≥ 30 MMSCFD / ≥ 10% produksi harian WK wajib dilaporkan awal via PROPAR & ke SKK Migas.</p>
+          <p class="bg-slate-50 border border-slate-200 rounded p-2 text-xs"><b>Tips 5-Whys:</b> Jangan berhenti di Why 1 (gejala). Terus gali sampai ketemu penyebab yang bisa dikendalikan — SOP, metode kerja, spek part, jadwal PM.</p>
           <p class="font-semibold text-slate-700 mt-3">Contoh Kasus Nyata — Spider Coupling Rusak Berulang</p>
           ${tbl(['#', 'Pertanyaan', 'Jawaban'], [
             ['Why 1', 'Kenapa spider coupling rusak lagi?', 'Sudah aus, retak di beberapa titik'],
@@ -22842,6 +23294,24 @@
             <li><b>Validasi ulang</b> — criticality kualitatif yang jatuh tempo ≤ 60 hari.</li>
             <li><b>Belum dinilai lengkap</b> — unit yang criticality atau integrity-nya masih kosong.</li>
           </ul>
+          <p class="font-bold text-slate-800 mt-3">Langkah 6 — Tentukan Strategi Pemeliharaan (tab 🧭 AIR → kartu Strategi)</p>
+          ${tbl(['#', 'Pertanyaan', 'Jika YA', 'Jika TIDAK'], [
+            ['M1', 'Kegagalan berdampak signifikan ke keselamatan, kesehatan, lingkungan?', 'lanjut M3', 'lanjut M2'],
+            ['M2', 'Kegagalan berdampak signifikan ke produksi & biaya?', 'lanjut M3', '<b>REACTIVE</b>'],
+            ['M3', 'Kegagalan bisa dipantau & diperkirakan kapan terjadi?', '<b>CBM / PREDICTIVE</b>', 'lanjut M4'],
+            ['M4', 'Ada pendekatan interval (periodik) yang bisa mengatasi?', '<b>PREVENTIVE</b>', '<b>REDESIGN</b>'],
+          ])}
+          <p>Contoh: engine Mobile Rig — gagal berdampak ke produksi (M2 Ya), kondisi oli bisa dipantau lewat SOS (M3 Ya) → <b>CBM/Predictive</b>. Dasar penilaian: IOM & data pabrikan.</p>
+
+          <p class="font-bold text-slate-800 mt-3">Langkah 7 — Catat kegagalan dengan format ISO 14224 (form Catat Downtime)</p>
+          <p>Kalau kategori <b>Breakdown</b> atau <b>Troubleshoot</b>, muncul kotak merah <b>Detail Kegagalan</b>:</p>
+          <ul class="list-disc pl-5 space-y-0.5">
+            <li><b>Failure mode — wajib saat dicatat.</b> Gejala yang terlihat, mis. VIB (getaran), ELU (bocor oli/hidrolik), FTS (tidak mau start), FTC (BOP tidak menutup).</li>
+            <li><b>Komponen</b> — pilih sub-unit yang gagal (mis. Carrier, Engine) kalau unitnya punya komponen.</li>
+            <li><b>Failure cause — wajib saat ditutup</b> (jam selesai diisi). Penyebab setelah diperbaiki, mis. 3.4 aus wajar, 3.3 kesalahan pemeliharaan, 2.2 salah pasang.</li>
+            <li><b>Jenis corrective</b> — Immediate / Deferred / Reactive (kosongkan = otomatis dari kategori).</li>
+          </ul>
+          <p>Tombol <b>Selesai</b> di daftar downtime akan membuka form kalau failure mode/cause belum lengkap.</p>
           <p class="bg-cyan-50 border border-cyan-200 rounded p-2 text-xs"><b>Urutan kerja yang disarankan:</b> mulai dari <b>BOP System</b> & <b>Well Control System</b> → <b>Mobile Rig, Carrier, Hoisting, Mast</b> → <b>Circulating System, Generator Set</b> → sisanya. Salah input? Admin bisa <b>Hapus</b> di tabel riwayat — status unit otomatis kembali ke penilaian sebelumnya.</p>
           <p class="text-xs text-slate-500"><b>Beda dengan Risk Assessment (CoF/PoF) lama:</b> CoF & Risk Level dari pedoman PEP 2023 masih tampil berdampingan. Criticality AIR adalah klasifikasi resmi pedoman yang baru.</p>`)}
         </div>
