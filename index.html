@@ -8494,13 +8494,15 @@
         if (error) throw error;
         state.__airAll = data || [];
         const since12 = new Date(); since12.setFullYear(since12.getFullYear() - 1);
-        const [kand, rcaAktif, belumKlas] = await Promise.all([
+        const [kand, rcaAktif, belumKlas, spVital] = await Promise.all([
           state.supabase.from('v_air_repetitive_kandidat').select('*').order('jumlah', { ascending: false }),
           state.supabase.from('rca_records').select('id, equipment_id, failure_date, failure_description, status, pemicu').neq('status', 'CLOSED').order('failure_date', { ascending: false }),
           state.supabase.from('downtime_events').select('id, equipment_id, equipment_tag, equipment_name, start_at, end_at, category, notes')
             .in('category', AIR_FAILURE_CATS).is('failure_mode', null).gte('start_at', since12.toISOString()).order('start_at', { ascending: false }).limit(300),
+          state.supabase.from('v_sparepart_vis').select('id, part_number, description, stok, stok_minimum, status_stok, alert_vital_habis, alert_vital_rendah')
+            .or('alert_vital_habis.eq.true,alert_vital_rendah.eq.true').order('part_number'),
         ]);
-        state.__airExtra = { kandidat: kand.data || [], rca: rcaAktif.data || [], belumKlas: belumKlas.data || [] };
+        state.__airExtra = { kandidat: kand.data || [], rca: rcaAktif.data || [], belumKlas: belumKlas.data || [], spVital: spVital.data || [] };
         if (state.airScope == null) state.airScope = 'lingkup';
         state.airCell = null;
         airPaintDashboard(host);
@@ -8677,7 +8679,25 @@
           <td class="px-2 py-1.5 text-right">${isSrMekanikOrAbove() ? `<button onclick="openDowntimeEdit('${d.id}')" class="px-2 py-1 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded text-xs font-semibold whitespace-nowrap">Klasifikasi</button>` : ''}</td>
         </tr>`).join('');
       const th = cols => `<thead><tr class="text-left text-xs text-slate-500 border-b">${cols.map(c => `<th class="px-2 py-1">${c}</th>`).join('')}</tr></thead>`;
+      const sp = x.spVital || [];
+      const spHtml = `
+        <div class="bg-white border ${sp.some(r => r.alert_vital_habis) ? 'border-red-300' : 'border-slate-200'} rounded-xl p-4">
+          <div class="flex items-center justify-between flex-wrap gap-2 mb-2">
+            <h4 class="font-bold text-navy text-sm uppercase tracking-wider">📦 Spare Part Vital Perlu Tindakan (${sp.length})</h4>
+            <button onclick="goCsppPreset('vital')" class="text-xs text-navy underline">Buka CSPP →</button>
+          </div>
+          <div class="text-[11px] text-slate-400 mb-2">Zero stock policy tidak berlaku untuk spare part Vital. Part yang kosong karena dipinjam tidak dihitung habis.</div>
+          ${sp.length ? `<div class="overflow-x-auto"><table class="w-full text-sm">${th(['Part Number', 'Deskripsi', 'Stok', 'Min', 'Status'])}<tbody>${sp.map(r => `
+            <tr class="border-b border-slate-100">
+              <td class="px-2 py-1.5 font-mono font-semibold whitespace-nowrap">${escapeHtml(r.part_number || '')}</td>
+              <td class="px-2 py-1.5">${escapeHtml(r.description || '')}</td>
+              <td class="px-2 py-1.5 text-center font-bold">${Number(r.stok) || 0}</td>
+              <td class="px-2 py-1.5 text-center">${Number(r.stok_minimum) || '—'}</td>
+              <td class="px-2 py-1.5 text-xs font-semibold ${r.alert_vital_habis ? 'text-red-700' : 'text-amber-700'}">${r.alert_vital_habis ? '🔴 Habis' : '🟠 ≤ minimum'}</td>
+            </tr>`).join('')}</tbody></table></div>` : '<div class="text-sm text-slate-400 italic">Semua spare part Vital aman. 👍</div>'}
+        </div>`;
       return `
+        ${spHtml}
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div class="bg-white border border-slate-200 rounded-xl p-4">
             <h4 class="font-bold text-navy text-sm uppercase tracking-wider mb-1">🔁 Repetitive Failure (${x.kandidat.length})</h4>
@@ -14379,11 +14399,241 @@
     // Phase 1: dashboard risiko stok (read-only). Forecast/enrichment menyusul.
     // ============================================================
     let csppMats = [];
-    let csppFilter = { category: '', q: '', critOnly: false, outOnly: false, belowOnly: false, equipmentId: '', equipmentLabel: '' };
+    let csppFilter = { category: '', q: '', critOnly: false, outOnly: false, belowOnly: false, equipmentId: '', equipmentLabel: '', vis: '', visPreset: '' };
     let csppCurrentMappedIds = null;   // Set material_id yg di-mapping ke csppFilter.equipmentId, null = tidak difilter
     // Centang manual buat gabungin beberapa PN yang gak sefilter/sekategori ke SATU Justifikasi
     // sekaligus — sebelumnya harus cari 1 PN, cetak, ulang lagi per PN (diminta Maman 2026-09-29).
     let csppSelectedIds = new Set();
+
+    // ============================================================
+    // AIR Tahap 3 — Spare Part VIS (Pedoman AIR Tabel 1), Fase 37
+    // Data dari view v_sparepart_vis; ditempel ke csppMats sebagai m._vis.
+    // ============================================================
+    let csppVis = null;   // Map id → baris v_sparepart_vis (null kalau fase37 belum dijalankan)
+    const VIS_META = {
+      V: { label: 'V', nama: 'Vital',     cls: 'bg-red-700 text-white' },
+      I: { label: 'I', nama: 'Important', cls: 'bg-amber-300 text-amber-900' },
+      S: { label: 'S', nama: 'Secondary', cls: 'bg-slate-200 text-slate-700' },
+    };
+    function visBadge(v) {
+      if (!v) return '<span class="text-slate-300 text-xs">—</span>';
+      const m = VIS_META[v.kelas_vis];
+      return `<span class="inline-block px-1.5 py-0.5 rounded text-xs font-bold ${m.cls}" title="${m.nama}${v.kelas_vis_override ? ' (manual)' : v.dipetakan ? ` — dari ${v.jumlah_equipment} equipment` : ' — belum dipetakan ke equipment'}">${m.label}${v.kelas_vis_override ? '*' : ''}</span>`;
+    }
+    async function loadCsppVis() {
+      try {
+        const rows = [];
+        for (let f = 0; ; f += 1000) {
+          const { data, error } = await state.supabase.from('v_sparepart_vis').select(
+            'id, kelas_vis, kelas_vis_otomatis, kelas_vis_override, dipetakan, jumlah_equipment, status_stok, qty_dipinjam, dipinjam_sejak, ' +
+            'usia_bulan, usia_maks_bulan, usia_perkiraan, tgl_stok_tertua, stok_maksimum, sap_material_no, lead_time_days, unit_price, ' +
+            'pakai_periode, pakai_per_bulan, kebutuhan_2th, rekomendasi_pengadaan, ' +
+            'alert_vital_habis, alert_vital_rendah, alert_vital_tanpa_minimum, alert_usia_simpan').range(f, f + 999);
+          if (error) throw error;
+          rows.push(...(data || []));
+          if (!data || data.length < 1000) break;
+        }
+        csppVis = new Map(rows.map(r => [r.id, r]));
+      } catch { csppVis = null; }
+    }
+    function visKpiHtml() {
+      if (!csppVis) return '';
+      const rows = [...csppVis.values()];
+      const c = f => rows.filter(f).length;
+      const btn = (label, val, preset, cls) => `<button onclick="setCsppPreset('${preset}')" class="text-left bg-white rounded-xl border ${val && cls ? cls : 'border-slate-200'} p-3 hover:border-navy transition"><div class="text-xs text-slate-500 mb-1">${label}</div><div class="text-xl font-extrabold text-slate-900">${val}</div></button>`;
+      return `
+        <div class="bg-white rounded-xl border border-slate-200 p-3">
+          <div class="flex items-center justify-between flex-wrap gap-2 mb-2">
+            <div class="text-sm font-bold text-navy">🧭 Spare Part VIS <span class="text-xs font-normal text-slate-500">— Pedoman AIR: kelas dari criticality equipment, zero stock tidak berlaku untuk Vital</span></div>
+            <button onclick="openVisRekomendasi()" class="text-xs bg-navy hover:bg-navy/80 text-white px-3 py-1.5 rounded-lg font-semibold">📈 Rekomendasi 2 Tahun</button>
+          </div>
+          <div class="grid grid-cols-2 md:grid-cols-5 gap-2">
+            ${btn('V — Vital', c(r => r.kelas_vis === 'V'), 'vital')}
+            ${btn('🔴 Vital Habis', c(r => r.alert_vital_habis), 'vitalhabis', 'border-red-400 bg-red-50')}
+            ${btn('🟠 Vital ≤ Minimum', c(r => r.alert_vital_rendah), 'vitalrendah', 'border-amber-400 bg-amber-50')}
+            ${btn('🤝 Sedang Dipinjam', c(r => r.status_stok === 'DIPINJAM' || Number(r.qty_dipinjam) > 0), 'dipinjam')}
+            ${btn('⏳ Usia Simpan Lewat', c(r => r.alert_usia_simpan), 'usia', 'border-amber-400 bg-amber-50')}
+          </div>
+          ${c(r => r.alert_vital_tanpa_minimum) ? `<div class="text-xs text-amber-700 mt-2">⚠️ ${c(r => r.alert_vital_tanpa_minimum)} part Vital belum punya stok minimum (safety stock) — <button onclick="setCsppPreset('vitaltanpamin')" class="underline">lihat</button></div>` : ''}
+        </div>`;
+    }
+    function visFilterPass(m) {
+      const v = m._vis; const f = csppFilter;
+      if (f.vis && (!v || v.kelas_vis !== f.vis)) return false;
+      if (!f.visPreset) return true;
+      if (!v) return false;
+      if (f.visPreset === 'vital') return v.kelas_vis === 'V';
+      if (f.visPreset === 'vitalhabis') return v.alert_vital_habis;
+      if (f.visPreset === 'vitalrendah') return v.alert_vital_rendah;
+      if (f.visPreset === 'vitaltanpamin') return v.alert_vital_tanpa_minimum;
+      if (f.visPreset === 'dipinjam') return v.status_stok === 'DIPINJAM' || Number(v.qty_dipinjam) > 0;
+      if (f.visPreset === 'usia') return v.alert_usia_simpan;
+      return true;
+    }
+    function visUsiaCell(v) {
+      if (!v || v.usia_bulan == null) return '<span class="text-slate-300 text-xs">—</span>';
+      const lewat = v.alert_usia_simpan;
+      return `<span class="text-xs ${lewat ? 'text-red-700 font-bold' : 'text-slate-600'}" title="Batas ${v.usia_maks_bulan} bln${v.usia_perkiraan ? ' — perkiraan dari tgl masuk (riwayat penerimaan tidak lengkap)' : ''}">${v.usia_perkiraan ? '±' : ''}${v.usia_bulan} bln${lewat ? ' ⏳' : ''}</span>`;
+    }
+
+    function openVisEdit(id) {
+      const m = csppMats.find(x => x.id === id); const v = m?._vis;
+      if (!m || !v) return;
+      const canEdit = isGudangOrAbove();
+      const inp = 'w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-navy';
+      openModal({
+        title: `Spare Part VIS — ${m.part_number || ''}`,
+        maxWidth: 'max-w-lg',
+        body: `
+          <div class="space-y-3 text-sm">
+            <div class="text-slate-700 font-semibold">${escapeHtml(m.description || '')}</div>
+            <div class="grid grid-cols-2 gap-2 text-xs bg-slate-50 rounded-lg p-3">
+              <div>Kelas otomatis: <b>${VIS_META[v.kelas_vis_otomatis].nama}</b></div>
+              <div>Equipment terkait: <b>${v.jumlah_equipment}</b>${v.dipetakan ? '' : ' <span class="text-amber-700">(belum dipetakan)</span>'}</div>
+              <div>No. material SAP: <b>${escapeHtml(v.sap_material_no || '—')}</b></div>
+              <div>Status: <b>${escapeHtml(v.status_stok)}</b>${Number(v.qty_dipinjam) > 0 ? ` · dipinjam ${v.qty_dipinjam}` : ''}</div>
+              <div>Pemakaian: <b>${v.pakai_per_bulan}</b>/bln</div>
+              <div>Kebutuhan 2 th: <b>${v.kebutuhan_2th}</b> · saran beli <b>${v.rekomendasi_pengadaan}</b></div>
+            </div>
+            <div class="text-[11px] text-slate-500">Kelas otomatis: <b>V</b> kalau terkait equipment SECE/PCE, <b>I</b> kalau terkait Important, selain itu <b>S</b>. Hubungkan part ke equipment lewat <b>Kelola Part Kritis</b> atau kolom equipment terkait di Gudang Logbook.</div>
+            <label class="block"><span class="text-xs font-semibold text-slate-600">Kelas VIS (koreksi manual)</span>
+              <select id="vis-override" class="${inp}" ${canEdit ? '' : 'disabled'}>
+                <option value="">Otomatis (${VIS_META[v.kelas_vis_otomatis].nama})</option>
+                ${Object.entries(VIS_META).map(([k, x]) => `<option value="${k}" ${v.kelas_vis_override === k ? 'selected' : ''}>${k} — ${x.nama}</option>`).join('')}
+              </select></label>
+            <label class="block"><span class="text-xs font-semibold text-slate-600">Stok maksimum (opsional)</span>
+              <input id="vis-max" type="number" min="0" value="${v.stok_maksimum ?? ''}" class="${inp}" ${canEdit ? '' : 'disabled'}></label>
+            <div class="text-[11px] text-slate-500">Stok minimum = Safety Stock di Gudang Logbook.</div>
+            <div id="vis-reservasi" class="border-t border-slate-200 pt-3"><div class="text-slate-400 text-xs">Memuat reservasi…</div></div>
+          </div>`,
+        footer: `<button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Tutup</button>
+          ${canEdit ? `<button onclick="saveVisEdit('${id}')" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy/80 text-white text-sm font-semibold">Simpan</button>` : ''}`,
+      });
+      loadVisReservasi(id);
+    }
+    window.openVisEdit = openVisEdit;
+    async function saveVisEdit(id) {
+      const ov = document.getElementById('vis-override')?.value || null;
+      const mx = document.getElementById('vis-max')?.value;
+      const { error } = await state.supabase.from('materials')
+        .update({ kelas_vis_override: ov, stok_maksimum: mx === '' || mx == null ? null : Number(mx) }).eq('id', id);
+      if (error) { toast('Gagal simpan: ' + error.message, 'error'); return; }
+      closeModal();
+      toast('Data VIS tersimpan.', 'success');
+      await loadCsppVis();
+      csppMats.forEach(m => { m._vis = csppVis?.get(m.id) || null; });
+      const host = document.getElementById('cspp-vis-kpi'); if (host) host.innerHTML = visKpiHtml();
+      renderCsppList();
+    }
+    window.saveVisEdit = saveVisEdit;
+
+    async function loadVisReservasi(materialId) {
+      const host = document.getElementById('vis-reservasi'); if (!host) return;
+      const { data, error } = await state.supabase.from('reservasi_sparepart').select('*').eq('material_id', materialId).order('tanggal', { ascending: false });
+      if (error) { host.innerHTML = `<div class="text-xs text-red-600">${escapeHtml(error.message)}</div>`; return; }
+      const can = isGudangOrAbove() || isSrMekanikOrAbove();
+      const ST = ['DIAJUKAN', 'DISETUJUI', 'DIAMBIL', 'BATAL'];
+      host.innerHTML = `
+        <div class="text-xs font-bold text-slate-600 uppercase mb-1">Reservasi SAP (${(data || []).length})</div>
+        ${(data || []).map(r => `
+          <div class="flex items-center gap-2 text-xs border-b border-slate-100 py-1 flex-wrap">
+            <span class="text-slate-500">${fmtDate(r.tanggal)}</span>
+            <span class="font-mono font-semibold">${escapeHtml(r.sap_reservation_no || '(belum ada no.)')}</span>
+            <span>qty ${r.qty}</span>
+            ${can ? `<select onchange="updateVisReservasi('${r.id}', this.value, '${materialId}')" class="border border-slate-300 rounded px-1 py-0.5 text-xs">${ST.map(s => `<option ${r.status === s ? 'selected' : ''}>${s}</option>`).join('')}</select>` : `<span>${r.status}</span>`}
+            ${r.catatan ? `<span class="text-slate-500">${escapeHtml(r.catatan)}</span>` : ''}
+          </div>`).join('') || '<div class="text-xs text-slate-400 italic">Belum ada reservasi.</div>'}
+        ${can ? `
+        <div class="grid grid-cols-6 gap-1 mt-2">
+          <input id="rsv-no" placeholder="No. reservasi SAP" class="col-span-3 border border-slate-300 rounded px-2 py-1 text-xs">
+          <input id="rsv-qty" type="number" min="1" placeholder="Qty" class="col-span-1 border border-slate-300 rounded px-2 py-1 text-xs">
+          <button onclick="addVisReservasi('${materialId}')" class="col-span-2 bg-slate-100 hover:bg-slate-200 rounded text-xs font-semibold">+ Reservasi</button>
+          <input id="rsv-note" placeholder="Catatan (mis. untuk unit / WO)" class="col-span-6 border border-slate-300 rounded px-2 py-1 text-xs">
+        </div>` : ''}`;
+    }
+    async function addVisReservasi(materialId) {
+      const qty = Number(document.getElementById('rsv-qty')?.value);
+      if (!qty || qty <= 0) { toast('Isi qty reservasi.', 'warn'); return; }
+      const { error } = await state.supabase.from('reservasi_sparepart').insert({
+        material_id: materialId, qty,
+        sap_reservation_no: (document.getElementById('rsv-no')?.value || '').trim() || null,
+        catatan: (document.getElementById('rsv-note')?.value || '').trim() || null,
+        created_by: state.user.id,
+      });
+      if (error) { toast('Gagal: ' + error.message, 'error'); return; }
+      toast('Reservasi dicatat.', 'success');
+      loadVisReservasi(materialId);
+    }
+    window.addVisReservasi = addVisReservasi;
+    async function updateVisReservasi(id, status, materialId) {
+      const { error } = await state.supabase.from('reservasi_sparepart').update({ status }).eq('id', id);
+      if (error) { toast('Gagal: ' + error.message, 'error'); return; }
+      toast('Status reservasi diperbarui.', 'success');
+      loadVisReservasi(materialId);
+    }
+    window.updateVisReservasi = updateVisReservasi;
+
+    // Rekomendasi kebutuhan 2 tahun (two years spare part)
+    function visRekomendasiRows() {
+      const order = { V: 0, I: 1, S: 2 };
+      return csppMats.filter(m => m._vis && (Number(m._vis.kebutuhan_2th) > 0 || m._vis.kelas_vis === 'V'))
+        .sort((a, b) => order[a._vis.kelas_vis] - order[b._vis.kelas_vis] || Number(b._vis.rekomendasi_pengadaan) - Number(a._vis.rekomendasi_pengadaan));
+    }
+    function openVisRekomendasi() {
+      const rows = visRekomendasiRows();
+      const n = v => Number(v) || 0;
+      openModal({
+        title: '📈 Rekomendasi Spare Part 2 Tahun',
+        maxWidth: 'max-w-5xl',
+        body: `
+          <div class="text-xs text-slate-500 mb-2">Kebutuhan = rata-rata pemakaian bulanan (semua part keluar 24 bulan terakhir: Input Harian, WO, Gudang manual — dikurangi koreksi edit; penyesuaian Audit Gudang tidak dihitung) × 24.
+            Saran beli = kebutuhan 2 th + stok minimum − stok sekarang. Part Vital selalu tampil. Reservasi resmi tetap lewat SAP.</div>
+          <div class="overflow-x-auto max-h-[60vh] overflow-y-auto"><table class="w-full text-xs">
+            <thead class="sticky top-0 bg-slate-50"><tr class="text-left font-bold text-slate-600">
+              <th class="px-2 py-1">VIS</th><th class="px-2 py-1">Part Number</th><th class="px-2 py-1">Deskripsi</th><th class="px-2 py-1">KIMAP/SAP</th>
+              <th class="px-2 py-1 text-right">Pakai/bln</th><th class="px-2 py-1 text-right">Kebutuhan 2 th</th><th class="px-2 py-1 text-right">Stok</th>
+              <th class="px-2 py-1 text-right">Min</th><th class="px-2 py-1 text-right">Saran beli</th><th class="px-2 py-1 text-right">Lead time</th>
+            </tr></thead>
+            <tbody>${rows.map(m => `
+              <tr class="border-b border-slate-100 ${n(m._vis.rekomendasi_pengadaan) > 0 ? '' : 'text-slate-400'}">
+                <td class="px-2 py-1">${visBadge(m._vis)}</td>
+                <td class="px-2 py-1 font-mono font-semibold">${escapeHtml(m.part_number || '')}</td>
+                <td class="px-2 py-1">${escapeHtml(m.description || '')}</td>
+                <td class="px-2 py-1">${escapeHtml(m._vis.sap_material_no || '')}</td>
+                <td class="px-2 py-1 text-right">${m._vis.pakai_per_bulan}</td>
+                <td class="px-2 py-1 text-right font-semibold">${m._vis.kebutuhan_2th}</td>
+                <td class="px-2 py-1 text-right">${n(m.stok)}</td>
+                <td class="px-2 py-1 text-right">${n(m.safety_stock) || '—'}</td>
+                <td class="px-2 py-1 text-right font-bold ${n(m._vis.rekomendasi_pengadaan) > 0 ? 'text-red-700' : ''}">${m._vis.rekomendasi_pengadaan}</td>
+                <td class="px-2 py-1 text-right">${m._vis.lead_time_days ? m._vis.lead_time_days + ' hr' : '—'}</td>
+              </tr>`).join('') || '<tr><td colspan="10" class="px-2 py-6 text-center text-slate-400">Belum ada data pemakaian.</td></tr>'}</tbody>
+          </table></div>`,
+        footer: `<button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Tutup</button>
+                 <button onclick="exportVisRekomendasi()" class="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-semibold">📊 Export Excel</button>`,
+      });
+    }
+    window.openVisRekomendasi = openVisRekomendasi;
+    function exportVisRekomendasi() {
+      const rows = visRekomendasiRows().map(m => ({
+        'Kelas VIS': m._vis.kelas_vis, 'Part Number': m.part_number, 'Deskripsi': m.description, 'KIMAP / No. Material SAP': m._vis.sap_material_no || '',
+        'Kategori': m.category, 'Pemakaian / bulan': Number(m._vis.pakai_per_bulan), 'Kebutuhan 2 tahun': Number(m._vis.kebutuhan_2th),
+        'Stok': Number(m.stok) || 0, 'Stok minimum': Number(m.safety_stock) || 0, 'Saran pengadaan': Number(m._vis.rekomendasi_pengadaan),
+        'Lead time (hari)': Number(m._vis.lead_time_days) || 0, 'Harga satuan': Number(m._vis.unit_price) || 0,
+        'Estimasi nilai': (Number(m._vis.rekomendasi_pengadaan) || 0) * (Number(m._vis.unit_price) || 0),
+      }));
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Rekomendasi 2 Tahun');
+      XLSX.writeFile(wb, `Rekomendasi_SparePart_2Tahun_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    }
+    window.exportVisRekomendasi = exportVisRekomendasi;
+
+    function goCsppPreset(p) {
+      window.__csppPreset = p;
+      state.ramTab = 'reliability';
+      state.reliabilityTab = 'cspp';
+      navigate('reliability');
+    }
+    window.goCsppPreset = goCsppPreset;
 
     PAGES.cspp = function () {
       const div = document.createElement('div');
@@ -14404,6 +14654,8 @@
           if (!data || data.length < 1000) break;
         }
         csppMats = all;
+        await loadCsppVis();
+        csppMats.forEach(m => { m._vis = csppVis?.get(m.id) || null; });
       } catch (e) {
         host.innerHTML = `<div class="bg-red-50 text-red-700 p-4 rounded-xl text-sm">Gagal memuat: ${escapeHtml(e.message)}</div>`;
         return;
@@ -14437,6 +14689,7 @@
           ${kpiBtn('🔴 Critical Habis', critOut, "setCsppPreset('critout')")}
           ${kpiBtn('⚠️ Di Bawah Safety', belowSafety, "setCsppPreset('below')")}
         </div>
+        <div id="cspp-vis-kpi">${visKpiHtml()}</div>
         <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
           <div class="px-4 py-3 border-b border-slate-100 space-y-2">
             <div class="font-semibold text-slate-800 text-sm">Daftar Spare Parts <span id="cspp-count" class="text-slate-400 font-normal"></span></div>
@@ -14445,6 +14698,10 @@
                 <option value="">Semua Kategori</option>
                 ${['Critical', 'Fast Moving', 'Slow Moving', 'Consumable', 'Lubricant'].map(c => `<option value="${c}">${c}</option>`).join('')}
               </select>
+              ${csppVis ? `<select id="cspp-vis" onchange="setCsppFilter('vis', this.value)" class="px-2 py-1.5 border border-slate-300 rounded-lg text-xs bg-white outline-none focus:ring-2 focus:ring-navy">
+                <option value="">Semua kelas VIS</option>
+                ${Object.entries(VIS_META).map(([k, x]) => `<option value="${k}">${k} — ${x.nama}</option>`).join('')}
+              </select>` : ''}
               <input id="cspp-q" oninput="setCsppFilterQ(this.value)" placeholder="Cari part number / deskripsi…" class="flex-1 min-w-[140px] px-2 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-navy">
               <label class="text-xs flex items-center gap-1"><input type="checkbox" id="cspp-crit" onchange="setCsppFilter('critOnly', this.checked)"> Critical</label>
               <label class="text-xs flex items-center gap-1"><input type="checkbox" id="cspp-out" onchange="setCsppFilter('outOnly', this.checked)"> Habis stok</label>
@@ -14458,13 +14715,14 @@
           <div class="overflow-x-auto max-h-[28rem] overflow-y-auto"><table class="w-full">
             <thead class="sticky top-0 bg-slate-50"><tr class="text-left text-xs font-bold text-slate-600">
               <th class="px-3 py-2"><input type="checkbox" id="cspp-select-all" onchange="toggleCsppSelectAll(this.checked)" title="Pilih semua yang tampil"></th>
-              <th class="px-3 py-2">#</th><th class="px-3 py-2">Part Number</th><th class="px-3 py-2">Deskripsi</th><th class="px-3 py-2">Kategori</th><th class="px-3 py-2">Stok</th><th class="px-3 py-2">Safety</th><th class="px-3 py-2">Status</th>
+              <th class="px-3 py-2">#</th><th class="px-3 py-2">Part Number</th><th class="px-3 py-2">Deskripsi</th><th class="px-3 py-2">Kategori</th><th class="px-3 py-2">Stok</th><th class="px-3 py-2">Safety</th><th class="px-3 py-2">Status</th>${csppVis ? '<th class="px-3 py-2" title="Kelas spare part Pedoman AIR — klik untuk detail/edit/reservasi">VIS</th><th class="px-3 py-2">Usia simpan</th>' : ''}
             </tr></thead>
             <tbody id="cspp-body"></tbody>
           </table></div>
         </div>`;
       renderCsppEqPicker();
       renderCsppList();
+      if (window.__csppPreset) { const p = window.__csppPreset; window.__csppPreset = null; setCsppPreset(p); }
       // Auto-buka modal Kelola Part Kritis kalau datang dari shortcut "Atur di CSPP" (equipment detail)
       if (window.__csppAutoOpenEquipment) {
         const { id, label } = window.__csppAutoOpenEquipment;
@@ -14534,6 +14792,8 @@
 
     function csppStatus(m) {
       const n = v => Number(v) || 0; const s = n(m.stok), sf = n(m.safety_stock);
+      if (m._vis?.status_stok === 'DIPINJAM') return `<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-teal-100 text-teal-700" title="Stok 0 karena dipinjamkan, belum kembali">🤝 Dipinjam (${m._vis.qty_dipinjam})</span>`;
+      if (m._vis?.status_stok === 'BERLEBIH') return '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">🔵 Di atas maks</span>';
       if (s === 0) return '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700">🔴 Habis</span>';
       if (sf > 0 && s < sf) return '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700">🟠 Rendah</span>';
       return '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700">🟢 Aman</span>';
@@ -14553,6 +14813,7 @@
       const n = v => Number(v) || 0; const f = csppFilter; const q = (f.q || '').toLowerCase().trim();
       return csppMats.filter(m => {
         if (csppCurrentMappedIds && !csppCurrentMappedIds.has(m.id)) return false;
+        if (!visFilterPass(m)) return false;
         if (f.category && m.category !== f.category) return false;
         if (f.critOnly && String(m.category || '').toLowerCase() !== 'critical') return false;
         if (f.outOnly && n(m.stok) !== 0) return false;
@@ -14574,7 +14835,8 @@
           <td class="px-3 py-2 text-base font-extrabold text-slate-900">${n(m.stok)}</td>
           <td class="px-3 py-2 text-sm font-semibold text-slate-700">${n(m.safety_stock) || '—'}</td>
           <td class="px-3 py-2">${csppStatus(m)}</td>
-        </tr>`).join('') : '<tr><td colspan="8" class="px-3 py-6 text-center text-slate-400 text-sm">Tidak ada part sesuai filter.</td></tr>';
+          ${csppVis ? `<td class="px-3 py-2"><button onclick="openVisEdit('${m.id}')" class="hover:opacity-80">${visBadge(m._vis)}</button></td><td class="px-3 py-2">${visUsiaCell(m._vis)}</td>` : ''}
+        </tr>`).join('') : `<tr><td colspan="${csppVis ? 10 : 8}" class="px-3 py-6 text-center text-slate-400 text-sm">Tidak ada part sesuai filter.</td></tr>`;
       const cnt = document.getElementById('cspp-count'); if (cnt) cnt.textContent = `(${list.length}${list.length > 500 ? ', tampil 500' : ''})`;
       const selectAll = document.getElementById('cspp-select-all');
       if (selectAll) selectAll.checked = list.length > 0 && list.slice(0, 500).every(m => csppSelectedIds.has(m.id));
@@ -14605,16 +14867,17 @@
     function clearCsppSelection() { csppSelectedIds.clear(); renderCsppList(); }
     window.clearCsppSelection = clearCsppSelection;
     let _csppDeb;
-    function setCsppFilter(k, v) { csppFilter.belowOnly = false; csppFilter[k] = v; renderCsppList(); }
-    function setCsppFilterQ(v) { csppFilter.belowOnly = false; csppFilter.q = v; clearTimeout(_csppDeb); _csppDeb = setTimeout(renderCsppList, 300); }
+    function setCsppFilter(k, v) { csppFilter.belowOnly = false; csppFilter.visPreset = ''; csppFilter[k] = v; renderCsppList(); }
+    function setCsppFilterQ(v) { csppFilter.belowOnly = false; csppFilter.visPreset = ''; csppFilter.q = v; clearTimeout(_csppDeb); _csppDeb = setTimeout(renderCsppList, 300); }
     function setCsppPreset(p) {
-      csppFilter = { category: '', q: '', critOnly: false, outOnly: false, belowOnly: false, equipmentId: '', equipmentLabel: '' };
+      csppFilter = { category: '', q: '', critOnly: false, outOnly: false, belowOnly: false, equipmentId: '', equipmentLabel: '', vis: '', visPreset: '' };
       csppCurrentMappedIds = null;
       if (p === 'critout') { csppFilter.critOnly = true; csppFilter.outOnly = true; }
       if (p === 'below') { csppFilter.belowOnly = true; }
+      if (['vital', 'vitalhabis', 'vitalrendah', 'vitaltanpamin', 'dipinjam', 'usia'].includes(p)) csppFilter.visPreset = p;
       const set = (id, prop, val) => { const el = document.getElementById(id); if (el) el[prop] = val; };
       set('cspp-crit', 'checked', csppFilter.critOnly); set('cspp-out', 'checked', csppFilter.outOnly);
-      set('cspp-cat', 'value', ''); set('cspp-q', 'value', '');
+      set('cspp-cat', 'value', ''); set('cspp-q', 'value', ''); set('cspp-vis', 'value', '');
       renderCsppEqPicker();
       renderCsppList();
     }
@@ -23312,6 +23575,18 @@
             <li><b>Jenis corrective</b> — Immediate / Deferred / Reactive (kosongkan = otomatis dari kategori).</li>
           </ul>
           <p>Tombol <b>Selesai</b> di daftar downtime akan membuka form kalau failure mode/cause belum lengkap.</p>
+          <p class="font-bold text-slate-800 mt-3">Langkah 8 — Spare Part VIS (RAM → Reliability → 📦 CSPP)</p>
+          ${tbl(['Kelas', 'Arti (Tabel 1 pedoman)', 'Ditentukan dari'], [
+            ['<b>V — Vital</b>', 'Part peralatan SECE/PCE. Kalau tidak ada → keselamatan turun / LPO. <b>Zero stock tidak berlaku — wajib ada di gudang.</b>', 'Terkait ≥1 equipment SECE/PCE'],
+            ['<b>I — Important</b>', 'Part peralatan di luar SECE/PCE. Kalau tidak ada → produksi jalan tapi kapasitas turun.', 'Terkait equipment Important'],
+            ['<b>S — Secondary</b>', 'Part pendukung lainnya.', 'Selain di atas / belum dipetakan'],
+          ])}
+          <ul class="list-disc pl-5 space-y-0.5">
+            <li>Kelas dihitung <b>otomatis</b> dari criticality equipment yang terkait dengan part (lewat <b>Kelola Part Kritis</b> di CSPP atau kolom equipment terkait di Gudang Logbook). Klik badge V/I/S untuk koreksi manual, isi stok maksimum, atau catat <b>No. reservasi SAP</b>.</li>
+            <li>Stok <b>0 karena dipinjamkan</b> (Peminjaman Part di Input Harian, belum ada stok masuk sesudahnya) tampil <b>🤝 Dipinjam</b>, bukan Habis — tidak memicu alert Vital habis.</li>
+            <li><b>Usia simpan</b> dihitung FIFO dari catatan stok masuk Gudang (tanda ± = perkiraan dari tgl masuk). Batas: Lubricant 24 bln, Consumable 36 bln, lainnya 60 bln.</li>
+            <li><b>📈 Rekomendasi 2 Tahun</b> = pemakaian rata-rata 24 bulan terakhir × 24 + stok minimum − stok sekarang. Bisa diekspor ke Excel untuk usulan pengadaan.</li>
+          </ul>
           <p class="bg-cyan-50 border border-cyan-200 rounded p-2 text-xs"><b>Urutan kerja yang disarankan:</b> mulai dari <b>BOP System</b> & <b>Well Control System</b> → <b>Mobile Rig, Carrier, Hoisting, Mast</b> → <b>Circulating System, Generator Set</b> → sisanya. Salah input? Admin bisa <b>Hapus</b> di tabel riwayat — status unit otomatis kembali ke penilaian sebelumnya.</p>
           <p class="text-xs text-slate-500"><b>Beda dengan Risk Assessment (CoF/PoF) lama:</b> CoF & Risk Level dari pedoman PEP 2023 masih tampil berdampingan. Criticality AIR adalah klasifikasi resmi pedoman yang baru.</p>`)}
         </div>
