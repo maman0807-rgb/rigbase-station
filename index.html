@@ -18507,7 +18507,6 @@
       const kurang = lhv2Kurang(e);
       const cekFlags = (e.flags || []).filter(f => f.level === 'cek' && f.kode !== 'equipment_belum_cocok');
       const isTS = e._isTS ?? (e.status_kerja === 'TS' || /\bTS\b/i.test(e.jenis_asli || ''));
-      const desk = (e.checklist || []).map(c => c.item).join('\n');
       const partTxt = (e.part || []).map(x => [x.nama, x.pn, x.qty != null ? `${x.qty}${x.satuan ? ' ' + x.satuan : ''}` : null, x.sumber].filter(v => v != null && v !== '').join(' | ')).join('\n');
       const merah = c => c ? 'border-red-400 bg-red-50' : '';
       return `<div class="bg-white rounded-xl border ${kurang.length ? 'border-red-300' : 'border-slate-200'} p-4 space-y-3">
@@ -18578,10 +18577,17 @@
 
         <div>
           <div class="flex items-center justify-between mb-1">
-            ${lbl('Deskripsi pekerjaan <span class="normal-case font-normal text-slate-400">(1 baris = 1 poin)</span>').replace('mb-1', 'mb-0')}
+            ${lbl('Deskripsi pekerjaan <span class="normal-case font-normal text-slate-400">(1 baris = 1 langkah, centang = sudah dikerjakan)</span>').replace('mb-1', 'mb-0')}
             ${!readonly && (e.checklist || []).some(c => lhfPecahKomaTeks(c.item).length > 1) ? `<button type="button" onclick="lhfPecahKoma(${i})" class="text-[11px] font-semibold text-navy hover:underline">↳ Pecah per koma</button>` : ''}
           </div>
-          <textarea ${dis} rows="${Math.max(3, (e.checklist || []).length + 1)}" oninput="lhfSetDeskripsi(${i},this.value)" class="${inp}">${escapeHtml(desk)}</textarea></div>
+          <div class="space-y-1">
+            ${(e.checklist || []).map((c, ci) => `<div class="flex items-center gap-2">
+              <input type="checkbox" ${c.checked ? 'checked' : ''} ${dis} onchange="lhChecklistToggle(${i},${ci},this.checked)" class="w-4 h-4 accent-navy flex-shrink-0">
+              <input ${dis} value="${escapeHtml(c.item || '')}" oninput="lhChecklistText(${i},${ci},this.value)" class="flex-1 border border-slate-300 rounded-lg px-2 py-1.5 text-sm">
+              ${!readonly ? `<button onclick="lhChecklistRemove(${i},${ci})" class="text-red-400 hover:text-red-600 text-xs px-1" title="Hapus poin">✕</button>` : ''}
+            </div>`).join('') || '<div class="text-xs text-slate-400 italic">Belum ada deskripsi.</div>'}
+          </div>
+          ${!readonly ? `<button onclick="lhChecklistAdd(${i})" class="text-xs text-navy hover:underline mt-1">+ poin</button>` : ''}</div>
         <div>${lbl('Part <span class="normal-case font-normal text-slate-400">(1 baris: nama | qty satuan — hanya dicatat)</span>')}
           <textarea ${dis} rows="${Math.max(2, (e.part || []).length)}" oninput="lhv2SetPart(${i},this.value)" class="${inp} font-mono text-xs">${escapeHtml(partTxt)}</textarea></div>
 
