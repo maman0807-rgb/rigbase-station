@@ -1,0 +1,136 @@
+*LAPORAN HARIAN HOIST & HEAVY EQUIPMENT*
+*Selasa, 06/10/2026*
+
+*A. STATUS RIG*
+*BW-100A*| OGN-39  |  Engine rig carrier, engine mud pump & all genset operasi
+
+*BW H35KD*| GNK-89  |  Persiapan program moving ke TLJ-104
+
+*BW KB150A*| TLJ-255 |  Unit engine operasi lanjut Rig up Upper mast.
+
+*BW KB150B*| GNK-39 | Unit operasi moving dari GNK-72 ke GNK-39, install matting & landaskan unit rig, rig up lower & upper mast 
+
+*BW KB150C*| TTB-17  | all unit operasi, cleaning fuel filter engine genset CAT, test function (ok)
+
+*B. PEKERJAAN*
+*1. BARU – BW-KB150A – Rig carier*
+Unit      : BW KB150A
+Equipment : Rig carier
+SN/Model  :
+Jenis     : CM (TS)
+Gejala    : low pressure air system
+Mulai     : 06/10/2026 10.00
+Selesai   : 06/10/2026 17.00
+Time : 10.00 S/d 17.00
+HM/RH/KM  : 14200
+Lokasi    : TLJ-255
+PIC       : Ilham, dipta, rizki
+Deskripsi pekerjaan :
+* Install R5 Valve crownomatic, F/T setting crownomatic ok
+* Compressor bocor pada connector oli, ganti connector aman, tidak ada kebocoran
+* Fill up oli engine rig carier dan oli stock (ATF, RORED, MEDITRAN S40)
+* Isi air water spark arrestor sampai penuh
+Part:
+* Valve R5 |1 pcs|
+* Quick Valve |2 Pcs|
+* Pelumas (atf, meditran, rored s140) 
+Status    : Progress 100%
+
+*2. LANJUT – BW H35KD – Tower light JCB*
+Unit      : BW H35KD
+Equipment : Tower light JCB
+SN/Model  : X2CH25843
+Jenis     : CM (TS)
+Gejala    : Short Line electrical
+Mulai Pekerjaan    : 30/09/2026
+Selesai Pekerjaan : - 
+Time :
+HM/RH/KM  : 14200
+Lokasi    : GNK-89
+PIC       : David
+Deskripsi pekerjaan (10.00–15.55):
+* Check all around
+* Dismantle body cover 
+* Dismantle Dinamo stater di Test Ok
+* Install Dinamo stater 
+* Replace sekring dan rumah sekring
+* Isolasi kabel yg terindikasi short
+* Test Running (keluar asap dari rumah sekring)
+* check visual kabel (tidak ada yg terkelupas)
+* housekeeping area
+Status    : Progress 70%
+
+*3. LANJUT – Fire pump Ziegler*
+SN/Model  : Portable pump Ziegler LD425/2
+Jenis     : CM (TS unit tidak bisa running)
+HM/RH/KM  : -
+Mulai Pekerjaan : 5/08/2026
+Selesai Pekerjaan : -
+Time :
+Deskripsi pekerjaan: -
+Status    : Tunggu part, Progress 30%
+
+*4. LANJUT – MAN FT-03 BG 8015 CZ*
+SN/Model  : MAN – 20830005312999
+Jenis     : CM (TS low power)
+Mulai Pekerjaan : 02/09/2026
+Selesai Pekerjaan : -
+Time :
+Lokasi : BPK
+PIC  : RAM Hoist
+Deskripsi pekerjaan: - 
+*Status    : tunggu realise SPK, Progress 20%
+
+*5. LANJUT – Dozer D7G BDEH-433*
+SN/Model  : 7MB02721
+Jenis     : CM (radiator leak & track kendor)
+Mulai Pekerjaan : 02/09/2026
+Selesai Pekerjaan : -
+Time :
+Lokasi    : SP 6 TLJ
+Deskripsi pekerjaan: - 
+Status    : Tunggu Tim Trakindo untuk perbaikan 78%
+
+*6. LANJUT – Genset Perkins MTU*
+SN/Model  : Perkins – DK32000U468058B
+Jenis  : OH (TOH)
+Mulai Pekerjaan : 26/06/2026
+Selesai Pekerjaan : -
+Time :
+Lokasi : BPM
+Deskripsi pekerjaan: - 
+Status : Tunggu part 45%
+
+*7. LANJUT – Hino TS-03 BG 8013 CZ*
+Jenis     : install part recomendation
+HM/RH/KM  : KM 16911,6
+Lokasi   : BPK
+Mulai Pekerjaan : 31/07/2026
+Selesai Pekerjaan : 06/10/2026
+Time : 09.00 S/d 15.30 WIB
+Deskripsi pekerjaan :
+* check all around
+* Persiapan tools 
+* Install crossjoint 2ea *(ok)*
+* Install Sling coupling *(ok)*
+* install kembali ban depan kiri dan kanan *(ok)*
+* Housekeeping
+Part:
+* Cross Joint |2 pcs|
+* Sling Coupling |2 Pcs|
+Status    : Pekerjaan selesai, Progress 100%
+
+*8. Lanjut – Genset Krisbow Dongfeng MTU – Engine not crank*
+Unit      : Genset Krisbow Dongfeng MTU
+Jenis     : CM
+Gejala    : Engine Cant running
+Mulai Pekerjaan : 05/10/2026 ..
+Selesai Pekerjaan : -
+Time 14.00 S/d 15.00 WIB
+HM/RH/KM  : 14219,7
+Lokasi    : BPM
+Deskripsi pekerjaan :
+* Check Unit Engine genset yang baru dikirim dari MTU
+* Reposisi Unit Genset
+* TTD serah terima Genset *(ok)*
+Status    : Pekerjaan Lanjut, progress 30%

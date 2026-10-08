@@ -35,6 +35,7 @@
 
   <!-- SheetJS untuk export Excel -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="js/laporan_harian_v2.js"></script>
 
   <style>
     body { font-family: 'Inter', system-ui, sans-serif; }
@@ -17637,7 +17638,7 @@
       if (lhEquipmentList) return lhEquipmentList;
       const { data, error } = await state.supabase
         .from('equipment')
-        .select('id, tag_number, nama_equipment, brand, model, serial_number, running_hours, status_operasi')
+        .select('id, tag_number, nama_equipment, brand, model, serial_number, running_hours, status_operasi, assigned_unit_id, pm_type')
         .order('tag_number');
       if (error) { toast('Gagal ambil daftar equipment: ' + error.message, 'error'); lhEquipmentList = []; return lhEquipmentList; }
       lhEquipmentList = data || [];
@@ -17660,7 +17661,7 @@
       const filterStatus = lhState.filterStatus || '';
       let q = state.supabase
         .from('laporan_harian')
-        .select('id, tanggal, tim, status, sumber, created_at, verified_by_name, verified_at')
+        .select('id, tanggal, tim, status, sumber, format_versi, created_at, verified_by_name, verified_at')
         .order('tanggal', { ascending: false });
       if (bulan) {
         const start = `${bulan}-01`;
@@ -17719,7 +17720,10 @@
               <h3 class="text-base font-bold text-navy">📝 Laporan Harian RAM</h3>
               ${draftCount ? `<p class="text-xs text-amber-600 font-semibold mt-0.5">⚠️ ${draftCount} laporan draft menunggu review</p>` : ''}
             </div>
-            <button onclick="lhStartCreate()" class="px-4 py-2 rounded-lg bg-navy text-white text-sm font-semibold hover:bg-navy/90">+ Buat Laporan Manual</button>
+            <div class="flex gap-2 flex-wrap">
+              <button onclick="lhOpenTempel()" class="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700">📋 Tempel Laporan</button>
+              <button onclick="lhStartCreate()" class="px-4 py-2 rounded-lg bg-navy text-white text-sm font-semibold hover:bg-navy/90">+ Buat Laporan Manual</button>
+            </div>
           </div>
           ${dupDates.length ? `<div class="bg-red-50 border border-red-200 rounded-xl p-3 space-y-2">
             <p class="text-xs font-semibold text-red-700">⚠️ ${dupDates.length} tanggal punya laporan draft ganda (kemungkinan dari bot) — sebaiknya digabungkan:</p>
@@ -17779,7 +17783,7 @@
             <div class="flex items-center gap-2 flex-wrap">
               <span class="font-semibold text-slate-800">${fmtDate(r.tanggal)}</span>
               ${r.status === 'draft' ? '<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">DRAFT</span>' : '<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">FINAL</span>'}
-              <span class="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">${r.sumber === 'bot_telegram' ? '🤖 Telegram' : r.sumber === 'bot_whatsapp' ? '🤖 WhatsApp' : '✍️ Manual'}</span>
+              <span class="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">${r.format_versi === 'v2' ? '📋 Tempel (format baru)' : r.sumber === 'bot_telegram' ? '🤖 Telegram' : r.sumber === 'bot_whatsapp' ? '🤖 WhatsApp' : '✍️ Manual'}</span>
             </div>
             <div class="text-xs text-slate-400 mt-1">${entries.length} unit${cmCount ? ` · ${cmCount} CM/TS aktif` : ''}${avgProg !== null ? ` · rata-rata progress ${avgProg}%` : ''}${followCount ? ` · <span class="text-red-500 font-semibold">${followCount} follow-up</span>` : ''}</div>
             ${r.verified_by_name ? `<div class="text-[11px] text-emerald-600 mt-0.5">✅ Diverifikasi oleh ${escapeHtml(r.verified_by_name)}</div>` : (r.status === 'draft' ? `<div class="text-[11px] text-amber-600 mt-0.5">⏳ Menunggu verifikasi</div>` : '')}
@@ -17893,6 +17897,7 @@
             <summary class="cursor-pointer font-semibold">📄 Teks asli laporan</summary>
             <pre class="whitespace-pre-wrap mt-2 text-slate-600">${escapeHtml(header.raw_text)}</pre>
           </details>` : ''}
+          ${lhv2StatusRigHtml(header)}
           <div id="lh-entries" class="space-y-3"></div>
           ${!readonly ? `<button onclick="lhAddEntry()" class="text-sm text-navy font-semibold hover:underline">+ Tambah Unit</button>` : ''}
           <div class="flex items-center gap-2 pt-2 border-t border-slate-200 flex-wrap">
@@ -18097,6 +18102,7 @@
           <label class="block text-[11px] font-semibold text-red-500 uppercase mb-1">⚠️ Follow-up (1 baris = 1 item)</label>
           <textarea ${dis} rows="2" oninput="lhFollowUpFromText(${i},this.value)" placeholder="mis. ganti bearing pompa pully" class="w-full border border-red-200 rounded-lg px-2 py-1.5 text-sm bg-red-50/40">${(e.follow_up_items || []).join('\n')}</textarea>
         </div>
+        ${lhv2CardHtml(e, i, dis)}
       </div>`;
     }
 
@@ -18189,6 +18195,249 @@
     window.lhAddEntry = lhAddEntry;
     function lhRemoveEntry(i) { lhState.entries.splice(i, 1); lhRenderEntriesList(); }
     window.lhRemoveEntry = lhRemoveEntry;
+
+    // ============================================================
+    // LAPORAN HARIAN v2 — "📋 Tempel Laporan" (format rangkuman baru, Fase 40)
+    // Rangkuman Telegram ditempel → js/laporan_harian_v2.js (tanpa AI) → draft biasa.
+    // ============================================================
+    const LHV2_STATUS_CLS = { Selesai: 'bg-emerald-100 text-emerald-700', Tunggu: 'bg-amber-100 text-amber-800', Progress: 'bg-blue-100 text-blue-700' };
+    let lhv2Parsed = null;
+
+    function lhOpenTempel() {
+      if (!window.LaporanHarianV2) { toast('Modul pembaca laporan belum termuat — muat ulang halaman.', 'error'); return; }
+      lhv2Parsed = null;
+      openModal({
+        title: '📋 Tempel Laporan Harian (format baru)',
+        maxWidth: 'max-w-3xl',
+        body: `
+          <div class="space-y-3">
+            <p class="text-xs text-slate-500">Salin rangkuman dari Telegram (mulai dari <b>*LAPORAN HARIAN HOIST &amp; HEAVY EQUIPMENT*</b> sampai blok pekerjaan terakhir), tempel di bawah, lalu klik <b>Baca</b>. Kalau pesannya terpotong jadi beberapa bagian, tempel semuanya berurutan.</p>
+            <textarea id="lhv2-teks" rows="10" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-mono outline-none focus:ring-2 focus:ring-navy" placeholder="*LAPORAN HARIAN HOIST & HEAVY EQUIPMENT*&#10;*Selasa, 06/10/2026*&#10;..."></textarea>
+            <div id="lhv2-preview"></div>
+          </div>`,
+        footer: `<button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm font-medium">Batal</button>
+                 <button onclick="lhv2Baca()" class="px-4 py-2 rounded-lg bg-navy hover:bg-navy/80 text-white text-sm font-semibold">🔍 Baca</button>
+                 <button id="lhv2-buat" onclick="lhv2BuatDraft()" disabled class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold disabled:opacity-40">✅ Buat Draft</button>`,
+      });
+    }
+    window.lhOpenTempel = lhOpenTempel;
+
+    function lhv2FlagHtml(flags) {
+      return (flags || []).map(f => `<div class="text-[11px] ${f.level === 'kurang' ? 'text-red-700' : 'text-amber-700'}">${f.level === 'kurang' ? '⛔' : '⚠️'} ${escapeHtml(f.pesan)}</div>`).join('');
+    }
+
+    async function lhv2Baca() {
+      const teks = document.getElementById('lhv2-teks')?.value || '';
+      const host = document.getElementById('lhv2-preview');
+      const btn = document.getElementById('lhv2-buat');
+      if (!teks.trim()) { toast('Tempel teks laporan dulu.', 'warn'); return; }
+      await lhEnsureEquipmentList();
+      const r = window.LaporanHarianV2.parseLaporan(teks);
+      // Cocokkan ke master equipment (hanya kalau satu kandidat jelas — tidak menebak)
+      r.pekerjaan.forEach(p => {
+        p._match = window.LaporanHarianV2.cocokkanEquipment(p, lhEquipmentList || [], state.parentUnits || []);
+        if (!p._match) p.flags.push({ level: 'cek', kode: 'equipment_belum_cocok', pesan: 'Belum dicocokkan ke master equipment — pilih di kartu' });
+      });
+      // Pekerjaan yang masih open di laporan sebelumnya tapi tidak muncul hari ini
+      r._hilang = [];
+      if (r.tanggal) {
+        try {
+          const { data: prev } = await state.supabase.from('laporan_harian').select('id, tanggal')
+            .lt('tanggal', r.tanggal).eq('format_versi', 'v2').order('tanggal', { ascending: false }).limit(1);
+          if (prev && prev[0]) {
+            const { data: ents } = await state.supabase.from('laporan_harian_entries')
+              .select('unit_lapor, judul_lapor, status_v2').eq('laporan_id', prev[0].id).not('tipe_v2', 'is', null);
+            const k = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+            const sekarang = new Set(r.pekerjaan.map(p => k(p.unit) + '|' + k(p.equipment)));
+            r._hilang = (ents || []).filter(e => e.status_v2 !== 'Selesai' && !sekarang.has(k(e.unit_lapor) + '|' + k(e.judul_lapor)))
+              .map(e => `${e.unit_lapor ? e.unit_lapor + ' – ' : ''}${e.judul_lapor || ''}`);
+            r._prevTanggal = prev[0].tanggal;
+          }
+        } catch { /* kolom v2 belum ada → lewati */ }
+      }
+      lhv2Parsed = { r, teks };
+      const nKurang = r.pekerjaan.reduce((a, p) => a + p.flags.filter(f => f.level === 'kurang').length, 0) + r.flags.filter(f => f.level === 'kurang').length;
+      const nCek = r.pekerjaan.reduce((a, p) => a + p.flags.filter(f => f.level === 'cek').length, 0) + r.flags.filter(f => f.level === 'cek').length + r._hilang.length;
+      const eqName = id => { const e = (lhEquipmentList || []).find(x => x.id === id); return e ? `${e.tag_number}` : ''; };
+      host.innerHTML = `
+        <div class="border border-slate-200 rounded-lg p-3 space-y-2">
+          <div class="text-sm"><b>${r.tanggal ? fmtDate(r.tanggal) : '<span class="text-red-600">Tanggal tidak terbaca</span>'}</b> · Status rig: <b>${r.status_rig.length}</b> · Pekerjaan: <b>${r.pekerjaan.length}</b>
+            (${r.pekerjaan.filter(p => p.tipe === 'BARU').length} baru, ${r.pekerjaan.filter(p => p.tipe === 'LANJUT').length} lanjut, ${r.pekerjaan.filter(p => p.status === 'Selesai').length} selesai)</div>
+          <div class="text-xs"><span class="text-red-700 font-semibold">⛔ Isian kurang: ${nKurang}</span> · <span class="text-amber-700 font-semibold">⚠️ Perlu dicek: ${nCek}</span>
+            <span class="text-slate-400">— bisa dilengkapi di kartu draft sebelum Simpan Final</span></div>
+          ${lhv2FlagHtml(r.flags)}
+          ${r._hilang.length ? `<div class="text-[11px] text-amber-700">⚠️ Masih open di laporan ${fmtDate(r._prevTanggal)} tapi tidak muncul hari ini: ${r._hilang.map(escapeHtml).join('; ')}</div>` : ''}
+          <div class="max-h-72 overflow-y-auto divide-y divide-slate-100">
+            ${r.pekerjaan.map(p => `
+              <div class="py-1.5">
+                <div class="text-xs flex items-center gap-1.5 flex-wrap">
+                  <b>#${p.no}</b>
+                  <span class="px-1.5 rounded text-[10px] font-bold ${p.tipe === 'BARU' ? 'bg-navy text-white' : 'bg-slate-200 text-slate-700'}">${p.tipe}</span>
+                  <span class="font-semibold">${escapeHtml([p.unit_rig ? p.unit : null, p.equipment].filter(Boolean).join(' – ') || p.judul)}</span>
+                  ${p.jenis ? `<span class="text-slate-500">${escapeHtml(p.jenis)}${p.is_ts ? ' (TS)' : ''}</span>` : ''}
+                  ${p.status ? `<span class="px-1.5 rounded text-[10px] font-semibold ${LHV2_STATUS_CLS[p.status]}">${p.status}${p.progress != null ? ' ' + p.progress + '%' : ''}</span>` : ''}
+                  ${p._match ? `<span class="text-[10px] text-emerald-700">↔ ${escapeHtml(eqName(p._match.id))}</span>` : ''}
+                </div>
+                ${lhv2FlagHtml(p.flags)}
+              </div>`).join('')}
+          </div>
+        </div>`;
+      if (btn) btn.disabled = !r.tanggal || !r.pekerjaan.length && !r.status_rig.length;
+    }
+    window.lhv2Baca = lhv2Baca;
+
+    function lhv2KeEntry(p) {
+      const eq = p._match ? (lhEquipmentList || []).find(x => x.id === p._match.id) : null;
+      const label = [p.unit_rig ? p.unit : (p.unit && p.unit !== p.equipment ? p.unit : null), p.equipment || p.judul].filter(Boolean).join(' – ');
+      const catatan = [p.status_asli ? `Status: ${p.status_asli}` : null, p.judul_ket ? `Ket. judul: ${p.judul_ket}` : null].filter(Boolean).join('\n');
+      return {
+        equipment_id: eq ? eq.id : null,
+        equipment_manual_nama: eq ? null : label,
+        site: p.lokasi || '',
+        status_kerja: p.status_kerja || 'Lainnya',
+        job_desc: [p.jenis_asli || p.jenis, p.gejala].filter(Boolean).join(' – '),
+        brand: eq?.brand || '', model: eq?.model || '', sn: p.sn || eq?.serial_number || '',
+        rh: p.meter_nilai ?? '',
+        waktu_mulai: '', waktu_selesai: '',
+        checklist: p.deskripsi.map(item => ({ item, checked: true })),
+        progress_pct: p.progress ?? '',
+        notes: catatan,
+        follow_up_items: p.status === 'Tunggu' ? [`Tunggu ${p.status_ket || ''}`.trim()] : [],
+        // kolom v2
+        tipe_v2: p.tipe, no_urut: p.no, unit_lapor: p.unit, judul_lapor: p.equipment || p.judul,
+        jenis: p.jenis, jenis_asli: p.jenis_asli, gejala: p.gejala,
+        mulai_pekerjaan: p.mulai, selesai_pekerjaan: p.selesai, jam_mulai: p.jam_mulai, jam_selesai: p.jam_selesai,
+        meter_tipe: p.meter_tipe, rig_stop: p.rig_stop, rig_stop_ket: p.rig_stop_ket, pic: p.pic, no_wo: p.no_wo,
+        status_v2: p.status, status_ket: p.status_ket, status_asli: p.status_asli,
+        part: p.part, flags: p.flags, _unit_rig: p.unit_rig,
+      };
+    }
+
+    async function lhv2BuatDraft() {
+      if (!lhv2Parsed) return;
+      const { r, teks } = lhv2Parsed;
+      const btn = document.getElementById('lhv2-buat');
+      // Laporan untuk tanggal yang sama sudah ada?
+      const { data: ada, error: e0 } = await state.supabase.from('laporan_harian').select('id, status').eq('tanggal', r.tanggal);
+      if (e0) { toast('Gagal cek laporan: ' + e0.message, 'error'); return; }
+      if ((ada || []).some(x => x.status === 'final')) {
+        toast(`Laporan ${fmtDate(r.tanggal)} sudah FINAL — tidak dibuat ulang. Buka laporan itu dan klik Edit kalau perlu diubah.`, 'warn');
+        return;
+      }
+      if ((ada || []).length) {
+        const ganti = await confirmDialog({ title: 'Draft sudah ada', message: `Sudah ada ${ada.length} draft untuk ${fmtDate(r.tanggal)}. Ganti dengan hasil tempelan ini? (draft lama dihapus)`, confirmText: 'Ganti Draft', danger: true });
+        if (!ganti) return;
+        const { error: ed } = await state.supabase.from('laporan_harian').delete().in('id', ada.map(x => x.id));
+        if (ed) { toast('Gagal hapus draft lama: ' + ed.message, 'error'); return; }
+      }
+      if (btn) { btn.disabled = true; btn.textContent = 'Menyimpan…'; }
+      try {
+        const { data: hdr, error: eh } = await state.supabase.from('laporan_harian').insert({
+          tanggal: r.tanggal, tim: 'RAM Hoist & Heavy Equipment', status: 'draft', sumber: 'manual_app',
+          raw_text: teks, format_versi: 'v2', status_rig: r.status_rig, created_by: state.user.id,
+        }).select('id').single();
+        if (eh) throw eh;
+        const rows = r.pekerjaan.map(p => { const { _unit_rig, ...e } = lhv2KeEntry(p); return {
+          ...e, laporan_id: hdr.id, rh: e.rh === '' ? null : Number(e.rh), progress_pct: e.progress_pct === '' ? null : Number(e.progress_pct),
+          waktu_mulai: null, waktu_selesai: null };
+        });
+        if (rows.length) {
+          const { error: ee } = await state.supabase.from('laporan_harian_entries').insert(rows);
+          if (ee) throw ee;
+        }
+        await logActivity('laporan_harian_tempel', 'laporan_harian', hdr.id, fmtDate(r.tanggal), { pekerjaan: rows.length });
+        closeModal();
+        toast(`Draft ${fmtDate(r.tanggal)} dibuat — ${rows.length} pekerjaan. Cek isian yang ditandai, lalu Simpan Final.`, 'success');
+        lhOpenDetail(hdr.id);
+      } catch (err) {
+        toast('Gagal membuat draft: ' + err.message, 'error');
+        if (btn) { btn.disabled = false; btn.textContent = '✅ Buat Draft'; }
+      }
+    }
+    window.lhv2BuatDraft = lhv2BuatDraft;
+
+    // Isian "kurang" dihitung ulang dari nilai kartu SAAT INI (bukan flag lama dari tempelan)
+    function lhv2Kurang(e) {
+      if (!e.tipe_v2) return [];
+      const out = [];
+      const unitRig = !!window.LaporanHarianV2?.normalisasiUnit(e.unit_lapor);
+      if (!e.equipment_id && !(e.equipment_manual_nama || '').trim()) out.push('equipment kosong');
+      if (e.jenis === 'CM' && !(e.gejala || '').trim()) out.push('CM tanpa gejala');
+      if (e.jenis === 'CM' && unitRig && (e.rig_stop === null || e.rig_stop === undefined || e.rig_stop === '')) out.push('rig stop belum diisi');
+      if (e.tipe_v2 === 'LANJUT' && !e.mulai_pekerjaan) out.push('LANJUT tanpa tanggal mulai');
+      if (e.status_v2 === 'Selesai' && !e.selesai_pekerjaan) out.push('selesai tanpa tanggal selesai');
+      return out;
+    }
+
+    function lhv2CardHtml(e, i, dis) {
+      if (!e.tipe_v2) return '';
+      const inp = 'w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm';
+      const kurang = lhv2Kurang(e);
+      const cekFlags = (e.flags || []).filter(f => f.level === 'cek' && f.kode !== 'equipment_belum_cocok');
+      const partTxt = (e.part || []).map(x => [x.nama, x.pn, x.qty != null ? `${x.qty}${x.satuan ? ' ' + x.satuan : ''}` : null, x.sumber].filter(v => v != null && v !== '').join(' | ')).join('\n');
+      return `
+        <div class="border-t border-dashed border-slate-200 pt-3 space-y-2">
+          <div class="flex items-center gap-1.5 flex-wrap text-xs">
+            <b class="text-slate-500">#${e.no_urut ?? ''}</b>
+            <span class="px-1.5 rounded text-[10px] font-bold ${e.tipe_v2 === 'BARU' ? 'bg-navy text-white' : 'bg-slate-200 text-slate-700'}">${e.tipe_v2}</span>
+            ${e.unit_lapor ? `<span class="text-slate-600">Unit: <b>${escapeHtml(e.unit_lapor)}</b></span>` : ''}
+            ${e.jenis ? `<span class="text-slate-600">Jenis: <b>${escapeHtml(e.jenis)}</b>${e.jenis_asli && e.jenis_asli !== e.jenis ? ` <span class="text-slate-400">(${escapeHtml(e.jenis_asli)})</span>` : ''}</span>` : ''}
+            ${e.status_v2 ? `<span class="px-1.5 rounded text-[10px] font-semibold ${LHV2_STATUS_CLS[e.status_v2] || ''}">${e.status_v2}${e.status_ket ? ': ' + escapeHtml(e.status_ket) : ''}</span>` : ''}
+            ${e.meter_tipe ? `<span class="text-slate-400">meter ${e.meter_tipe}</span>` : ''}
+          </div>
+          ${kurang.length ? `<div class="bg-red-50 border border-red-200 rounded px-2 py-1 text-[11px] text-red-700">⛔ Isian kurang: ${kurang.join(', ')}</div>` : ''}
+          ${cekFlags.length ? `<div class="bg-amber-50 border border-amber-200 rounded px-2 py-1">${lhv2FlagHtml(cekFlags)}</div>` : ''}
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div class="col-span-2"><label class="block text-[11px] font-semibold text-slate-500 uppercase mb-1">Gejala</label>
+              <input ${dis} value="${escapeHtml(e.gejala || '')}" oninput="lhv2Set(${i},'gejala',this.value)" class="${inp} ${e.jenis === 'CM' && !(e.gejala || '').trim() ? 'border-red-400 bg-red-50' : ''}"></div>
+            <div><label class="block text-[11px] font-semibold text-slate-500 uppercase mb-1">Mulai pekerjaan</label>
+              <input ${dis} type="date" value="${e.mulai_pekerjaan || ''}" onchange="lhv2Set(${i},'mulai_pekerjaan',this.value||null)" class="${inp} ${e.tipe_v2 === 'LANJUT' && !e.mulai_pekerjaan ? 'border-red-400 bg-red-50' : ''}"></div>
+            <div><label class="block text-[11px] font-semibold text-slate-500 uppercase mb-1">Selesai pekerjaan</label>
+              <input ${dis} type="date" value="${e.selesai_pekerjaan || ''}" onchange="lhv2Set(${i},'selesai_pekerjaan',this.value||null)" class="${inp} ${e.status_v2 === 'Selesai' && !e.selesai_pekerjaan ? 'border-red-400 bg-red-50' : ''}"></div>
+            <div><label class="block text-[11px] font-semibold text-slate-500 uppercase mb-1">Jam kerja</label>
+              <div class="flex gap-1"><input ${dis} value="${escapeHtml(e.jam_mulai || '')}" placeholder="10:00" oninput="lhv2Set(${i},'jam_mulai',this.value,true)" class="${inp}"><input ${dis} value="${escapeHtml(e.jam_selesai || '')}" placeholder="17:00" oninput="lhv2Set(${i},'jam_selesai',this.value,true)" class="${inp}"></div></div>
+            <div><label class="block text-[11px] font-semibold text-slate-500 uppercase mb-1">Rig stop</label>
+              <select ${dis} onchange="lhv2Set(${i},'rig_stop',this.value===''?null:this.value==='1')" class="${inp} bg-white ${lhv2Kurang(e).includes('rig stop belum diisi') ? 'border-red-400 bg-red-50' : ''}">
+                <option value="" ${e.rig_stop == null ? 'selected' : ''}>—</option><option value="1" ${e.rig_stop === true ? 'selected' : ''}>Ya</option><option value="0" ${e.rig_stop === false ? 'selected' : ''}>Tidak</option>
+              </select></div>
+            <div><label class="block text-[11px] font-semibold text-slate-500 uppercase mb-1">Rig stop (jam/ket)</label>
+              <input ${dis} value="${escapeHtml(e.rig_stop_ket || '')}" placeholder="mis. 7 jam" oninput="lhv2Set(${i},'rig_stop_ket',this.value,true)" class="${inp}"></div>
+            <div><label class="block text-[11px] font-semibold text-slate-500 uppercase mb-1">PIC</label>
+              <input ${dis} value="${escapeHtml(e.pic || '')}" oninput="lhv2Set(${i},'pic',this.value,true)" class="${inp}"></div>
+          </div>
+          <div><label class="block text-[11px] font-semibold text-slate-500 uppercase mb-1">Part <span class="normal-case font-normal text-slate-400">(1 baris: nama | qty — hanya dicatat, tidak memotong stok)</span></label>
+            <textarea ${dis} rows="${Math.max(2, (e.part || []).length)}" oninput="lhv2SetPart(${i},this.value)" class="${inp} font-mono text-xs">${escapeHtml(partTxt)}</textarea></div>
+        </div>`;
+    }
+    // diam = true → tidak render ulang kartu (input teks, supaya kursor tidak lompat)
+    function lhv2Set(i, field, value, diam) {
+      if (!lhState.entries[i]) return;
+      lhState.entries[i][field] = value;
+      if (!diam) lhRenderEntriesList();
+    }
+    window.lhv2Set = lhv2Set;
+    function lhv2SetPart(i, text) {
+      if (!lhState.entries[i]) return;
+      lhState.entries[i].part = String(text || '').split('\n').map(s => s.trim()).filter(Boolean).map(s => window.LaporanHarianV2.parsePart(s));
+    }
+    window.lhv2SetPart = lhv2SetPart;
+
+    function lhv2StatusRigHtml(header) {
+      const rows = header?.status_rig;
+      if (!Array.isArray(rows) || !rows.length) return '';
+      return `
+        <div class="bg-white rounded-xl border border-slate-200 p-4">
+          <div class="text-xs font-bold text-navy uppercase tracking-wider mb-2">A. Status Rig</div>
+          <div class="overflow-x-auto"><table class="w-full text-sm">
+            <thead><tr class="text-left text-xs text-slate-500 border-b"><th class="py-1 pr-2">Unit</th><th class="py-1 pr-2">Lokasi</th><th class="py-1">Keterangan</th></tr></thead>
+            <tbody>${rows.map(s => `<tr class="border-b border-slate-100 align-top">
+              <td class="py-1.5 pr-2 font-semibold whitespace-nowrap">${escapeHtml(s.unit || '')}</td>
+              <td class="py-1.5 pr-2 whitespace-nowrap">${escapeHtml(s.lokasi || '')}</td>
+              <td class="py-1.5">${escapeHtml(s.keterangan || '')}${s.rh ? `<div class="text-[11px] text-slate-500 mt-0.5">RH hari ini: ${Object.entries(s.rh).map(([k, v]) => `${escapeHtml(k)} ${v}`).join(' · ')}</div>` : ''}</td>
+            </tr>`).join('')}</tbody>
+          </table></div>
+        </div>`;
+    }
 
     async function lhDeleteReport() {
       const isFinal = lhState.header?.status === 'final';
@@ -18285,6 +18534,19 @@
         }
       }
 
+      // Laporan Harian v2: isian wajib dari format baru (bisa di-override admin)
+      const v2Kurang = lhState.entries.map((e, i) => ({ e, i, k: lhv2Kurang(e) })).filter(x => x.k.length);
+      if (v2Kurang.length) {
+        const okV2 = await confirmDialog({
+          title: '⛔ Isian format baru belum lengkap',
+          message: `${v2Kurang.length} pekerjaan masih kurang: ${v2Kurang.map(x => `#${x.e.no_urut ?? x.i + 1} ${x.e.judul_lapor || x.e.equipment_manual_nama || ''} (${x.k.join(', ')})`).join(' | ')}. Sebaiknya dilengkapi dulu. Tetap simpan?`,
+          confirmText: 'Tetap Simpan',
+          cancelText: 'Batal, Lengkapi Dulu',
+          danger: true,
+        });
+        if (!okV2) return;
+      }
+
       const isEditingFinal = lhState.header?.status === 'final';
       const ok = await confirmDialog({
         title: isEditingFinal ? 'Simpan Perubahan' : 'Konfirmasi & Simpan Final',
@@ -18334,6 +18596,16 @@
           progress_pct: e.progress_pct === '' || e.progress_pct === null ? null : Number(e.progress_pct),
           notes: e.notes || null,
           follow_up_items: e.follow_up_items || [],
+          // Laporan Harian v2 (NULL untuk entry format lama)
+          ...(e.tipe_v2 ? {
+            tipe_v2: e.tipe_v2, no_urut: e.no_urut ?? null, unit_lapor: e.unit_lapor || null, judul_lapor: e.judul_lapor || null,
+            jenis: e.jenis || null, jenis_asli: e.jenis_asli || null, gejala: e.gejala || null,
+            mulai_pekerjaan: e.mulai_pekerjaan || null, selesai_pekerjaan: e.selesai_pekerjaan || null,
+            jam_mulai: e.jam_mulai || null, jam_selesai: e.jam_selesai || null, meter_tipe: e.meter_tipe || null,
+            rig_stop: e.rig_stop === true || e.rig_stop === false ? e.rig_stop : null, rig_stop_ket: e.rig_stop_ket || null,
+            pic: e.pic || null, no_wo: e.no_wo || null, status_v2: e.status_v2 || null, status_ket: e.status_ket || null,
+            status_asli: e.status_asli || null, part: e.part || [], flags: e.flags || [],
+          } : {}),
         }));
         const { error: ee } = await state.supabase.from('laporan_harian_entries').insert(rows);
         if (ee) throw ee;
@@ -18344,6 +18616,8 @@
         for (const e of lhState.entries) {
           if (!e.equipment_id || e.rh === '' || e.rh === null) continue;
           const eq = (lhEquipmentList || []).find(x => x.id === e.equipment_id);
+          // Format baru: angka KM jangan masuk ke unit ber-HM (dan sebaliknya)
+          if (e.meter_tipe && eq && ((e.meter_tipe === 'KM') !== (eq.pm_type === 'km'))) continue;
           const newRh = Number(e.rh);
           if (eq && Number(eq.running_hours || 0) === newRh) continue;
           const { error: eu } = await state.supabase.from('equipment').update({ running_hours: newRh, updated_by: state.user.id, updated_at: new Date().toISOString() }).eq('id', e.equipment_id);
@@ -24472,6 +24746,24 @@
           <p><b>Layout:</b> 2 section terpisah — Berbasis JAM (engine, genset, pump) + Berbasis KM (Kendaraan, Damkar, Slickline truck).</p>
           <p><b>Catatan:</b> kolom Rusak/MTBF/Avail terisi seiring kamu mencatat kerusakan di tab Availability. Selama belum ada catatan, verdict bersandar pada umur saja.</p>
           <p>Pelengkap keputusan ganti: hasil <b>RLA</b> (batas layan) dan <b>biaya pemeliharaan per tahun</b> ada di tab 🧭 AIR tiap equipment (AIR langkah 9).</p>`)}
+
+        ${sec('#059669', '📝', 'Laporan Harian — Tempel Laporan (format rangkuman baru)', `
+          <p>Menu <b>RAM → 📝 Laporan Harian</b> (admin). Satu laporan per tanggal: <b>Draft</b> → dicek → <b>Simpan Final</b>. Saat final, RH/HM yang diisi meng-update HM equipment.</p>
+          <p class="font-semibold text-slate-800">Cara pakai format baru (sejak 06/10/2026):</p>
+          <ol class="list-decimal pl-5 space-y-0.5">
+            <li>Salin rangkuman dari Telegram — mulai <b>*LAPORAN HARIAN HOIST &amp; HEAVY EQUIPMENT*</b> sampai blok pekerjaan terakhir (kalau terpotong jadi beberapa pesan, salin semua berurutan).</li>
+            <li>Klik <b>📋 Tempel Laporan</b> → tempel → <b>🔍 Baca</b>. Pratinjau menampilkan tanggal, status rig, jumlah pekerjaan (baru/lanjut/selesai), isian kurang ⛔ dan yang perlu dicek ⚠️.</li>
+            <li>Klik <b>✅ Buat Draft</b> → tiap blok pekerjaan jadi satu kartu: deskripsi → checklist, Jenis → status kerja (CM (TS) → TS), Status → progress, HM/KM → RH, Tunggu … → follow-up. Equipment dicocokkan otomatis ke master <b>hanya kalau jelas</b> (SN sama / kode di tag / nama mirip) — yang belum cocok, pilih di kartu.</li>
+            <li>Lengkapi isian bertanda merah: gejala untuk CM, <b>Rig stop</b> untuk CM di unit rig, tanggal mulai untuk LANJUT, tanggal selesai kalau status selesai.</li>
+            <li><b>Simpan Final</b> seperti biasa. Sistem mengingatkan kalau isian belum lengkap (boleh tetap simpan), RH turun drastis, atau CM/TS belum dibuka Downtime-nya.</li>
+          </ol>
+          ${tbl(['Peringatan ⚠️', 'Arti'], [
+            ['HM/KM sama persis di unit lain', 'Kemungkinan salah salin dari blok lain — cek sebelum final (angka ini akan meng-update HM equipment)'],
+            ['Deskripsi menyebut beberapa equipment', 'Satu blok berisi beberapa pekerjaan berbeda — sebaiknya dipisah di laporan berikutnya'],
+            ['Jenis tidak dikenali', 'Jenis selain CM/PM/OH/Cat 3/Cat 4/Inspeksi — tersimpan sebagai Lainnya'],
+            ['Masih open kemarin tapi tidak muncul', 'Pekerjaan yang belum selesai di laporan sebelumnya tidak dilaporkan hari ini'],
+          ])}
+          <p class="text-xs text-slate-500">Part di laporan <b>hanya dicatat</b> — stok Gudang tetap dipotong lewat Input Harian Logbook. Angka KM tidak akan masuk ke unit ber-HM (dan sebaliknya). Teks asli laporan selalu bisa dilihat di draft. Laporan yang sudah FINAL tidak ditimpa oleh tempelan baru.</p>`)}
 
         ${sec('#7c3aed', '📸', 'Catat Downtime + Foto — workflow real-time', `
           <p>Setiap kejadian downtime bisa diupload <b>foto dengan tanggal kejadian</b> (bukan tanggal upload — supaya audit trail jujur kalau telat upload).</p>
