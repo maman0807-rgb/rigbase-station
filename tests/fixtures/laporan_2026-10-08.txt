@@ -1,0 +1,103 @@
+*LAPORAN HARIAN HOIST & HEAVY EQUIPMENT*
+*Kamis, 08/10/2026*
+
+*A. STATUS RIG*
+*BW-100A*| OGN-39  |  All Unit operasi, cleaning filter genset FG Wilson.
+
+*BW H35KD*| TLJ-104 |  Engine rig operasi lanjut Moving dari yard lappes ke TLJ-104, install matting & landaskan rig carier, rig up lower & upper mast.
+
+*BW KB150A*| TLJ-255 |  All unit operasi, Tambah pelumasan drawwork.
+
+*BW KB150B*| GNK-39 | All unit Operasi, program well bleeding.
+
+*BW KB150C*| TTB-17  | all unit Standby, program test produksi.
+
+*B. PEKERJAAN*
+*1. ON GOING – BW H35KD – Tower light JCB*
+Unit      : BW H35KD
+Equipment : Tower light JCB
+SN/Model  : X2CH25843
+Jenis     : CM (TS)
+Gejala    : Short Line electrical
+Mulai Pekerjaan    : 30/09/2026
+Selesai Pekerjaan : - 
+Time : 10.00 S/d 15.55 WIB
+HM/RH/KM  : 14200
+Lokasi    : GNK-89
+PIC       : David, ilham
+Deskripsi pekerjaan :
+- Service Altenator  *Ok*
+- Install Togel untuk jumpper D+ *ok*
+- Test Running
+- Housekeeping area
+Status    : Progress 78%
+
+*2. ON GOING – Fire pump Ziegler*
+SN/Model  : Portable pump Ziegler LD425/2
+Jenis     : CM (TS unit tidak bisa running)
+HM/RH/KM  : -
+Mulai Pekerjaan : 5/08/2026
+Selesai Pekerjaan : -
+Time :
+Deskripsi pekerjaan: -
+Status    : Tunggu part, Progress 30%
+
+*3. ON GOING – MAN FT-03 BG 8015 CZ*
+SN/Model  : MAN – 20830005312999
+Jenis     : CM (TS low power)
+Mulai Pekerjaan : 02/09/2026
+Selesai Pekerjaan : -
+Time :
+Lokasi : BPK
+PIC  : RAM Hoist
+Deskripsi pekerjaan: - 
+*Status    : tunggu realise SPK, Progress 20%
+
+*4. ON GOING – Dozer D7G BDEH-433*
+SN/Model  : 7MB02721
+Jenis     : CM (radiator leak & track kendor)
+Mulai Pekerjaan : 02/09/2026
+Selesai Pekerjaan : -
+Time :
+Lokasi    : SP 6 TLJ
+Deskripsi pekerjaan: - 
+Status    : Tunggu Tim Trakindo untuk perbaikan 78%
+
+*5. ON GOING – Genset Perkins MTU*
+SN/Model  : Perkins – DK32000U468058B
+Jenis  : OH (TOH)
+Mulai Pekerjaan : 26/06/2026
+Selesai Pekerjaan : -
+Time :
+Lokasi : BPM
+Deskripsi pekerjaan: - 
+Status : Tunggu part 45%
+
+*6. ON GOING – Genset Krisbow Dongfeng MTU – Engine not crank*
+Unit      : Genset Krisbow Dongfeng MTU
+Jenis     : CM
+Gejala    : Engine Cant running
+Mulai Pekerjaan : 05/10/2026 ..
+Selesai Pekerjaan : -
+Time 09.00 S/d 11.00 WIB
+HM/RH/KM  : 14219,7
+Lokasi    : BPM
+Deskripsi pekerjaan :
+Status    : Pekerjaan lanjut, progress 40%
+
+*7. NEW JOB – Rig carier BW KB 150 C – Brake stuck*
+Unit      : Rig carier
+Jenis     : CM
+Gejala    : Brake stuck
+Mulai Pekerjaan : 08/10/2026
+Selesai Pekerjaan : 08/10/2026
+Time 10.00 S/d 15.00 WIB
+HM/RH/KM  :-
+Lokasi    : TTB-17
+Deskripsi pekerjaan :
+- check all around 
+- Setting rem roda rig carier bagian belakang *(OK)*
+- Test function *(OK)*
+- house keeping area
+Note : terdapat temuan pada box driling konsul, untuk dipasangkan name plate pada ( sandram ),( kill of sandram ),( pto ), ( shifter gigi ), (down di throttol maindram ), ( up down tubing tong )
+*status : pekerjaan 100% selesai*

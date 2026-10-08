@@ -137,6 +137,25 @@ cek(L.cocokkanEquipment(p2, eqList, units)?.id === 'e2', '#2 cocok lewat SN');
 cek(L.cocokkanEquipment(p7, eqList, units)?.id === 'e3', '#7 cocok lewat kode TS-03 di tag');
 cek(L.cocokkanEquipment(p3, eqList, units) === null, '#3 dua Fire Pump Ziegler → tidak ditebak');
 
+console.log('Fixture 08/10/2026 (variasi: ON GOING / NEW JOB, rig di tengah judul, Note)');
+const r8 = L.parseLaporan(fs.readFileSync(path.join(__dirname, 'fixtures/laporan_2026-10-08.txt'), 'utf8'));
+const Q = no => r8.pekerjaan.find(p => p.no === no);
+cek(r8.tanggal === '2026-10-08' && r8.status_rig.length === 5 && r8.flags.length === 0, '08/10: tanggal & 5 status rig');
+cek(r8.status_rig.find(x => x.unit === 'BW KB150C')?.keterangan === 'all unit Standby, program test produksi.', '08/10: keterangan KB150C');
+cek(r8.pekerjaan.length === 7, '08/10: 7 pekerjaan', r8.pekerjaan.length);
+cek([1, 2, 3, 4, 5, 6].every(n => Q(n).tipe === 'LANJUT' && Q(n).tipe_asli === 'ON GOING') && Q(7).tipe === 'BARU' && Q(7).tipe_asli === 'NEW JOB', '08/10: ON GOING → LANJUT, NEW JOB → BARU');
+cek(Q(1).unit === 'BW H35KD' && Q(1).equipment === 'Tower light JCB' && Q(1).progress === 78 && Q(1).deskripsi.length === 4 && Q(1).pic === 'David, ilham', '08/10 #1 Tower light: 78%, 4 deskripsi, PIC');
+cek(Q(5).jenis === 'OH' && Q(5).status === 'Tunggu' && Q(5).progress === 45, '08/10 #5 Genset Perkins: OH, Tunggu 45%');
+cek(Q(6).jam_mulai === '09:00' && Q(6).jam_selesai === '11:00' && Q(6).progress === 40 && Q(6).status === 'Progress', '08/10 #6: "Time 09.00 S/d 11.00", lanjut 40%');
+const q7 = Q(7);
+cek(q7.unit === 'BW KB150C' && q7.unit_rig && q7.equipment === 'Rig carier', '08/10 #7: unit rig dari tengah judul "Rig carier BW KB 150 C"', [q7.unit, q7.equipment]);
+cek(q7.gejala === 'Brake stuck' && q7.jenis === 'CM', '08/10 #7: CM, gejala Brake stuck');
+cek(q7.status === 'Selesai' && q7.progress === 100 && q7.selesai === '2026-10-08' && q7.jam_selesai === '15:00', '08/10 #7: "*status : pekerjaan 100% selesai*" → Selesai');
+cek(/^terdapat temuan pada box driling konsul/.test(q7.catatan || ''), '08/10 #7: Note tersimpan sebagai catatan');
+cek(q7.deskripsi.length === 4 && q7.meter_nilai === null, '08/10 #7: 4 deskripsi, HM "-" kosong');
+cek(adaFlag(Q(1), 'rig_stop', 'kurang') && adaFlag(q7, 'rig_stop', 'kurang') && !adaFlag(Q(2), 'rig_stop'), '08/10: rig stop diminta hanya untuk CM di unit rig');
+cek(L.parseLaporan('*B. PEKERJAAN*\n*1. ONGOING – Genset X*\n*2. New Job – BW KB150A – Mud pump*\n*3. Lanjutan – Hino TS-03*').pekerjaan.map(p => p.tipe).join() === 'LANJUT,BARU,LANJUT', 'variasi ejaan: ONGOING / New Job / Lanjutan');
+
 console.log('Template di Panduan');
 const tc = L.parseLaporan(L.TEMPLATE_CONTOH);
 cek(tc.tanggal === '2026-10-08' && tc.status_rig.length === 5 && tc.flags.length === 0, 'contoh template: tanggal & 5 status rig');
@@ -147,6 +166,10 @@ cek(c1.rig_stop === true && c1.rig_stop_ket === '3 jam' && c1.no_wo === '4500123
 cek(tc.pekerjaan[1].unit === null && tc.pekerjaan[1].status === 'Tunggu' && tc.pekerjaan[1].status_ket === 'part', 'contoh #2: unit "-" kosong, Tunggu part');
 const tk = L.parseLaporan(L.TEMPLATE_KOSONG);
 cek(tk.pekerjaan.length === 1 && tk.status_rig.length === 5, 'template kosong tetap bisa dibaca (tidak error)');
+
+console.log('Salinan parser');
+const salinan = fs.readFileSync(path.join(__dirname, '../supabase/functions/_shared/laporan_harian_v2.js'), 'utf8');
+cek(salinan.endsWith(fs.readFileSync(path.join(__dirname, '../js/laporan_harian_v2.js'), 'utf8')), 'salinan Edge Function identik dengan js/laporan_harian_v2.js');
 
 console.log(`\n${gagal ? 'ADA YANG GAGAL' : 'SEMUA LULUS'}: ${lulus} lulus, ${gagal} gagal`);
 process.exit(gagal ? 1 : 0);

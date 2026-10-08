@@ -34,6 +34,21 @@
     if (!teks) return null;
     return RIG_ALIAS[kunciUnit(teks)] || null;
   }
+  // Cari unit rig DI DALAM teks bebas, mis. "Rig carier BW KB 150 C" → {rig:'BW KB150C', sisa:'Rig carier'}
+  const RIG_DALAM_RE = /\b(BW[\s.-]*KB[\s.-]*150[\s.-]*[ABC]|KB[\s.-]*150[\s.-]*[ABC]|BW[\s.-]*H[\s.-]*35[\s.-]*KD|H35KD|BW[\s.-]*100[\s.-]*A?)\b/i;
+  function cariRigDalam(teks) {
+    const m = RIG_DALAM_RE.exec(String(teks || ''));
+    if (!m) return null;
+    const rig = normalisasiUnit(m[1]);
+    if (!rig) return null;
+    const sisa = (teks.slice(0, m.index) + ' ' + teks.slice(m.index + m[0].length)).replace(/\s+/g, ' ').replace(/^[\s–—-]+|[\s–—-]+$/g, '').trim();
+    return { rig, sisa: sisa || null };
+  }
+  // Tipe judul: BARU/NEW JOB → BARU ; LANJUT/ON GOING → LANJUT
+  function normalisasiTipe(t) {
+    return /^(BARU|NEW)/i.test(String(t).trim()) ? 'BARU' : 'LANJUT';
+  }
+
   // 'BW KB150A' → 'BW KB150.A' (nama parent_units di eRAMHoist)
   function namaParentUnit(rig) {
     const m = /^BW KB150([ABC])$/.exec(rig || '');
@@ -193,6 +208,7 @@
     if (/^rig ?stop/.test(k)) return 'rigstop';
     if (/^no ?wo$|^wo$|^nomor wo/.test(k)) return 'nowo';
     if (/^deskripsi/.test(k)) return 'deskripsi';
+    if (/^note|^catatan|^temuan|^keterangan|^ket$/.test(k)) return 'catatan';
     if (/^part|^sparepart|^spare part/.test(k)) return 'part';
     return null;
   }
@@ -250,13 +266,13 @@
 
     // Pecah blok pekerjaan
     if (iB >= 0) {
-      const judulRe = /^(\d+)\s*[.)]\s*(BARU|LANJUT)\s*[-–—:]\s*(.+)$/i;
+      const judulRe = /^(\d+)\s*[.)]\s*(BARU|LANJUTAN|LANJUT|ON\s*-?\s*GOING|NEW\s*JOB|NEW)\s*[-–—:]\s*(.+)$/i;
       let blok = null;
       const blokList = [];
       for (let i = iB + 1; i < baris.length; i++) {
         const b = baris[i];
         const mj = !b.bullet && judulRe.exec(b.teks);
-        if (mj) { blok = { no: Number(mj[1]), tipe: mj[2].toUpperCase(), judul: mj[3].trim(), baris: [] }; blokList.push(blok); continue; }
+        if (mj) { blok = { no: Number(mj[1]), tipe: normalisasiTipe(mj[2]), tipe_asli: mj[2].trim(), judul: mj[3].trim(), baris: [] }; blokList.push(blok); continue; }
         if (blok && b.teks) blok.baris.push(b);
       }
       blokList.forEach(bl => hasil.pekerjaan.push(parseBlok(bl, tahun)));
@@ -281,7 +297,7 @@
 
   function parseBlok(bl, tahun) {
     const p = {
-      no: bl.no, tipe: bl.tipe, judul: bl.judul,
+      no: bl.no, tipe: bl.tipe, tipe_asli: bl.tipe_asli || bl.tipe, judul: bl.judul, catatan: null,
       unit: null, unit_rig: false, equipment: null, judul_ket: null, sn: null,
       jenis: null, jenis_asli: null, is_ts: false, status_kerja: null, gejala: null,
       mulai: null, selesai: null, jam_mulai: null, jam_selesai: null,
@@ -295,7 +311,13 @@
     const bagJudul = bl.judul.split(/\s+[-–—]\s+/).map(s => s.trim()).filter(Boolean);
     const rigJudul = normalisasiUnit(bagJudul[0]);
     if (rigJudul) { p.unit = rigJudul; p.unit_rig = true; p.equipment = bagJudul.slice(1, 2).join('') || null; p.judul_ket = bagJudul.slice(2).join(' – ') || null; }
-    else { p.equipment = bagJudul[0] || null; p.judul_ket = bagJudul.slice(1).join(' – ') || null; }
+    else {
+      // Unit rig bisa terselip di tengah judul: "Rig carier BW KB 150 C – Brake stuck"
+      const dalam = cariRigDalam(bagJudul[0] || '');
+      if (dalam) { p.unit = dalam.rig; p.unit_rig = true; p.equipment = dalam.sisa; }
+      else p.equipment = bagJudul[0] || null;
+      p.judul_ket = bagJudul.slice(1).join(' – ') || null;
+    }
 
     const f = {};
     let mode = null;  // 'deskripsi' | 'part'
@@ -329,7 +351,9 @@
     // Unit & equipment dari field (field menang atas judul)
     if (!kosong(f.unit)) {
       const r = normalisasiUnit(f.unit);
-      if (r) { p.unit = r; p.unit_rig = true; } else if (!p.unit) p.unit = f.unit;
+      if (r) { p.unit = r; p.unit_rig = true; }
+      else if (!p.unit) p.unit = f.unit;
+      else if (p.unit_rig && !p.equipment) p.equipment = f.unit;   // "Unit : Rig carier" padahal unit rig sudah dari judul
     }
     if (!kosong(f.equipment)) p.equipment = f.equipment;
     if (!p.equipment && p.unit && !p.unit_rig) p.equipment = p.unit;
@@ -357,6 +381,7 @@
     p.lokasi = kosong(f.lokasi) ? null : f.lokasi;
     p.pic = kosong(f.pic) ? null : f.pic;
     p.no_wo = kosong(f.nowo) ? null : f.nowo;
+    p.catatan = kosong(f.catatan) ? null : f.catatan;
     Object.assign(p, parseRigStop(f.rigstop));
     // Status
     const st = normalisasiStatus(f.status, p.selesai);
