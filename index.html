@@ -18507,7 +18507,6 @@
       const kurang = lhv2Kurang(e);
       const cekFlags = (e.flags || []).filter(f => f.level === 'cek' && f.kode !== 'equipment_belum_cocok');
       const isTS = e._isTS ?? (e.status_kerja === 'TS' || /\bTS\b/i.test(e.jenis_asli || ''));
-      const partTxt = (e.part || []).map(x => [x.nama, x.pn, x.qty != null ? `${x.qty}${x.satuan ? ' ' + x.satuan : ''}` : null, x.sumber].filter(v => v != null && v !== '').join(' | ')).join('\n');
       const merah = c => c ? 'border-red-400 bg-red-50' : '';
       return `<div class="bg-white rounded-xl border ${kurang.length ? 'border-red-300' : 'border-slate-200'} p-4 space-y-3">
         <div class="flex items-center justify-between gap-2 flex-wrap">
@@ -18588,8 +18587,22 @@
             </div>`).join('') || '<div class="text-xs text-slate-400 italic">Belum ada deskripsi.</div>'}
           </div>
           ${!readonly ? `<button onclick="lhChecklistAdd(${i})" class="text-xs text-navy hover:underline mt-1">+ poin</button>` : ''}</div>
-        <div>${lbl('Part <span class="normal-case font-normal text-slate-400">(1 baris: nama | qty satuan — hanya dicatat)</span>')}
-          <textarea ${dis} rows="${Math.max(2, (e.part || []).length)}" oninput="lhv2SetPart(${i},this.value)" class="${inp} font-mono text-xs">${escapeHtml(partTxt)}</textarea></div>
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            ${lbl('Part yang diganti / dipakai <span class="normal-case font-normal text-slate-400">(hanya dicatat — stok tetap lewat Input Harian)</span>').replace('mb-1', 'mb-0')}
+            ${!readonly && (e.part || []).some(x => lhfPecahPartNama(x.nama).length > 1) ? `<button type="button" onclick="lhfPecahPart(${i})" class="text-[11px] font-semibold text-navy hover:underline">↳ Pecah part</button>` : ''}
+          </div>
+          ${(e.part || []).length ? `<div class="hidden sm:grid grid-cols-12 gap-1 text-[10px] font-semibold text-slate-400 uppercase px-0.5"><div class="col-span-6">Nama part</div><div class="col-span-3">PN</div><div class="col-span-1">Qty</div><div class="col-span-2">Satuan</div></div>` : ''}
+          <div class="space-y-1">
+            ${(e.part || []).map((x, pi) => `<div class="grid grid-cols-12 gap-1 items-center">
+              <input ${dis} value="${escapeHtml(x.nama || '')}" placeholder="Nama part" oninput="lhfPartSet(${i},${pi},'nama',this.value)" class="col-span-12 sm:col-span-6 border border-slate-300 rounded-lg px-2 py-1.5 text-sm">
+              <input ${dis} value="${escapeHtml(x.pn || '')}" placeholder="PN" oninput="lhfPartSet(${i},${pi},'pn',this.value)" class="col-span-5 sm:col-span-3 border border-slate-300 rounded-lg px-2 py-1.5 text-sm">
+              <input ${dis} type="number" min="0" step="any" value="${x.qty ?? ''}" placeholder="Qty" oninput="lhfPartSet(${i},${pi},'qty',this.value)" class="col-span-3 sm:col-span-1 border ${x.qty == null ? 'border-amber-300 bg-amber-50' : 'border-slate-300'} rounded-lg px-2 py-1.5 text-sm">
+              <input ${dis} value="${escapeHtml(x.satuan || '')}" placeholder="pcs" oninput="lhfPartSet(${i},${pi},'satuan',this.value)" class="col-span-3 sm:col-span-1 border border-slate-300 rounded-lg px-2 py-1.5 text-sm">
+              ${!readonly ? `<button onclick="lhfPartHapus(${i},${pi})" class="col-span-1 text-red-400 hover:text-red-600 text-xs" title="Hapus part">✕</button>` : '<span class="col-span-1"></span>'}
+            </div>`).join('') || '<div class="text-xs text-slate-400 italic">Tidak ada part.</div>'}
+          </div>
+          ${!readonly ? `<button onclick="lhfPartTambah(${i})" class="text-xs text-navy hover:underline mt-1">+ part</button>` : ''}</div>
 
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
           <div>${lbl('Status')}
@@ -18642,6 +18655,29 @@
       lhRenderEntriesList();
     }
     window.lhfPecahKoma = lhfPecahKoma;
+    // Pecah nama part: "Pelumas (atf, meditran, rored s140)" → Pelumas atf / Pelumas meditran / Pelumas rored s140,
+    // "Filter oli, filter solar" → 2 part. Qty asli tidak ditebak untuk hasil pecahan (dikosongkan → isi manual).
+    function lhfPecahPartNama(nama) {
+      const t = String(nama || '').trim();
+      const m = /^(.*?)\s*\(([^()]*,[^()]*)\)\s*$/.exec(t);
+      if (m && m[1].trim()) return m[2].split(',').map(x => x.trim()).filter(Boolean).map(x => `${m[1].trim()} ${x}`);
+      return lhfPecahKomaTeks(t);
+    }
+    async function lhfPecahPart(i) {
+      const e = lhState.entries[i]; if (!e) return;
+      const baru = (e.part || []).flatMap(x => {
+        const nm = lhfPecahPartNama(x.nama);
+        return nm.length > 1 ? nm.map(n => ({ nama: n, pn: null, qty: null, satuan: x.satuan || null, sumber: x.sumber || null })) : [x];
+      });
+      const ok = await confirmDialog({ title: 'Pecah part', message: `Pecah jadi ${baru.length} part terpisah? Qty hasil pecahan dikosongkan — isi qty masing-masing setelahnya.`, confirmText: 'Ya, Pecah' });
+      if (!ok) return;
+      e.part = baru;
+      lhRenderEntriesList();
+    }
+    window.lhfPecahPart = lhfPecahPart;
+    window.lhfPartSet = (i, pi, f, v) => { const x = lhState.entries[i]?.part?.[pi]; if (!x) return; x[f] = f === 'qty' ? (v === '' ? null : Number(v)) : (v.trim() || null); };
+    window.lhfPartTambah = i => { const e = lhState.entries[i]; if (!e) return; (e.part = e.part || []).push({ nama: '', pn: null, qty: null, satuan: 'pcs', sumber: null }); lhRenderEntriesList(); };
+    window.lhfPartHapus = (i, pi) => { lhState.entries[i]?.part?.splice(pi, 1); lhRenderEntriesList(); };
     function lhfAddPekerjaan() { lhState.entries.push(lhfBlankPekerjaan()); lhRenderEntriesList(); }
     window.lhfAddPekerjaan = lhfAddPekerjaan;
 
