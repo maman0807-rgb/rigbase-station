@@ -18203,6 +18203,27 @@
     const LHV2_STATUS_CLS = { Selesai: 'bg-emerald-100 text-emerald-700', Tunggu: 'bg-amber-100 text-amber-800', Progress: 'bg-blue-100 text-blue-700' };
     let lhv2Parsed = null;
 
+    function salinTemplateLH(k) {
+      const teks = k === 'contoh' ? window.LaporanHarianV2?.TEMPLATE_CONTOH : window.LaporanHarianV2?.TEMPLATE_KOSONG;
+      if (!teks) { toast('Template belum termuat — muat ulang halaman.', 'error'); return; }
+      const fallback = () => {
+        const ta = document.createElement('textarea'); ta.value = teks; ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.select();
+        let ok = false; try { ok = document.execCommand('copy'); } catch {}
+        ta.remove();
+        toast(ok ? 'Template disalin — tempel ke WhatsApp/Telegram.' : 'Gagal menyalin otomatis — tekan lama teks template lalu salin manual.', ok ? 'success' : 'warn');
+      };
+      if (navigator.clipboard?.writeText) navigator.clipboard.writeText(teks).then(() => toast('Template disalin — tempel ke WhatsApp/Telegram.', 'success'), fallback);
+      else fallback();
+    }
+    window.salinTemplateLH = salinTemplateLH;
+    function lhBukaTemplate() {
+      closeModal();
+      navigate('panduan');
+      setTimeout(() => document.getElementById('panduan-lh')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150);
+    }
+    window.lhBukaTemplate = lhBukaTemplate;
+
     function lhOpenTempel() {
       if (!window.LaporanHarianV2) { toast('Modul pembaca laporan belum termuat — muat ulang halaman.', 'error'); return; }
       lhv2Parsed = null;
@@ -18211,7 +18232,7 @@
         maxWidth: 'max-w-3xl',
         body: `
           <div class="space-y-3">
-            <p class="text-xs text-slate-500">Salin rangkuman dari Telegram (mulai dari <b>*LAPORAN HARIAN HOIST &amp; HEAVY EQUIPMENT*</b> sampai blok pekerjaan terakhir), tempel di bawah, lalu klik <b>Baca</b>. Kalau pesannya terpotong jadi beberapa bagian, tempel semuanya berurutan.</p>
+            <p class="text-xs text-slate-500">Salin rangkuman dari Telegram (mulai dari <b>*LAPORAN HARIAN HOIST &amp; HEAVY EQUIPMENT*</b> sampai blok pekerjaan terakhir), tempel di bawah, lalu klik <b>Baca</b>. Kalau pesannya terpotong jadi beberapa bagian, tempel semuanya berurutan. <button type="button" onclick="lhBukaTemplate()" class="text-emerald-700 font-semibold underline">📄 Lihat template</button></p>
             <textarea id="lhv2-teks" rows="10" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-mono outline-none focus:ring-2 focus:ring-navy" placeholder="*LAPORAN HARIAN HOIST & HEAVY EQUIPMENT*&#10;*Selasa, 06/10/2026*&#10;..."></textarea>
             <div id="lhv2-preview"></div>
           </div>`,
@@ -24747,6 +24768,7 @@
           <p><b>Catatan:</b> kolom Rusak/MTBF/Avail terisi seiring kamu mencatat kerusakan di tab Availability. Selama belum ada catatan, verdict bersandar pada umur saja.</p>
           <p>Pelengkap keputusan ganti: hasil <b>RLA</b> (batas layan) dan <b>biaya pemeliharaan per tahun</b> ada di tab 🧭 AIR tiap equipment (AIR langkah 9).</p>`)}
 
+        <div id="panduan-lh">
         ${sec('#059669', '📝', 'Laporan Harian — Tempel Laporan (format rangkuman baru)', `
           <p>Menu <b>RAM → 📝 Laporan Harian</b> (admin). Satu laporan per tanggal: <b>Draft</b> → dicek → <b>Simpan Final</b>. Saat final, RH/HM yang diisi meng-update HM equipment.</p>
           <p class="font-semibold text-slate-800">Cara pakai format baru (sejak 06/10/2026):</p>
@@ -24763,7 +24785,30 @@
             ['Jenis tidak dikenali', 'Jenis selain CM/PM/OH/Cat 3/Cat 4/Inspeksi — tersimpan sebagai Lainnya'],
             ['Masih open kemarin tapi tidak muncul', 'Pekerjaan yang belum selesai di laporan sebelumnya tidak dilaporkan hari ini'],
           ])}
-          <p class="text-xs text-slate-500">Part di laporan <b>hanya dicatat</b> — stok Gudang tetap dipotong lewat Input Harian Logbook. Angka KM tidak akan masuk ke unit ber-HM (dan sebaliknya). Teks asli laporan selalu bisa dilihat di draft. Laporan yang sudah FINAL tidak ditimpa oleh tempelan baru.</p>`)}
+          <p class="text-xs text-slate-500">Part di laporan <b>hanya dicatat</b> — stok Gudang tetap dipotong lewat Input Harian Logbook. Angka KM tidak akan masuk ke unit ber-HM (dan sebaliknya). Teks asli laporan selalu bisa dilihat di draft. Laporan yang sudah FINAL tidak ditimpa oleh tempelan baru.</p>
+
+          <p class="font-bold text-slate-800 mt-3">📄 Template rangkuman (untuk perangkum)</p>
+          <p class="text-xs text-slate-500">Klik <b>Salin</b>, lalu tempel ke WhatsApp/Telegram. Bagian yang tidak ada boleh dikosongkan atau diisi <b>-</b>. Tambah blok pekerjaan berikutnya dengan nomor 2, 3, … (<b>BARU</b> untuk pekerjaan baru, <b>LANJUT</b> untuk lanjutan).</p>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            ${[['kosong', 'Template kosong', window.LaporanHarianV2?.TEMPLATE_KOSONG], ['contoh', 'Contoh terisi', window.LaporanHarianV2?.TEMPLATE_CONTOH]].map(([k, judul, isi]) => `
+              <div class="border border-slate-200 rounded-lg overflow-hidden">
+                <div class="flex items-center justify-between bg-slate-50 px-3 py-1.5 border-b border-slate-200">
+                  <span class="text-xs font-bold text-slate-700">${judul}</span>
+                  <button onclick="salinTemplateLH('${k}')" class="no-print px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-semibold">📋 Salin</button>
+                </div>
+                <pre id="tpl-lh-${k}" class="text-[11px] leading-snug p-3 whitespace-pre-wrap font-mono text-slate-700 max-h-96 overflow-y-auto">${escapeHtml(isi || '(template belum termuat — muat ulang halaman)')}</pre>
+              </div>`).join('')}
+          </div>
+          ${tbl(['Bagian', 'Aturan untuk perangkum'], [
+            ['Judul pekerjaan', '<b>N. BARU – Unit – Equipment</b> (baru) / <b>N. LANJUT – …</b> (lanjutan). Unit non-rig: <b>N. LANJUT – Nama alat</b>.'],
+            ['Wajib untuk CM', '<b>Gejala</b>. Kalau unit rig (BW-100A / H35KD / KB150A/B/C): <b>Rig stop: Ya – … jam / Tidak</b>.'],
+            ['Wajib untuk LANJUT', '<b>Mulai</b> = tanggal pertama pekerjaan dimulai (bukan tanggal hari ini).'],
+            ['Kalau sudah selesai', 'Isi <b>Selesai</b> (tanggal) + Status <b>Selesai, Progress 100%</b>.'],
+            ['Tunggu', '<b>Tunggu part / Tunggu SPK / Tunggu Tim Trakindo …, Progress …%</b>'],
+            ['Baris RH (opsional)', 'Di bawah baris rig, hanya kalau ada: <b>RH: Eng rig 6 | MP GD 2 | …</b> (jam jalan hari itu).'],
+            ['HM/RH/KM', 'Angka HM/KM <b>unit itu sendiri</b> — jangan salin dari blok lain (angka ini meng-update HM di sistem).'],
+          ])}`)}
+        </div>
 
         ${sec('#7c3aed', '📸', 'Catat Downtime + Foto — workflow real-time', `
           <p>Setiap kejadian downtime bisa diupload <b>foto dengan tanggal kejadian</b> (bukan tanggal upload — supaya audit trail jujur kalau telat upload).</p>

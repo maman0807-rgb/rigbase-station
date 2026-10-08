@@ -137,5 +137,16 @@ cek(L.cocokkanEquipment(p2, eqList, units)?.id === 'e2', '#2 cocok lewat SN');
 cek(L.cocokkanEquipment(p7, eqList, units)?.id === 'e3', '#7 cocok lewat kode TS-03 di tag');
 cek(L.cocokkanEquipment(p3, eqList, units) === null, '#3 dua Fire Pump Ziegler → tidak ditebak');
 
+console.log('Template di Panduan');
+const tc = L.parseLaporan(L.TEMPLATE_CONTOH);
+cek(tc.tanggal === '2026-10-08' && tc.status_rig.length === 5 && tc.flags.length === 0, 'contoh template: tanggal & 5 status rig');
+cek(JSON.stringify(tc.status_rig[1].rh) === JSON.stringify({ 'Eng rig': 6, 'MP GD': 2, 'Gen Deutz': 10, 'Gen CAT': 0 }), 'contoh template: baris RH');
+cek(tc.pekerjaan.length === 2 && tc.pekerjaan.every(p => p.flags.length === 0), 'contoh template: 2 pekerjaan tanpa peringatan', tc.pekerjaan.map(p => p.flags));
+const c1 = tc.pekerjaan[0];
+cek(c1.rig_stop === true && c1.rig_stop_ket === '3 jam' && c1.no_wo === '4500123456' && c1.pic === 'Ilham, Rizki' && c1.status === 'Selesai', 'contoh #1: rig stop, WO, PIC, selesai');
+cek(tc.pekerjaan[1].unit === null && tc.pekerjaan[1].status === 'Tunggu' && tc.pekerjaan[1].status_ket === 'part', 'contoh #2: unit "-" kosong, Tunggu part');
+const tk = L.parseLaporan(L.TEMPLATE_KOSONG);
+cek(tk.pekerjaan.length === 1 && tk.status_rig.length === 5, 'template kosong tetap bisa dibaca (tidak error)');
+
 console.log(`\n${gagal ? 'ADA YANG GAGAL' : 'SEMUA LULUS'}: ${lulus} lulus, ${gagal} gagal`);
 process.exit(gagal ? 1 : 0);
