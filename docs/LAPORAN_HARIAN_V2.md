@@ -10,7 +10,7 @@ Catatan serah terima (2026-10-08) supaya pekerjaan bisa dilanjutkan dari laptop 
 
 | Opsi | Isi | Status |
 |---|---|---|
-| **A. Tempel Laporan** | Rangkuman ditempel di app, dibaca parser JS **tanpa AI**, jadi draft Laporan Harian biasa, lalu Simpan Final | **Selesai dibangun & diuji, belum live** |
+| **A. Tempel Laporan** | Rangkuman ditempel di app, dibaca parser JS **tanpa AI**, jadi draft Laporan Harian biasa, lalu Simpan Final | **LIVE 2026-10-08** (+ template di Panduan) |
 | B. A + bot | Draft otomatis begitu laporan dikirim ke bot (Supabase Edge Function, tanpa n8n) | Belum |
 | C. Prompt penuh | Pekerjaan sebagai data tersendiri lintas hari, Daftar Open pagi, pecah pekerjaan, dll. | Belum |
 
@@ -34,8 +34,11 @@ Keputusan desain:
 - Parser: 77/77 lulus.
 - UI end-to-end (jsdom, di scratchpad Mac rumah): 25/25 lulus, dan regresi seluruh fitur AIR tetap lulus.
 
-## Langkah melanjutkan
-1. **Maman:** jalankan `fase40_laporan_harian_v2.sql` di Supabase SQL Editor.
-2. Push ke `main`. Ini harus **setelah** langkah 1, karena daftar Laporan Harian membaca kolom `format_versi`.
-3. Uji nyata: tempel laporan 06/10, lalu cek kartu #1/#2. **HM 14200 tertulis di Rig carier dan Tower light** (kemungkinan salah salin), jadi koreksi sebelum final karena RH meng-update HM equipment.
-4. Opsi B/C kalau nanti diperlukan.
+## Template untuk perangkum
+`TEMPLATE_KOSONG` dan `TEMPLATE_CONTOH` ada di `js/laporan_harian_v2.js`. Keduanya tampil di **Panduan app → 📝 Laporan Harian → 📄 Template rangkuman** dengan tombol **📋 Salin** dan tabel aturan, dan ada link "📄 Lihat template" dari jendela Tempel Laporan. Kedua template ikut diuji (total tes **83/83**).
+
+## Status & langkah berikutnya
+1. ✅ `fase40_laporan_harian_v2.sql` sudah dijalankan, dan kode sudah live (commit b3890fd, template 7bd775b).
+2. Uji nyata oleh Maman dengan laporan harian sungguhan. Kalau ada label atau singkatan yang tidak terbaca, tambahkan aturan di parser beserta tesnya.
+3. Saat uji, cek angka HM/RH tiap kartu sebelum final. Contoh 06/10 punya **HM 14200 di Rig carier dan Tower light** (kemungkinan salah salin), sementara RH ikut meng-update HM equipment.
+4. Opsi B/C hanya kalau diminta.
