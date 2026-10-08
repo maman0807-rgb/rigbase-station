@@ -18576,7 +18576,11 @@
             <input ${dis} value="${escapeHtml(e.no_wo || '')}" oninput="lhfSet(${i},'no_wo',this.value,true)" class="${inp}"></div>
         </div>
 
-        <div>${lbl('Deskripsi pekerjaan <span class="normal-case font-normal text-slate-400">(1 baris = 1 poin)</span>')}
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            ${lbl('Deskripsi pekerjaan <span class="normal-case font-normal text-slate-400">(1 baris = 1 poin)</span>').replace('mb-1', 'mb-0')}
+            ${!readonly && (e.checklist || []).some(c => lhfPecahKomaTeks(c.item).length > 1) ? `<button type="button" onclick="lhfPecahKoma(${i})" class="text-[11px] font-semibold text-navy hover:underline">↳ Pecah per koma</button>` : ''}
+          </div>
           <textarea ${dis} rows="${Math.max(3, (e.checklist || []).length + 1)}" oninput="lhfSetDeskripsi(${i},this.value)" class="${inp}">${escapeHtml(desk)}</textarea></div>
         <div>${lbl('Part <span class="normal-case font-normal text-slate-400">(1 baris: nama | qty satuan — hanya dicatat)</span>')}
           <textarea ${dis} rows="${Math.max(2, (e.part || []).length)}" oninput="lhv2SetPart(${i},this.value)" class="${inp} font-mono text-xs">${escapeHtml(partTxt)}</textarea></div>
@@ -18608,6 +18612,30 @@
       e.checklist = String(text || '').split('\n').map(s => s.replace(/^[*\-•]\s*/, '').trim()).filter(Boolean).map(item => ({ item, checked: true }));
     }
     window.lhfSetDeskripsi = lhfSetDeskripsi;
+    // Pecah satu poin deskripsi per koma — koma DI DALAM kurung tidak dipecah,
+    // mis. "Fill up oli (ATF, RORED, MEDITRAN S40)" tetap utuh. Pola lama: Job Desc
+    // dipecah per koma jadi baris (05d7d10) / "Jadikan Checklist" (5d084ff).
+    function lhfPecahKomaTeks(teks) {
+      const out = []; let buf = '', dalam = 0;
+      for (const ch of String(teks || '')) {
+        if (ch === '(') dalam++;
+        if (ch === ')') dalam = Math.max(0, dalam - 1);
+        if (ch === ',' && dalam === 0) { out.push(buf); buf = ''; continue; }
+        buf += ch;
+      }
+      out.push(buf);
+      return out.map(x => x.trim()).filter(Boolean);
+    }
+    async function lhfPecahKoma(i) {
+      const e = lhState.entries[i]; if (!e) return;
+      const baru = (e.checklist || []).flatMap(c => lhfPecahKomaTeks(c.item).map(item => ({ item, checked: c.checked !== false })));
+      if (baru.length === (e.checklist || []).length) { toast('Tidak ada koma yang bisa dipecah.', 'warn'); return; }
+      const ok = await confirmDialog({ title: 'Pecah per koma', message: `Pecah deskripsi jadi ${baru.length} poin (koma di dalam kurung tidak ikut dipecah)?`, confirmText: 'Ya, Pecah' });
+      if (!ok) return;
+      e.checklist = baru;
+      lhRenderEntriesList();
+    }
+    window.lhfPecahKoma = lhfPecahKoma;
     function lhfAddPekerjaan() { lhState.entries.push(lhfBlankPekerjaan()); lhRenderEntriesList(); }
     window.lhfAddPekerjaan = lhfAddPekerjaan;
 
