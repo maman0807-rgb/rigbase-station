@@ -1,8 +1,10 @@
 /* ============================================================
- * ⚠️ ADA SALINAN file ini di supabase/functions/_shared/laporan_harian_v2.js
- * (dipakai Edge Function telegram-laporan-webhook, bot Telegram → draft
- * otomatis). KALAU UBAH ATURAN PARSER DI SINI, COPY ULANG KE FILE ITU JUGA —
- * biar hasil parse bot & "Tempel Laporan" di app selalu sama persis.
+ * ⚠️ SALINAN — sumber asli ada di js/laporan_harian_v2.js (repo root), dipakai
+ * browser (index.html) + tes Node. File ini salinannya buat dipakai Edge
+ * Function telegram-laporan-webhook (Deno gak bisa import lintas folder
+ * functions/ dengan aman). KALAU ADA PERUBAHAN ATURAN PARSER, COPY ULANG
+ * FILE INI DARI js/laporan_harian_v2.js — isinya HARUS identik, biar hasil
+ * parse lewat bot sama persis dengan hasil parse lewat "Tempel Laporan" di app.
  * ============================================================ */
 /* ============================================================
  * Laporan Harian v2 — pembaca rangkuman format baru (disepakati tim HHE, 06/10/2026)

@@ -17721,7 +17721,12 @@
               ${draftCount ? `<p class="text-xs text-amber-600 font-semibold mt-0.5">⚠️ ${draftCount} laporan draft menunggu review</p>` : ''}
             </div>
             <div class="flex gap-2 flex-wrap">
-              <button onclick="lhOpenTempel()" class="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700">📋 Tempel Laporan</button>
+              <!-- Tombol "📋 Tempel Laporan" (paste manual) disembunyikan 2026-10-08 -- Maman pilih
+                   balik ke alur bot Telegram otomatis (telegram-laporan-webhook Edge Function,
+                   lihat docs/LAPORAN_HARIAN_V2.md "Opsi B"). Fungsi lhOpenTempel()/lhv2Baca()/
+                   lhv2BuatDraft() SENGAJA DIBIARKAN ADA (bukan dihapus) -- parser yang sama dipakai
+                   bareng Edge Function itu, dan ini masih bisa jadi jalur manual darurat kalau
+                   bot/Telegram lagi bermasalah. Panggil lhOpenTempel() dari console kalau perlu. -->
               <button onclick="lhStartCreate()" class="px-4 py-2 rounded-lg bg-navy text-white text-sm font-semibold hover:bg-navy/90">+ Buat Laporan Manual</button>
             </div>
           </div>
