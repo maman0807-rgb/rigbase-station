@@ -246,9 +246,15 @@
     if (!hasil.tanggal) hasil.flags.push({ level: 'kurang', pesan: 'Tanggal laporan tidak ditemukan di judul' });
     const tahun = hasil.tanggal ? Number(hasil.tanggal.slice(0, 4)) : new Date().getFullYear();
 
-    // Bagian A & B
+    // Bagian A & B. Baris "B. PEKERJAAN" boleh tidak ada (mis. bagian ke-2 dari laporan yang
+    // terpotong jadi 2 pesan Telegram) — blok pekerjaan dikenali dari judul bernomornya.
+    const judulRe = /^(\d+)\s*[.)]\s*(BARU|LANJUTAN|LANJUT|ON\s*-?\s*GOING|NEW\s*JOB|NEW)\s*[-–—:]\s*(.+)$/i;
     const iA = baris.findIndex(b => /^A\.?\s*STATUS RIG/i.test(b.teks));
-    const iB = baris.findIndex(b => /^B\.?\s*PEKERJAAN/i.test(b.teks));
+    let iB = baris.findIndex(b => /^B\.?\s*PEKERJAAN/i.test(b.teks));
+    if (iB < 0) {
+      const iJudul = baris.findIndex((b, i) => i > iA && !b.bullet && judulRe.test(b.teks));
+      if (iJudul >= 0) iB = iJudul - 1;
+    }
 
     if (iA >= 0) {
       const akhirA = iB > iA ? iB : baris.length;
@@ -274,7 +280,6 @@
 
     // Pecah blok pekerjaan
     if (iB >= 0) {
-      const judulRe = /^(\d+)\s*[.)]\s*(BARU|LANJUTAN|LANJUT|ON\s*-?\s*GOING|NEW\s*JOB|NEW)\s*[-–—:]\s*(.+)$/i;
       let blok = null;
       const blokList = [];
       for (let i = iB + 1; i < baris.length; i++) {
@@ -284,8 +289,8 @@
         if (blok && b.teks) blok.baris.push(b);
       }
       blokList.forEach(bl => hasil.pekerjaan.push(parseBlok(bl, tahun)));
-    } else {
-      hasil.flags.push({ level: 'cek', pesan: 'Bagian "B. PEKERJAAN" tidak ditemukan' });
+    } else if (iA < 0) {
+      hasil.flags.push({ level: 'cek', pesan: 'Tidak ada status rig maupun blok pekerjaan bernomor yang terbaca' });
     }
 
     // Cek lintas blok: HM/KM sama persis di unit berbeda (indikasi salah salin)

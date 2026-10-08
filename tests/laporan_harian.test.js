@@ -156,6 +156,20 @@ cek(q7.deskripsi.length === 4 && q7.meter_nilai === null, '08/10 #7: 4 deskripsi
 cek(adaFlag(Q(1), 'rig_stop', 'kurang') && adaFlag(q7, 'rig_stop', 'kurang') && !adaFlag(Q(2), 'rig_stop'), '08/10: rig stop diminta hanya untuk CM di unit rig');
 cek(L.parseLaporan('*B. PEKERJAAN*\n*1. ONGOING – Genset X*\n*2. New Job – BW KB150A – Mud pump*\n*3. Lanjutan – Hino TS-03*').pekerjaan.map(p => p.tipe).join() === 'LANJUT,BARU,LANJUT', 'variasi ejaan: ONGOING / New Job / Lanjutan');
 
+console.log('Laporan terpotong 2 pesan Telegram (bagian ke-2 mengulang judul)');
+{
+  const t8 = fs.readFileSync(path.join(__dirname, 'fixtures/laporan_2026-10-08.txt'), 'utf8');
+  const i5 = t8.indexOf('*5. ON GOING');
+  const judul = '*LAPORAN HARIAN HOIST & HEAVY EQUIPMENT*\n*Kamis, 08/10/2026*\n\n';
+  const b1 = L.parseLaporan(t8.slice(0, i5));
+  const b2 = L.parseLaporan(judul + t8.slice(i5));
+  const b2b = L.parseLaporan(judul + '*B. PEKERJAAN*\n' + t8.slice(i5));
+  cek(b1.tanggal === '2026-10-08' && b1.status_rig.length === 5 && b1.pekerjaan.map(p => p.no).join() === '1,2,3,4', 'bagian 1: status rig + #1–#4');
+  cek(b2.tanggal === '2026-10-08' && b2.status_rig.length === 0 && b2.pekerjaan.map(p => p.no).join() === '5,6,7' && b2.flags.length === 0, 'bagian 2 tanpa "B. PEKERJAAN": #5–#7 tetap terbaca');
+  cek(b2b.pekerjaan.map(p => p.no).join() === '5,6,7', 'bagian 2 dengan "B. PEKERJAAN"');
+  cek(b2.pekerjaan.find(p => p.no === 7).unit === 'BW KB150C', 'bagian 2: #7 tetap utuh');
+}
+
 console.log('Template di Panduan');
 const tc = L.parseLaporan(L.TEMPLATE_CONTOH);
 cek(tc.tanggal === '2026-10-08' && tc.status_rig.length === 5 && tc.flags.length === 0, 'contoh template: tanggal & 5 status rig');
