@@ -124,6 +124,11 @@ serve(async (req) => {
       const data = await resp.json();
       return new Response(JSON.stringify(data), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
+    if (action === "delete") {
+      const resp = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/deleteWebhook`);
+      const data = await resp.json();
+      return new Response(JSON.stringify(data), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
     return new Response("ok", { headers: corsHeaders });
   }
 
