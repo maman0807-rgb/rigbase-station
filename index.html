@@ -22183,11 +22183,29 @@
       const cntFail = events.filter((d) => d.category === 'breakdown' || d.category === 'troubleshoot').length;
       const cntOther = events.length - cntPM - cntFail;
 
+      // Pekerjaan BELUM SELESAI per akhir bulan: downtime yang sudah mulai sebelum akhir bulan tapi
+      // end_at masih kosong / baru selesai sesudahnya — termasuk bawaan bulan sebelumnya (pakai
+      // allEvents, bukan cuma kejadian yg mulai di bulan itu). Bulan berjalan: dipotong s/d hari ini.
+      const batasBulan = (ym) => {
+        const [y, m] = ym.split('-').map(Number);
+        const akhir = new Date(y, m, 1);
+        return akhir > now ? now : akhir;
+      };
+      const belumSelesai = (ym) => {
+        const batas = batasBulan(ym);
+        return allEvents.filter((d) => d.start_at && new Date(d.start_at) < batas && (!d.end_at || new Date(d.end_at) >= batas))
+          .sort((a, b) => (a.start_at || '').localeCompare(b.start_at || ''));
+      };
+      const ymPeriode = [...new Set(events.map((d) => (d.start_at || '').slice(0, 7)))].sort();
+      const ymTerakhir = ymPeriode[ymPeriode.length - 1];
+      const cntBelum = ymTerakhir ? belumSelesai(ymTerakhir).length : 0;
+
       const summary = `<div class="cards">
         <div class="card navy"><div class="num">${events.length}</div><div class="lbl">📋 TOTAL KEJADIAN</div></div>
         <div class="card green"><div class="num">${cntPM}</div><div class="lbl">🟢 PM/TOH/GOH</div></div>
         <div class="card red"><div class="num">${cntFail}</div><div class="lbl">💥 Breakdown/TS</div></div>
         <div class="card amber"><div class="num">${cntOther}</div><div class="lbl">🟡 Lainnya</div></div>
+        <div class="card" style="background:#f5f3ff;border-color:#ddd6fe"><div class="num" style="color:#6d28d9">${cntBelum}</div><div class="lbl">⏳ Belum Selesai${ymTerakhir && batasBulan(ymTerakhir) === now ? ' (s/d hari ini)' : ' (akhir periode)'}</div></div>
       </div>`;
 
       const intro = `<p>Laporan riwayat maintenance AKTUAL dari eRAMHoist — semua kejadian yang sudah tercatat (PM/TOH/GOH selesai, breakdown, troubleshoot, inspeksi terjadwal, dst), bukan proyeksi.</p>
@@ -22230,14 +22248,46 @@
           <td style="text-align:center;font-weight:bold">${items.length}</td>
           <td style="text-align:center;color:${pm > 0 ? '#16a34a' : '#94a3b8'}">${pm || '—'}</td>
           <td style="text-align:center;color:${fail > 0 ? '#dc2626' : '#94a3b8'}">${fail || '—'}</td>
+          <td style="text-align:center;color:${belumSelesai(ym).length ? '#6d28d9' : '#94a3b8'};font-weight:bold">${belumSelesai(ym).length || '—'}</td>
         </tr>`;
       }).join('');
       const monthSummaryTable = `
         <h3>📅 Ringkasan Distribusi Kejadian per Bulan</h3>
         <table>
-          <thead><tr><th>No</th><th>Bulan</th><th>Total</th><th>🟢 PM/TOH/GOH</th><th>💥 Breakdown/TS</th></tr></thead>
-          <tbody>${monthSummaryRows || '<tr><td colspan="5" style="text-align:center">Tidak ada kejadian</td></tr>'}</tbody>
+          <thead><tr><th>No</th><th>Bulan</th><th>Total</th><th>🟢 PM/TOH/GOH</th><th>💥 Breakdown/TS</th><th>⏳ Belum Selesai (akhir bln)</th></tr></thead>
+          <tbody>${monthSummaryRows || '<tr><td colspan="6" style="text-align:center">Tidak ada kejadian</td></tr>'}</tbody>
         </table>`;
+
+      const belumDetail = sortedYMs.map((ym) => {
+        const items = belumSelesai(ym);
+        const lbl = new Date(ym + '-01').toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
+        const batas = batasBulan(ym);
+        const rows = items.map((d, i) => {
+          const hari = Math.floor((batas - new Date(d.start_at)) / 86400000);
+          const status = d.end_at ? `Selesai ${fmtDate(d.end_at.slice(0, 10))}` : '<b style="color:#dc2626">Masih open</b>';
+          return `<tr>
+          <td style="text-align:center">${i + 1}</td>
+          <td><b>${escapeHtml(d.equipment_tag || '-')}</b><br><span style="color:#64748b;font-size:10px">${escapeHtml(d.equipment_name || '')}</span></td>
+          <td style="text-align:center;font-size:11px">${escapeHtml(d.unit_name || '-')}</td>
+          <td style="text-align:center;font-weight:bold">${escapeHtml(catLabel(d))}</td>
+          <td style="text-align:center;font-size:11px;white-space:nowrap">${fmtDate((d.start_at || '').slice(0, 10))}</td>
+          <td style="text-align:center;font-size:11px">${hari} hari</td>
+          <td style="text-align:center;font-size:11px">${status}</td>
+          <td style="font-size:11px;line-height:1.4">${escapeHtml(d.notes || '-')}</td>
+        </tr>`;
+        }).join('');
+        return `
+          <h3 style="color:#6d28d9;margin-top:18px;margin-bottom:8px;page-break-after:avoid">⏳ ${escapeHtml(lbl)} — ${items.length} belum selesai ${batas === now ? 's/d hari ini' : 'di akhir bulan'}</h3>
+          ${items.length ? `<table style="page-break-inside:avoid">
+            <thead><tr>
+              <th style="width:3%">No</th><th style="width:15%">Equipment</th><th style="width:11%">Rig</th><th style="width:10%">Kategori</th>
+              <th style="width:10%">Mulai</th><th style="width:8%">Umur</th><th style="width:11%">Status sekarang</th><th>Catatan</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>` : '<p style="color:#64748b;font-size:11px">Semua pekerjaan sudah selesai.</p>'}`;
+      }).join('');
+      const belumSection = `<h2 style="margin-top:24px;color:#6d28d9;border-top:2px solid #6d28d9;padding-top:10px">⏳ PEKERJAAN BELUM SELESAI PER BULAN</h2>
+        <p style="font-size:11px;color:#64748b">Downtime yang sudah mulai tapi belum selesai sampai akhir bulan (termasuk bawaan bulan sebelumnya). Umur = hari sejak mulai sampai akhir bulan.</p>${belumDetail}`;
 
       const perBulanDetail = sortedYMs.map((ym) => {
         const items = byMonth[ym].slice().sort((a, b) => (b.start_at || '').localeCompare(a.start_at || ''));
@@ -22295,7 +22345,7 @@
           <tbody>${rigRows}</tbody>
         </table>`;
 
-      const table = monthSummaryTable + rigTable + perBulanSection;
+      const table = monthSummaryTable + rigTable + belumSection + perBulanSection;
       const kesimpulan = `<p><i>Catatan: laporan ini menampilkan kejadian aktual yang sudah tercatat di sistem, bukan proyeksi kebutuhan maintenance ke depan.</i></p>`;
       const chart = (typeof chartBars === 'function') ? chartBars('Distribusi per Kategori', [
         { label: 'PM/TOH/GOH', value: cntPM, color: '#16a34a' },
