@@ -1034,6 +1034,21 @@
     // beneran dicatat (PM3+) saja, biar gak ke-drown sama level kecil yg emang gak per-siklus
     // di-log — PM1/PM2 tetap tampil di tabel ladder lengkap, cuma diskip dari perhitungan due-next.
     const CAT_C71_TRACKED_LEVELS = CAT_C71_PM_ORDER.slice(2); // ['PM3','PM4','PM5','PM6']
+    // PM Berikutnya Cat C7.1 ala hitungan Trakindo: servis jatuh di titik jam TETAP kelipatan 500
+    // (500=PM3, 1000=PM4, 1500=PM3, 2000=PM5, 3000=PM6, ...), level = level tertinggi yg intervalnya
+    // pas membagi titik itu. PM terakhir (PM3+, apa pun labelnya) dibulatkan ke titik 500 terdekat
+    // (servis maju/mundur dikit tetap dianggap servis titik itu), lalu +500. Sebelumnya: level dgn
+    // lastDone+interval terkecil -> GS-KB150A-CAT (PM di HM 473) nunjuk PM3 @973, padahal Trakindo
+    // bilang PM4 @1000 (Maman 2026-10-09).
+    function getCatC71NextLevel(levels, currentHM) {
+      const step = CAT_C71_PM_LADDER.PM3.intervalHm;
+      const tracked = levels.filter(l => CAT_C71_TRACKED_LEVELS.includes(l.level));
+      const lastDone = Math.max(0, ...tracked.map(l => l.lastDone));
+      const nextDue = Math.round(lastDone / step) * step + step;
+      const level = [...CAT_C71_TRACKED_LEVELS].reverse()
+        .find(lv => nextDue % CAT_C71_PM_LADDER[lv].intervalHm === 0) || 'PM3';
+      return { level, lastDone, nextDue, remaining: nextDue - (Number(currentHM) || 0) };
+    }
     // Checklist kumulatif s/d 1 level (PM4 = item PM1+PM2+PM3+PM4).
     function getCatC71ChecklistForLevel(level) {
       const idx = CAT_C71_PM_ORDER.indexOf(level);
@@ -1145,8 +1160,7 @@
             const nextDue   = lastDone + CAT_C71_PM_LADDER[level].intervalHm;
             return { level, lastDone, nextDue, remaining: nextDue - currentHM };
           });
-          const nextLevel = levels.filter(l => CAT_C71_TRACKED_LEVELS.includes(l.level))
-            .reduce((a, b) => (b.nextDue < a.nextDue ? b : a));
+          const nextLevel = getCatC71NextLevel(levels, currentHM);
           catRows.push({
             ...e,
             _interval: CAT_C71_PM_LADDER[nextLevel.level].intervalHm,
@@ -9832,10 +9846,8 @@
             const remaining = nextDue - _currentHM;
             return { level, lastDone, nextDue, remaining };
           });
-          // "Due berikutnya" keseluruhan = level dengan next_due_hm TERKECIL (paling awal jatuh tempo),
-          // dibatasi ke level yang beneran dicatat formal (PM3+) — lihat CAT_C71_TRACKED_LEVELS.
-          const nextLevel = levels.filter(l => CAT_C71_TRACKED_LEVELS.includes(l.level))
-            .reduce((a, b) => (b.nextDue < a.nextDue ? b : a));
+          // "Due berikutnya" keseluruhan = titik jam tetap ala Trakindo — lihat getCatC71NextLevel().
+          const nextLevel = getCatC71NextLevel(levels, _currentHM);
           catC71Info = { levels, nextLevel, lastDoneDate };
         }
 
@@ -21042,8 +21054,7 @@
               const nextDue = lastDone + CAT_C71_PM_LADDER[level].intervalHm;
               return { level, lastDone, nextDue, remaining: nextDue - currentHM };
             });
-            const nextLevel = levels.filter(l => CAT_C71_TRACKED_LEVELS.includes(l.level))
-              .reduce((a, b) => (b.nextDue < a.nextDue ? b : a));
+            const nextLevel = getCatC71NextLevel(levels, currentHM);
             catNextByEqId[e.id] = nextLevel;
           });
         }
