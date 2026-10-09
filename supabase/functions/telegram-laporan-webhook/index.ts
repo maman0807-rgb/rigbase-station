@@ -26,15 +26,20 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { createRequire } from "node:module";
-
-const require = createRequire(import.meta.url);
-const LaporanHarianV2 = require("../_shared/laporan_harian_v2.js");
+// laporan_harian_v2.js adalah UMD: dia sendiri cek `typeof module !== 'undefined'`
+// (gak ada di Deno ESM) lalu jatuh ke `root.LaporanHarianV2 = api` (root = globalThis
+// di Deno). Jadi cukup side-effect import biasa, gak perlu node:module createRequire
+// (createRequire sempat dicoba, gagal -- WORKER_ERROR, kemungkinan gak didukung penuh
+// di Edge Runtime Supabase).
+import "../_shared/laporan_harian_v2.js";
+const LaporanHarianV2 = (globalThis as any).LaporanHarianV2;
 
 const BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN")!;
-const REPORT_CHAT_ID = Deno.env.get("TELEGRAM_REPORT_CHAT_ID")!;
-const WEBHOOK_SECRET = Deno.env.get("TELEGRAM_WEBHOOK_SECRET")!;
-const REPORT_USER_ID = Deno.env.get("TELEGRAM_REPORT_USER_ID")!;
+// Tiga ini BOLEH kosong di awal (mode bootstrap/setup) -- makanya gak pakai "!" dan
+// dicek falsy di handler, bukan diasumsikan selalu ada kayak BOT_TOKEN/SB_URL/SB_SERVICE_KEY.
+const REPORT_CHAT_ID = Deno.env.get("TELEGRAM_REPORT_CHAT_ID") || "";
+const WEBHOOK_SECRET = Deno.env.get("TELEGRAM_WEBHOOK_SECRET") || "";
+const REPORT_USER_ID = Deno.env.get("TELEGRAM_REPORT_USER_ID") || "";
 const SB_URL = Deno.env.get("SUPABASE_URL")!;
 const SB_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.get("SUPABASE_SECRET_KEYS")!;
 
@@ -94,6 +99,34 @@ function keEntry(p: any, eq: any | null) {
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
+  // ---- Mode setup (GET, dipanggil manual sekali lewat curl, bukan dari Telegram) ----
+  // Dipakai supaya pendaftaran webhook ke Telegram bisa dilakukan tanpa siapapun
+  // (termasuk Claude) perlu pegang TELEGRAM_BOT_TOKEN secara langsung -- function
+  // ini yang baca token-nya sendiri dari secret, lalu panggil Telegram API.
+  //   GET ...?action=setup&secret=<TELEGRAM_WEBHOOK_SECRET>  -> daftarkan webhook
+  //   GET ...?action=info&secret=<TELEGRAM_WEBHOOK_SECRET>   -> cek status webhook
+  if (req.method === "GET") {
+    const url = new URL(req.url);
+    const action = url.searchParams.get("action");
+    const secretParam = url.searchParams.get("secret");
+    if (secretParam !== WEBHOOK_SECRET) return new Response("forbidden", { status: 403, headers: corsHeaders });
+    if (action === "setup") {
+      // Jangan pakai url.origin dari req.url -- di dalam Edge Runtime itu bukan hostname
+      // publik (Telegram nolak, "An HTTPS URL must be provided"). Rakit dari SUPABASE_URL
+      // yang memang https://<ref>.supabase.co.
+      const selfUrl = `${SB_URL}/functions/v1/telegram-laporan-webhook`;
+      const resp = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/setWebhook?url=${encodeURIComponent(selfUrl)}&secret_token=${encodeURIComponent(WEBHOOK_SECRET)}`);
+      const data = await resp.json();
+      return new Response(JSON.stringify(data), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    if (action === "info") {
+      const resp = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getWebhookInfo`);
+      const data = await resp.json();
+      return new Response(JSON.stringify(data), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    return new Response("ok", { headers: corsHeaders });
+  }
+
   // Verifikasi ini beneran dari Telegram -- Telegram ngirim balik secret_token
   // yang kita daftarkan saat setWebhook, di header ini.
   const gotSecret = req.headers.get("x-telegram-bot-api-secret-token");
@@ -112,9 +145,21 @@ serve(async (req) => {
   const text: string | undefined = msg?.text;
   const chatId = msg?.chat?.id;
 
-  // Bukan pesan teks, atau bukan dari chat pelapor yang terdaftar -> diemin aja
-  // (200 OK biar Telegram gak nge-retry), jangan proses & jangan balas apa-apa.
-  if (!text || String(chatId) !== String(REPORT_CHAT_ID)) {
+  if (!text || !chatId) return new Response("ok", { headers: corsHeaders });
+
+  // ---- Mode bootstrap chat ID ----
+  // Selama TELEGRAM_REPORT_CHAT_ID belum di-set, balas APAPUN yang masuk dengan chat
+  // ID-nya sendiri -- supaya chat ID pelapor bisa ketemu tanpa perlu buka getUpdates
+  // manual. Begitu TELEGRAM_REPORT_CHAT_ID sudah di-set, baris ini otomatis gak aktif
+  // lagi dan alur normal (filter chat ID di bawah) yang jalan.
+  if (!REPORT_CHAT_ID) {
+    await sendTelegram(chatId, `🔧 Setup: chat ID kamu adalah <code>${chatId}</code>. Kirim ini ke yang lagi setup bot, buat di-set sebagai TELEGRAM_REPORT_CHAT_ID.`);
+    return new Response("ok", { headers: corsHeaders });
+  }
+
+  // Bukan dari chat pelapor yang terdaftar -> diemin aja (200 OK biar Telegram gak
+  // nge-retry), jangan proses & jangan balas apa-apa.
+  if (String(chatId) !== String(REPORT_CHAT_ID)) {
     return new Response("ok", { headers: corsHeaders });
   }
 
@@ -161,10 +206,17 @@ serve(async (req) => {
       if (!p._match) p.flags.push({ level: "cek", kode: "equipment_belum_cocok", pesan: "Belum dicocokkan ke master equipment — pilih di kartu" });
     });
 
-    const { data: hdr, error: eHdr } = await sb.from("laporan_harian").insert({
+    // created_by/user_id cuma diisi kalau TELEGRAM_REPORT_USER_ID sudah di-set --
+    // biar bisa dites dulu sebelum UUID user-nya ada. Kalau kolomnya NOT NULL di DB,
+    // insert ini bakal gagal dengan error yang jelas (dibalas ke chat lewat catch
+    // di bawah), baru ketahuan harus di-set.
+    const headerPayload: Record<string, unknown> = {
       tanggal: r.tanggal, tim: "RAM Hoist & Heavy Equipment", status: "draft", sumber: "bot_telegram",
-      raw_text: text, format_versi: "v2", status_rig: r.status_rig, created_by: REPORT_USER_ID,
-    }).select("id").single();
+      raw_text: text, format_versi: "v2", status_rig: r.status_rig,
+    };
+    if (REPORT_USER_ID) headerPayload.created_by = REPORT_USER_ID;
+
+    const { data: hdr, error: eHdr } = await sb.from("laporan_harian").insert(headerPayload).select("id").single();
     if (eHdr) throw eHdr;
 
     const rows = r.pekerjaan.map((p: any) => {
@@ -176,11 +228,13 @@ serve(async (req) => {
       if (eRows) throw eRows;
     }
 
-    await sb.from("activity_log").insert({
-      user_id: REPORT_USER_ID, user_name: "Bot Telegram", action: "laporan_harian_tempel",
+    const logPayload: Record<string, unknown> = {
+      user_name: "Bot Telegram", action: "laporan_harian_tempel",
       entity_type: "laporan_harian", entity_id: String(hdr.id), entity_label: fmtDateID(r.tanggal),
       details: { pekerjaan: rows.length, via: "telegram_bot" },
-    });
+    };
+    if (REPORT_USER_ID) logPayload.user_id = REPORT_USER_ID;
+    await sb.from("activity_log").insert(logPayload);
 
     const nKurang = r.pekerjaan.reduce((a: number, p: any) => a + p.flags.filter((f: any) => f.level === "kurang").length, 0) + r.flags.filter((f: any) => f.level === "kurang").length;
     const nCek = r.pekerjaan.reduce((a: number, p: any) => a + p.flags.filter((f: any) => f.level === "cek").length, 0) + r.flags.filter((f: any) => f.level === "cek").length;
