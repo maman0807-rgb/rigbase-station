@@ -1,8 +1,16 @@
+// ⚠️⚠️ TIDAK DIPAKAI — JANGAN JALANKAN action=setup (setWebhook) ⚠️⚠️
+// Keputusan final (2026-10-09, lihat docs/LAPORAN_HARIAN_V2.md "Keputusan 2026-10-09"):
+// alur produksi tetap PAKAI N8N ("Laporan Harian RAM" workflow, masih AKTIF — bukan
+// mati seperti dikira sesi yang bikin function ini). Satu bot Telegram cuma bisa
+// punya SATU webhook -- kalau function ini di-setWebhook, otomatis NGAMBIL ALIH dari
+// n8n dan n8n berhenti nerima laporan (sudah kejadian sekali, 2026-10-09, diperbaiki
+// pakai action=delete). Kode ini dibiarkan ada cuma buat referensi/opsi masa depan --
+// jangan deploy+setWebhook lagi tanpa konfirmasi eksplisit dari Maman.
+//
 // Edge Function: telegram-laporan-webhook
 // "Opsi B" dari docs/LAPORAN_HARIAN_V2.md — Perangkum kirim rangkuman Laporan
 // Harian ke bot Telegram (chat pribadi, bot yang sama dengan bot alert), bot
-// langsung bikin draft di eRAMHoist lewat function ini (tanpa n8n, karena n8n
-// sudah dimatikan — lihat reference_eramhoist_repo.md soal WAHA/n8n).
+// langsung bikin draft di eRAMHoist lewat function ini (tanpa n8n).
 //
 // Pakai parser yang SAMA PERSIS dengan tombol "📋 Tempel Laporan" di app
 // (supabase/functions/_shared/laporan_harian_v2.js, salinan dari

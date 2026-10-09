@@ -1,8 +1,16 @@
 # telegram-laporan-webhook — "Opsi B": bot Telegram → draft otomatis
 
+> ⚠️ **TIDAK DIPAKAI.** Keputusan final 2026-10-09: alur produksi tetap pakai **n8n**
+> (workflow "Laporan Harian RAM", masih AKTIF — bukan mati seperti dikira waktu function
+> ini dibikin). JANGAN jalankan `?action=setup` (setWebhook) — bot Telegram cuma bisa
+> punya 1 webhook, jadi itu bakal ngambil alih dari n8n dan laporan berhenti masuk ke
+> sana (sudah kejadian sekali, 2026-10-09, diperbaiki pakai `?action=delete`). Lihat
+> `docs/LAPORAN_HARIAN_V2.md` bagian "Keputusan 2026-10-09" sebelum menyentuh ini lagi.
+
 Ganti alur "📋 Tempel Laporan" (paste manual di app) jadi: Perangkum kirim rangkuman
 ke bot Telegram seperti dulu → bot langsung bikin draft Laporan Harian di eRAMHoist.
-Gak pakai n8n (udah dimatikan). Lihat `docs/LAPORAN_HARIAN_V2.md` bagian "Opsi B".
+Dibikin dengan asumsi n8n sudah mati total — **asumsi itu salah**, lihat peringatan
+di atas. Disimpan di repo buat referensi/opsi masa depan saja.
 
 **Saya (Claude, sesi ini) gak punya akses CLI/deploy ke project Supabase-nya** — langkah
 di bawah ini perlu Maman jalanin sendiri.
