@@ -17835,7 +17835,8 @@
     }
 
     function lhStartCreate() {
-      lhState = { mode: 'create', laporanId: null, entries: [lhBlankEntry()], header: { tanggal: new Date().toISOString().slice(0, 10) }, filterBulan: lhState.filterBulan || '', filterStatus: lhState.filterStatus || '', filterEqId: lhState.filterEqId || '', filterEqLabel: lhState.filterEqLabel || '' };
+      lhState = { mode: 'create', laporanId: null, entries: [], header: { tanggal: new Date().toISOString().slice(0, 10) }, filterBulan: lhState.filterBulan || '', filterStatus: lhState.filterStatus || '', filterEqId: lhState.filterEqId || '', filterEqLabel: lhState.filterEqLabel || '' };
+      lhState.entries.push(lhfBlankPekerjaan());
       renderLaporanHarianPage();
     }
     window.lhStartCreate = lhStartCreate;
@@ -17902,9 +17903,10 @@
             <summary class="cursor-pointer font-semibold">📄 Teks asli laporan</summary>
             <pre class="whitespace-pre-wrap mt-2 text-slate-600">${escapeHtml(header.raw_text)}</pre>
           </details>` : ''}
-          ${lhv2StatusRigHtml(header)}
+          ${lhIsV2() ? lhfStatusRigHtml(readonly) : ''}
+          ${lhIsV2() ? '<div class="text-xs font-bold text-navy uppercase tracking-wider -mb-1">B. Pekerjaan</div>' : ''}
           <div id="lh-entries" class="space-y-3"></div>
-          ${!readonly ? `<button onclick="lhAddEntry()" class="text-sm text-navy font-semibold hover:underline">+ Tambah Unit</button>` : ''}
+          ${!readonly ? (lhIsV2() ? `<button onclick="lhfAddPekerjaan()" class="text-sm text-navy font-semibold hover:underline">+ Tambah Pekerjaan</button>` : `<button onclick="lhAddEntry()" class="text-sm text-navy font-semibold hover:underline">+ Tambah Unit</button>`) : ''}
           <div class="flex items-center gap-2 pt-2 border-t border-slate-200 flex-wrap">
             ${!readonly ? `<button onclick="lhSaveFinal()" class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold">✅ ${isFinal ? 'Simpan Perubahan' : 'Konfirmasi & Simpan Final'}</button>` : ''}
             ${readonly && isFinal ? `<button onclick="lhEnableEdit()" class="px-4 py-2 rounded-lg bg-navy/10 hover:bg-navy/20 text-navy text-sm font-semibold">✏️ Edit Laporan</button>` : ''}
@@ -18041,6 +18043,7 @@
     window.lhResolveEqInput = lhResolveEqInput;
 
     function lhEntryCardHtml(e, i, readonly) {
+      if (e.tipe_v2) return lhfCardHtml(e, i, readonly);   // form format baru
       const currentEq = (lhEquipmentList || []).find(eq => eq.id === e.equipment_id);
       const currentEqLabel = currentEq ? `${currentEq.tag_number} — ${currentEq.nama_equipment || ''}` : '';
       const statusColors = { Standby: 'bg-slate-100 text-slate-600', Operasi: 'bg-emerald-100 text-emerald-700', CM: 'bg-red-100 text-red-700', PM: 'bg-blue-100 text-blue-700', TS: 'bg-amber-100 text-amber-700', Lainnya: 'bg-slate-100 text-slate-600' };
@@ -18315,7 +18318,7 @@
     function lhv2KeEntry(p) {
       const eq = p._match ? (lhEquipmentList || []).find(x => x.id === p._match.id) : null;
       const label = [p.unit_rig ? p.unit : (p.unit && p.unit !== p.equipment ? p.unit : null), p.equipment || p.judul].filter(Boolean).join(' – ');
-      const catatan = [p.status_asli ? `Status: ${p.status_asli}` : null, p.judul_ket ? `Ket. judul: ${p.judul_ket}` : null].filter(Boolean).join('\n');
+      const catatan = [p.catatan ? `Note: ${p.catatan}` : null, p.judul_ket ? `Ket. judul: ${p.judul_ket}` : null].filter(Boolean).join('\n');
       return {
         equipment_id: eq ? eq.id : null,
         equipment_manual_nama: eq ? null : label,
@@ -18465,6 +18468,252 @@
         </div>`;
     }
 
+    // ============================================================
+    // FORM LAPORAN HARIAN FORMAT BARU (2026-10-09)
+    // Form mengikuti isi rangkuman yang dikirim: A. Status Rig + B. Pekerjaan bernomor.
+    // Dipakai untuk laporan format baru (format_versi 'v2' / entry bertipe BARU-LANJUT)
+    // dan laporan manual baru. Laporan lama tetap memakai kartu lama.
+    // ============================================================
+    const LHF_JENIS = ['CM', 'PM', 'OH', 'Cat 3', 'Cat 4', 'Inspeksi', 'Lainnya'];
+    const LHF_STATUS = ['Progress', 'Tunggu', 'Selesai'];
+    const LHF_RIG = ['BW-100A', 'BW H35KD', 'BW KB150A', 'BW KB150B', 'BW KB150C'];
+
+    function lhIsV2() {
+      if (lhState.mode === 'create') return true;
+      return lhState.header?.format_versi === 'v2' || (lhState.entries || []).some(e => e.tipe_v2);
+    }
+    function lhfBlankPekerjaan() {
+      const no = (lhState.entries || []).reduce((m, e) => Math.max(m, Number(e.no_urut) || 0), 0) + 1;
+      return { ...lhBlankEntry(), status_kerja: 'Lainnya', tipe_v2: 'BARU', no_urut: no, unit_lapor: '', judul_lapor: '',
+        jenis: '', jenis_asli: '', gejala: '', mulai_pekerjaan: null, selesai_pekerjaan: null, jam_mulai: '', jam_selesai: '',
+        meter_tipe: 'HM', rig_stop: null, rig_stop_ket: '', pic: '', no_wo: '', status_v2: 'Progress', status_ket: '', status_asli: '',
+        part: [], flags: [], _isTS: false };
+    }
+    // Status kerja lama (dipakai Analisa/PLO/peringatan CM-TS) & job desc diturunkan dari isian format baru
+    function lhfSinkronLama(e) {
+      const isTS = e._isTS ?? (e.status_kerja === 'TS' || /\bTS\b/i.test(e.jenis_asli || ''));
+      e.status_kerja = e.jenis === 'CM' ? (isTS ? 'TS' : 'CM') : e.jenis === 'PM' ? 'PM' : 'Lainnya';
+      e.job_desc = [e.jenis ? e.jenis + (e.jenis === 'CM' && isTS ? ' (TS)' : '') : '', e.gejala].filter(Boolean).join(' – ');
+      e.progress_pct = e.status_v2 === 'Selesai' ? 100 : e.progress_pct;
+      e.follow_up_items = e.status_v2 === 'Tunggu' ? [`Tunggu ${e.status_ket || ''}`.trim()] : [];
+      if (!e.equipment_id && !e.equipment_manual_nama) e.equipment_manual_nama = [e.unit_lapor, e.judul_lapor].filter(Boolean).join(' – ');
+    }
+
+    function lhfCardHtml(e, i, readonly) {
+      const dis = readonly ? 'disabled' : '';
+      const inp = 'w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm';
+      const lbl = t => `<label class="block text-[11px] font-semibold text-slate-500 uppercase mb-1">${t}</label>`;
+      const currentEq = (lhEquipmentList || []).find(eq => eq.id === e.equipment_id);
+      const kurang = lhv2Kurang(e);
+      const cekFlags = (e.flags || []).filter(f => f.level === 'cek' && f.kode !== 'equipment_belum_cocok');
+      const isTS = e._isTS ?? (e.status_kerja === 'TS' || /\bTS\b/i.test(e.jenis_asli || ''));
+      const merah = c => c ? 'border-red-400 bg-red-50' : '';
+      return `<div class="bg-white rounded-xl border ${kurang.length ? 'border-red-300' : 'border-slate-200'} p-4 space-y-3">
+        <div class="flex items-center justify-between gap-2 flex-wrap">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="text-base font-bold text-navy">${e.no_urut ?? i + 1}.</span>
+            <select ${dis} onchange="lhfSet(${i},'tipe_v2',this.value)" class="border border-slate-300 rounded-lg px-2 py-1 text-xs font-bold ${e.tipe_v2 === 'BARU' ? 'bg-navy text-white' : 'bg-slate-100'}">
+              ${['BARU', 'LANJUT'].map(t => `<option ${e.tipe_v2 === t ? 'selected' : ''}>${t}</option>`).join('')}
+            </select>
+            <span class="text-sm font-semibold text-slate-800">${escapeHtml([e.unit_lapor, e.judul_lapor].filter(Boolean).join(' – ') || 'Pekerjaan baru')}</span>
+            ${e.status_v2 ? `<span class="px-2 py-0.5 rounded text-[11px] font-semibold ${LHV2_STATUS_CLS[e.status_v2] || ''}">${e.status_v2}${e.progress_pct !== '' && e.progress_pct != null ? ' ' + e.progress_pct + '%' : ''}</span>` : ''}
+          </div>
+          ${!readonly ? `<button onclick="lhRemoveEntry(${i})" class="text-red-400 hover:text-red-600 text-sm px-1" title="Hapus pekerjaan ini">✕</button>` : ''}
+        </div>
+        ${kurang.length ? `<div class="bg-red-50 border border-red-200 rounded px-2 py-1 text-[11px] text-red-700">⛔ Isian kurang: ${kurang.join(', ')}</div>` : ''}
+        ${cekFlags.length ? `<div class="bg-amber-50 border border-amber-200 rounded px-2 py-1">${lhv2FlagHtml(cekFlags)}</div>` : ''}
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <div>${lbl('Unit')}
+            <input ${dis} list="lhf-rig-dl" value="${escapeHtml(e.unit_lapor || '')}" placeholder="BW KB150A / nama unit" oninput="lhfSet(${i},'unit_lapor',this.value,true)" onchange="lhfSet(${i},'unit_lapor',this.value)" class="${inp}"></div>
+          <div>${lbl('Equipment')}
+            <input ${dis} value="${escapeHtml(e.judul_lapor || '')}" placeholder="mis. Rig carier" oninput="lhfSet(${i},'judul_lapor',this.value,true)" onchange="lhfSet(${i},'judul_lapor',this.value)" class="${inp} ${merah(!e.judul_lapor && !e.equipment_id)}"></div>
+          <div>${lbl('SN / Model')}
+            <input ${dis} value="${escapeHtml(e.sn || '')}" oninput="lhfSet(${i},'sn',this.value,true)" class="${inp}"></div>
+        </div>
+        <div>${lbl('Equipment di sistem <span class="normal-case font-normal text-slate-400">(untuk riwayat & update HM)</span>')}
+          <input ${dis} type="text" list="lh-eq-dl" autocomplete="off" value="${escapeHtml(currentEq ? `${currentEq.tag_number} — ${currentEq.nama_equipment || ''}` : '')}" placeholder="🔍 Ketik tag / nama equipment…" onfocus="this.select()" onchange="lhResolveEqInput(${i}, this.value)" class="${inp} ${currentEq ? '' : 'border-amber-300 bg-amber-50'}">
+          ${!currentEq ? '<div class="text-[11px] text-amber-700 mt-0.5">Belum dicocokkan ke master equipment — HM tidak akan ter-update & tidak masuk riwayat unit.</div>' : ''}
+        </div>
+
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div>${lbl('Jenis')}
+            <select ${dis} onchange="lhfSet(${i},'jenis',this.value)" class="${inp} bg-white">
+              <option value="">—</option>${LHF_JENIS.map(j => `<option ${e.jenis === j ? 'selected' : ''}>${j}</option>`).join('')}
+            </select>
+            ${e.jenis === 'CM' ? `<label class="flex items-center gap-1 text-[11px] mt-1"><input ${dis} type="checkbox" ${isTS ? 'checked' : ''} onchange="lhfSet(${i},'_isTS',this.checked)"> TS (troubleshoot)</label>` : ''}</div>
+          <div class="col-span-2">${lbl('Gejala')}
+            <input ${dis} value="${escapeHtml(e.gejala || '')}" oninput="lhfSet(${i},'gejala',this.value,true)" onchange="lhfSet(${i},'gejala',this.value)" class="${inp} ${merah(e.jenis === 'CM' && !(e.gejala || '').trim())}"></div>
+          <div>${lbl('Rig stop')}
+            <select ${dis} onchange="lhfSet(${i},'rig_stop',this.value===''?null:this.value==='1')" class="${inp} bg-white ${merah(kurang.includes('rig stop belum diisi'))}">
+              <option value="" ${e.rig_stop == null ? 'selected' : ''}>—</option><option value="1" ${e.rig_stop === true ? 'selected' : ''}>Ya</option><option value="0" ${e.rig_stop === false ? 'selected' : ''}>Tidak</option>
+            </select>
+            ${e.rig_stop === true ? `<input ${dis} value="${escapeHtml(e.rig_stop_ket || '')}" placeholder="… jam" oninput="lhfSet(${i},'rig_stop_ket',this.value,true)" class="${inp} mt-1">` : ''}</div>
+        </div>
+
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div>${lbl('Mulai')}
+            <input ${dis} type="date" value="${e.mulai_pekerjaan || ''}" onchange="lhfSet(${i},'mulai_pekerjaan',this.value||null)" class="${inp} ${merah(e.tipe_v2 === 'LANJUT' && !e.mulai_pekerjaan)}">
+            <input ${dis} value="${escapeHtml(e.jam_mulai || '')}" placeholder="jam, mis. 10:00" oninput="lhfSet(${i},'jam_mulai',this.value,true)" class="${inp} mt-1"></div>
+          <div>${lbl('Selesai')}
+            <input ${dis} type="date" value="${e.selesai_pekerjaan || ''}" onchange="lhfSet(${i},'selesai_pekerjaan',this.value||null)" class="${inp} ${merah(e.status_v2 === 'Selesai' && !e.selesai_pekerjaan)}">
+            <input ${dis} value="${escapeHtml(e.jam_selesai || '')}" placeholder="jam, mis. 17:00" oninput="lhfSet(${i},'jam_selesai',this.value,true)" class="${inp} mt-1"></div>
+          <div>${lbl('HM / RH / KM')}
+            <div class="flex gap-1">
+              <select ${dis} onchange="lhfSet(${i},'meter_tipe',this.value,true)" class="border border-slate-300 rounded-lg px-1 py-1.5 text-xs bg-white">
+                ${['HM', 'KM'].map(t => `<option ${(e.meter_tipe || 'HM') === t ? 'selected' : ''}>${t}</option>`).join('')}
+              </select>
+              <input ${dis} type="number" step="0.1" value="${e.rh ?? ''}" oninput="lhUpdateEntry(${i},'rh',this.value); lhUpdateRhDelta(${i});" class="${inp}">
+            </div>
+            <div id="lh-rh-delta-${i}" class="mt-0.5 min-h-[14px]">${lhRhDeltaHtml(e)}</div></div>
+          <div>${lbl('Lokasi')}
+            <input ${dis} value="${escapeHtml(e.site || '')}" oninput="lhfSet(${i},'site',this.value,true)" class="${inp}"></div>
+          <div>${lbl('PIC')}
+            <input ${dis} value="${escapeHtml(e.pic || '')}" oninput="lhfSet(${i},'pic',this.value,true)" class="${inp}"></div>
+          <div>${lbl('No WO')}
+            <input ${dis} value="${escapeHtml(e.no_wo || '')}" oninput="lhfSet(${i},'no_wo',this.value,true)" class="${inp}"></div>
+        </div>
+
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            ${lbl('Deskripsi pekerjaan <span class="normal-case font-normal text-slate-400">(1 baris = 1 langkah, centang = sudah dikerjakan)</span>').replace('mb-1', 'mb-0')}
+            ${!readonly && (e.checklist || []).some(c => lhfPecahKomaTeks(c.item).length > 1) ? `<button type="button" onclick="lhfPecahKoma(${i})" class="text-[11px] font-semibold text-navy hover:underline">↳ Pecah per koma</button>` : ''}
+          </div>
+          <div class="space-y-1">
+            ${(e.checklist || []).map((c, ci) => `<div class="flex items-center gap-2">
+              <input type="checkbox" ${c.checked ? 'checked' : ''} ${dis} onchange="lhChecklistToggle(${i},${ci},this.checked)" class="w-4 h-4 accent-navy flex-shrink-0">
+              <input ${dis} value="${escapeHtml(c.item || '')}" oninput="lhChecklistText(${i},${ci},this.value)" class="flex-1 border border-slate-300 rounded-lg px-2 py-1.5 text-sm">
+              ${!readonly ? `<button onclick="lhChecklistRemove(${i},${ci})" class="text-red-400 hover:text-red-600 text-xs px-1" title="Hapus poin">✕</button>` : ''}
+            </div>`).join('') || '<div class="text-xs text-slate-400 italic">Belum ada deskripsi.</div>'}
+          </div>
+          ${!readonly ? `<button onclick="lhChecklistAdd(${i})" class="text-xs text-navy hover:underline mt-1">+ poin</button>` : ''}</div>
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            ${lbl('Part yang diganti / dipakai <span class="normal-case font-normal text-slate-400">(hanya dicatat — stok tetap lewat Input Harian)</span>').replace('mb-1', 'mb-0')}
+            ${!readonly && (e.part || []).some(x => lhfPecahPartNama(x.nama).length > 1) ? `<button type="button" onclick="lhfPecahPart(${i})" class="text-[11px] font-semibold text-navy hover:underline">↳ Pecah part</button>` : ''}
+          </div>
+          ${(e.part || []).length ? `<div class="hidden sm:grid grid-cols-12 gap-1 text-[10px] font-semibold text-slate-400 uppercase px-0.5"><div class="col-span-6">Nama part</div><div class="col-span-3">PN</div><div class="col-span-1">Qty</div><div class="col-span-2">Satuan</div></div>` : ''}
+          <div class="space-y-1">
+            ${(e.part || []).map((x, pi) => `<div class="grid grid-cols-12 gap-1 items-center">
+              <input ${dis} value="${escapeHtml(x.nama || '')}" placeholder="Nama part" oninput="lhfPartSet(${i},${pi},'nama',this.value)" class="col-span-12 sm:col-span-6 border border-slate-300 rounded-lg px-2 py-1.5 text-sm">
+              <input ${dis} value="${escapeHtml(x.pn || '')}" placeholder="PN" oninput="lhfPartSet(${i},${pi},'pn',this.value)" class="col-span-5 sm:col-span-3 border border-slate-300 rounded-lg px-2 py-1.5 text-sm">
+              <input ${dis} type="number" min="0" step="any" value="${x.qty ?? ''}" placeholder="Qty" oninput="lhfPartSet(${i},${pi},'qty',this.value)" class="col-span-3 sm:col-span-1 border ${x.qty == null ? 'border-amber-300 bg-amber-50' : 'border-slate-300'} rounded-lg px-2 py-1.5 text-sm">
+              <input ${dis} value="${escapeHtml(x.satuan || '')}" placeholder="pcs" oninput="lhfPartSet(${i},${pi},'satuan',this.value)" class="col-span-3 sm:col-span-1 border border-slate-300 rounded-lg px-2 py-1.5 text-sm">
+              ${!readonly ? `<button onclick="lhfPartHapus(${i},${pi})" class="col-span-1 text-red-400 hover:text-red-600 text-xs" title="Hapus part">✕</button>` : '<span class="col-span-1"></span>'}
+            </div>`).join('') || '<div class="text-xs text-slate-400 italic">Tidak ada part.</div>'}
+          </div>
+          ${!readonly ? `<button onclick="lhfPartTambah(${i})" class="text-xs text-navy hover:underline mt-1">+ part</button>` : ''}</div>
+
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div>${lbl('Status')}
+            <select ${dis} onchange="lhfSet(${i},'status_v2',this.value)" class="${inp} bg-white ${LHV2_STATUS_CLS[e.status_v2] || ''}">
+              ${LHF_STATUS.map(s => `<option ${e.status_v2 === s ? 'selected' : ''}>${s}</option>`).join('')}
+            </select></div>
+          <div class="col-span-2">${lbl(e.status_v2 === 'Tunggu' ? 'Tunggu apa' : 'Keterangan status')}
+            <input ${dis} value="${escapeHtml(e.status_ket || '')}" placeholder="${e.status_v2 === 'Tunggu' ? 'mis. part / SPK / Tim Trakindo' : ''}" oninput="lhfSet(${i},'status_ket',this.value,true)" class="${inp}"></div>
+          <div>${lbl('Progress %')}
+            <input ${dis} type="number" min="0" max="100" value="${e.progress_pct ?? ''}" oninput="lhfSet(${i},'progress_pct',this.value,true)" class="${inp}"></div>
+        </div>
+        ${e.notes ? `<div class="text-[11px] text-slate-400 whitespace-pre-line">${escapeHtml(e.notes)}</div>` : ''}
+      </div>`;
+    }
+
+    // diam = true → tidak render ulang (input teks), supaya kursor tidak lompat
+    function lhfSet(i, field, value, diam) {
+      const e = lhState.entries[i]; if (!e) return;
+      e[field] = value;
+      lhfSinkronLama(e);
+      if (!diam) lhRenderEntriesList();
+    }
+    window.lhfSet = lhfSet;
+    function lhfSetDeskripsi(i, text) {
+      const e = lhState.entries[i]; if (!e) return;
+      e.checklist = String(text || '').split('\n').map(s => s.replace(/^[*\-•]\s*/, '').trim()).filter(Boolean).map(item => ({ item, checked: true }));
+    }
+    window.lhfSetDeskripsi = lhfSetDeskripsi;
+    // Pecah satu poin deskripsi per koma — koma DI DALAM kurung tidak dipecah,
+    // mis. "Fill up oli (ATF, RORED, MEDITRAN S40)" tetap utuh. Pola lama: Job Desc
+    // dipecah per koma jadi baris (05d7d10) / "Jadikan Checklist" (5d084ff).
+    function lhfPecahKomaTeks(teks) {
+      const out = []; let buf = '', dalam = 0;
+      for (const ch of String(teks || '')) {
+        if (ch === '(') dalam++;
+        if (ch === ')') dalam = Math.max(0, dalam - 1);
+        if (ch === ',' && dalam === 0) { out.push(buf); buf = ''; continue; }
+        buf += ch;
+      }
+      out.push(buf);
+      return out.map(x => x.trim()).filter(Boolean);
+    }
+    async function lhfPecahKoma(i) {
+      const e = lhState.entries[i]; if (!e) return;
+      const baru = (e.checklist || []).flatMap(c => lhfPecahKomaTeks(c.item).map(item => ({ item, checked: c.checked !== false })));
+      if (baru.length === (e.checklist || []).length) { toast('Tidak ada koma yang bisa dipecah.', 'warn'); return; }
+      const ok = await confirmDialog({ title: 'Pecah per koma', message: `Pecah deskripsi jadi ${baru.length} poin (koma di dalam kurung tidak ikut dipecah)?`, confirmText: 'Ya, Pecah' });
+      if (!ok) return;
+      e.checklist = baru;
+      lhRenderEntriesList();
+    }
+    window.lhfPecahKoma = lhfPecahKoma;
+    // Pecah nama part: "Pelumas (atf, meditran, rored s140)" → Pelumas atf / Pelumas meditran / Pelumas rored s140,
+    // "Filter oli, filter solar" → 2 part. Qty asli tidak ditebak untuk hasil pecahan (dikosongkan → isi manual).
+    function lhfPecahPartNama(nama) {
+      const t = String(nama || '').trim();
+      const m = /^(.*?)\s*\(([^()]*,[^()]*)\)\s*$/.exec(t);
+      if (m && m[1].trim()) return m[2].split(',').map(x => x.trim()).filter(Boolean).map(x => `${m[1].trim()} ${x}`);
+      return lhfPecahKomaTeks(t);
+    }
+    async function lhfPecahPart(i) {
+      const e = lhState.entries[i]; if (!e) return;
+      const baru = (e.part || []).flatMap(x => {
+        const nm = lhfPecahPartNama(x.nama);
+        return nm.length > 1 ? nm.map(n => ({ nama: n, pn: null, qty: null, satuan: x.satuan || null, sumber: x.sumber || null })) : [x];
+      });
+      const ok = await confirmDialog({ title: 'Pecah part', message: `Pecah jadi ${baru.length} part terpisah? Qty hasil pecahan dikosongkan — isi qty masing-masing setelahnya.`, confirmText: 'Ya, Pecah' });
+      if (!ok) return;
+      e.part = baru;
+      lhRenderEntriesList();
+    }
+    window.lhfPecahPart = lhfPecahPart;
+    window.lhfPartSet = (i, pi, f, v) => { const x = lhState.entries[i]?.part?.[pi]; if (!x) return; x[f] = f === 'qty' ? (v === '' ? null : Number(v)) : (v.trim() || null); };
+    window.lhfPartTambah = i => { const e = lhState.entries[i]; if (!e) return; (e.part = e.part || []).push({ nama: '', pn: null, qty: null, satuan: 'pcs', sumber: null }); lhRenderEntriesList(); };
+    window.lhfPartHapus = (i, pi) => { lhState.entries[i]?.part?.splice(pi, 1); lhRenderEntriesList(); };
+    function lhfAddPekerjaan() { lhState.entries.push(lhfBlankPekerjaan()); lhRenderEntriesList(); }
+    window.lhfAddPekerjaan = lhfAddPekerjaan;
+
+    // ---------- A. Status Rig (bisa diedit) ----------
+    function lhfRhKeTeks(rh) { return rh ? Object.entries(rh).map(([k, v]) => `${k} ${v}`).join(' | ') : ''; }
+    function lhfTeksKeRh(t) {
+      const rh = {};
+      String(t || '').split('|').forEach(seg => { const m = /^(.*?)\s*(\d+(?:[.,]\d+)?)\s*$/.exec(seg.trim()); if (m && m[1]) rh[m[1].trim()] = Number(m[2].replace(',', '.')); });
+      return Object.keys(rh).length ? rh : null;
+    }
+    function lhfStatusRigHtml(readonly) {
+      if (!Array.isArray(lhState.header?.status_rig)) lhState.header = { ...(lhState.header || {}), status_rig: LHF_RIG.map(unit => ({ unit, lokasi: '', keterangan: '', rh: null })) };
+      const rows = lhState.header.status_rig;
+      const dis = readonly ? 'disabled' : '';
+      const c = 'w-full border border-slate-300 rounded px-2 py-1 text-sm';
+      return `
+        <div class="bg-white rounded-xl border border-slate-200 p-4">
+          <div class="text-xs font-bold text-navy uppercase tracking-wider mb-2">A. Status Rig</div>
+          <div class="space-y-2">
+            ${rows.map((s, r) => `
+              <div class="grid grid-cols-12 gap-1.5 items-start border-b border-slate-100 pb-2">
+                <input ${dis} list="lhf-rig-dl" value="${escapeHtml(s.unit || '')}" oninput="lhfRig(${r},'unit',this.value)" class="${c} col-span-6 sm:col-span-2 font-semibold">
+                <input ${dis} value="${escapeHtml(s.lokasi || '')}" placeholder="Lokasi" oninput="lhfRig(${r},'lokasi',this.value)" class="${c} col-span-6 sm:col-span-2">
+                <input ${dis} value="${escapeHtml(s.keterangan || '')}" placeholder="Keterangan" oninput="lhfRig(${r},'keterangan',this.value)" class="${c} col-span-12 sm:col-span-4">
+                <input ${dis} value="${escapeHtml(lhfRhKeTeks(s.rh))}" placeholder="RH (opsional): Eng rig 3 | Gen CAT 4" oninput="lhfRig(${r},'rh',this.value)" class="${c} col-span-11 sm:col-span-3 text-xs">
+                ${!readonly ? `<button onclick="lhfRigHapus(${r})" class="col-span-1 text-red-400 hover:text-red-600 text-sm">✕</button>` : ''}
+              </div>`).join('')}
+          </div>
+          ${!readonly ? `<button onclick="lhfRigTambah()" class="text-xs text-navy font-semibold hover:underline mt-2">+ Tambah rig</button>` : ''}
+          <datalist id="lhf-rig-dl">${LHF_RIG.map(u => `<option value="${u}">`).join('')}</datalist>
+        </div>`;
+    }
+    window.lhfRig = (r, f, v) => { const s = lhState.header.status_rig[r]; if (!s) return; s[f] = f === 'rh' ? lhfTeksKeRh(v) : v; };
+    window.lhfRigTambah = () => { lhState.header.status_rig.push({ unit: '', lokasi: '', keterangan: '', rh: null }); lhRenderEditor(document.getElementById('ram-content')); };
+    window.lhfRigHapus = r => { lhState.header.status_rig.splice(r, 1); lhRenderEditor(document.getElementById('ram-content')); };
+
     async function lhDeleteReport() {
       const isFinal = lhState.header?.status === 'final';
       const message = isFinal
@@ -18560,6 +18809,10 @@
         }
       }
 
+      // Form format baru: turunkan status kerja / job desc / follow-up lama dari isian baru
+      const isV2 = lhIsV2();
+      if (isV2) lhState.entries.forEach(e => { if (!e.tipe_v2) Object.assign(e, { tipe_v2: 'LANJUT' }); lhfSinkronLama(e); });
+
       // Laporan Harian v2: isian wajib dari format baru (bisa di-override admin)
       const v2Kurang = lhState.entries.map((e, i) => ({ e, i, k: lhv2Kurang(e) })).filter(x => x.k.length);
       if (v2Kurang.length) {
@@ -18595,12 +18848,13 @@
         let laporanId = lhState.laporanId;
         if (lhState.mode === 'create') {
           const { data: newHeader, error: eh } = await state.supabase.from('laporan_harian')
-            .insert({ tanggal, tim: 'RAM Hoist & Heavy Equipment', status: 'final', sumber: 'manual_app', created_by: state.user.id, ...verifierFields })
+            .insert({ tanggal, tim: 'RAM Hoist & Heavy Equipment', status: 'final', sumber: 'manual_app', created_by: state.user.id, ...verifierFields,
+              ...(isV2 ? { format_versi: 'v2', status_rig: lhState.header?.status_rig || null } : {}) })
             .select().single();
           if (eh) throw eh;
           laporanId = newHeader.id;
         } else {
-          const { error: eh } = await state.supabase.from('laporan_harian').update({ status: 'final', ...verifierFields }).eq('id', laporanId);
+          const { error: eh } = await state.supabase.from('laporan_harian').update({ status: 'final', ...verifierFields, ...(isV2 ? { format_versi: 'v2', status_rig: lhState.header?.status_rig || null } : {}) }).eq('id', laporanId);
           if (eh) throw eh;
           const { error: ed } = await state.supabase.from('laporan_harian_entries').delete().eq('laporan_id', laporanId);
           if (ed) throw ed;

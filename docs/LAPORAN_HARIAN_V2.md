@@ -5,7 +5,7 @@ Catatan serah terima (2026-10-08) supaya pekerjaan bisa dilanjutkan dari laptop 
 ## Latar belakang
 - Tim HHE menyepakati **format rangkuman harian baru** sejak 06/10/2026. Lihat `ERAMHOIST_LAPORAN_HARIAN_V2_PROMPT.md`.
 - Perangkum mengirim rangkuman **langsung ke bot Telegram** (chat pribadi, bot yang sama dengan bot alert).
-- **n8n tidak dipakai lagi** (dimatikan karena WAHA bermasalah). Akibatnya laporan selama ini harus diketik ulang manual di app.
+- ~~n8n tidak dipakai lagi~~ **Koreksi 2026-10-09:** yang dimatikan hanya workflow WAHA (WhatsApp). Workflow n8n **"Laporan Harian RAM"** (Telegram → Claude → draft `sumber=bot_telegram`) **masih aktif**.
 - Prompt aslinya besar: tabel pekerjaan lintas hari, buffer bot + `/proses`, Daftar Open jam 06.00, dan Claude API. Setelah audit modul yang ada, Maman memilih **opsi A**:
 
 | Opsi | Isi | Status |
@@ -36,6 +36,14 @@ Keputusan desain:
 
 ## Template untuk perangkum
 `TEMPLATE_KOSONG` dan `TEMPLATE_CONTOH` ada di `js/laporan_harian_v2.js`. Keduanya tampil di **Panduan app → 📝 Laporan Harian → 📄 Template rangkuman** dengan tombol **📋 Salin** dan tabel aturan, dan ada link "📄 Lihat template" dari jendela Tempel Laporan. Kedua template ikut diuji (total tes **83/83**).
+
+## Keputusan 2026-10-09
+Setelah mencoba, Maman memilih **tetap memakai alur lama** (kirim ke bot, lalu n8n membuat draft otomatis). **Tempel Laporan tetap tersedia sebagai cadangan** kalau n8n, bot, atau kuota Claude bermasalah. Kedua alur memakai tabel yang sama, jadi tidak saling mengganggu.
+
+**Opsi B sudah dibangun tapi TIDAK dipakai.** Pada 2026-10-08 14:21, sesi Claude lain (laptop kantor, mengira n8n mati) membuat Edge Function `supabase/functions/telegram-laporan-webhook/` (commit 759ebf5) dan **menyembunyikan tombol Tempel Laporan**. Kodenya ada di repo tapi **belum di-deploy**.
+> ⚠️ **Jangan jalankan `setWebhook` ke Edge Function itu selama alur n8n dipakai.** Satu bot Telegram hanya bisa punya satu webhook, jadi alur n8n akan langsung berhenti menerima laporan.
+
+Yang perlu dipantau: prompt parsing di n8n dibuat untuk format lama. Kalau draft dari bot meleset untuk format baru, ada dua pilihan: sesuaikan prompt n8n (bisa memakai aturan di `js/laporan_harian_v2.js` sebagai acuan), atau pakai Tempel Laporan.
 
 ## Status & langkah berikutnya
 1. ✅ `fase40_laporan_harian_v2.sql` sudah dijalankan, dan kode sudah live (commit b3890fd, template 7bd775b).
