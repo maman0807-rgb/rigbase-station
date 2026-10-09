@@ -18752,13 +18752,16 @@
         const eq = (lhEquipmentList || []).find(x => x.id === e.equipment_id);
         if (guardScrapEquipment(eq)) return;
       }
+      // Laporan lama (>7 hari, mis. isi histori Jan–Mei 2026): RH-nya hanya dicatat di laporan,
+      // TIDAK disinkron ke equipment.running_hours — kalau disinkron, HM sekarang tertimpa angka lama.
+      const lhLama = (Date.now() - new Date(tanggal + 'T00:00:00+07:00').getTime()) > 7 * 86400000;
 
       // Sanity check RH sebelum simpan: cegah salah ketik RH turun besar dari Laporan Harian
       // (kejadian TL-KB150A 2026-08-05: rh diketik 1415.2 padahal seharusnya ~8941, langsung
       // kesinkron ke equipment.running_hours tanpa validasi apapun). Threshold sama dgn Revisi HM.
       const rhAnomalies = [];
       for (const e of lhState.entries) {
-        if (!e.equipment_id || e.rh === '' || e.rh === null) continue;
+        if (lhLama || !e.equipment_id || e.rh === '' || e.rh === null) continue;
         const eq = (lhEquipmentList || []).find(x => x.id === e.equipment_id);
         if (!eq) continue;
         const oldRh = Number(eq.running_hours || 0);
@@ -18841,7 +18844,9 @@
       const isEditingFinal = lhState.header?.status === 'final';
       const ok = await confirmDialog({
         title: isEditingFinal ? 'Simpan Perubahan' : 'Konfirmasi & Simpan Final',
-        message: isEditingFinal
+        message: lhLama
+          ? `Simpan laporan ${fmtDate(tanggal)} sebagai FINAL? Ini laporan lama (lebih dari 7 hari), jadi RH hanya dicatat sebagai histori dan TIDAK mengubah HM equipment sekarang.`
+          : isEditingFinal
           ? `Simpan perubahan ke laporan ${fmtDate(tanggal)} yang sudah final? Unit dengan RH terisi akan otomatis update running_hours equipment terkait.`
           : `Simpan laporan ${fmtDate(tanggal)} sebagai FINAL? Unit dengan RH terisi akan otomatis update running_hours equipment terkait.`,
         confirmText: isEditingFinal ? 'Ya, Simpan Perubahan' : 'Ya, Simpan Final'
@@ -18906,7 +18911,7 @@
         // (auto-shift last_pm/toh/goh_hours kalau lompatannya besar), bukan logic baru.
         let syncCount = 0;
         for (const e of lhState.entries) {
-          if (!e.equipment_id || e.rh === '' || e.rh === null) continue;
+          if (lhLama || !e.equipment_id || e.rh === '' || e.rh === null) continue;
           const eq = (lhEquipmentList || []).find(x => x.id === e.equipment_id);
           // Format baru: angka KM jangan masuk ke unit ber-HM (dan sebaliknya)
           if (e.meter_tipe && eq && ((e.meter_tipe === 'KM') !== (eq.pm_type === 'km'))) continue;
