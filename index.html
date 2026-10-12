@@ -16379,6 +16379,7 @@
     function fmeaStatusBadge(s) { const m = FMEA_STATUS[s] || FMEA_STATUS.open; return `<span class="px-2 py-0.5 rounded-full text-xs font-semibold ${m.cls}">${m.l}</span>`; }
 
     let fmeaFilter = { status: '', band: '', q: '', rig: '' };
+    const fmeaSelected = new Set(); // id FMEA yg dicontreng buat dicetak
 
     PAGES.fmea = function () {
       const div = document.createElement('div');
@@ -16420,7 +16421,7 @@
             <p class="text-sm text-slate-500">RPN = Severity × Occurrence × Detection. Makin tinggi = makin prioritas.</p>
           </div>
           <div class="flex gap-2">
-            <button onclick="cetakFmeaReport()" class="btn-cetak">🖨 Cetak SPK</button>
+            <button onclick="cetakFmeaReport()" class="btn-cetak">🖨 Cetak SPK <span id="fmea-sel-count"></span></button>
             <button onclick="openFmeaForm()" class="bg-safety hover:bg-safety/90 text-white px-4 py-2.5 rounded-lg text-sm font-semibold whitespace-nowrap">+ Tambah FMEA</button>
           </div>
         </div>
@@ -16447,6 +16448,10 @@
             </div>
           </div>
         </div>
+        <div id="fmea-sel-bar" class="hidden bg-amber-50 border border-amber-200 rounded-xl px-4 py-2 flex items-center justify-between gap-2 text-sm text-amber-800">
+          <span>☑ <b>0</b> FMEA dicontreng untuk dicetak</span>
+          <button onclick="clearFmeaSel()" class="text-xs font-semibold text-amber-700 hover:underline">Hapus contreng</button>
+        </div>
         <div id="fmea-groups" class="space-y-3"></div>`;
       renderFmeaList();
     }
@@ -16462,7 +16467,8 @@
       });
     }
     function fmeaRowHtml(e) {
-      return `<tr class="border-b border-slate-100">
+      return `<tr class="border-b border-slate-100 ${fmeaSelected.has(e.id) ? 'bg-amber-50' : ''}">
+        <td class="px-3 py-2"><input type="checkbox" ${fmeaSelected.has(e.id) ? 'checked' : ''} onchange="toggleFmeaSel('${e.id}', this.checked)" class="w-4 h-4 accent-navy cursor-pointer" title="Contreng untuk dicetak"></td>
         <td class="px-3 py-2 text-sm"><div class="font-mono text-xs font-bold text-navy">${escapeHtml(e.equipment_tag || '—')}</div><div class="text-slate-700 text-xs font-semibold">${escapeHtml(e.equipment_name || '')}</div></td>
         <td class="px-3 py-2 text-sm font-semibold text-slate-700">${escapeHtml(e.failure_mode || '')}</td>
         <td class="px-3 py-2 text-sm font-semibold text-slate-700">${e.severity}</td>
@@ -16480,6 +16486,7 @@
       const host = document.getElementById('fmea-groups'); if (!host) return;
       const list = fmeaFiltered();
       const cnt = document.getElementById('fmea-count'); if (cnt) cnt.textContent = `(${list.length})`;
+      updateFmeaSelInfo();
       if (!list.length) { host.innerHTML = '<div class="bg-white rounded-xl border border-slate-200 p-6 text-center text-slate-400 text-sm">Tidak ada FMEA sesuai filter.</div>'; return; }
       const filterActive = !!(fmeaFilter.status || fmeaFilter.band || (fmeaFilter.q || '').trim());
       const groups = {};
@@ -16490,18 +16497,30 @@
         const rows = groups[g].sort((a, b) => (Number(b.rpn) || 0) - (Number(a.rpn) || 0));
         const maxRpn = maxOf(rows);
         const crit = rows.filter(x => (Number(x.rpn) || 0) >= 200).length;
-        return `<details class="bg-white rounded-xl border border-slate-200 overflow-hidden" ${filterActive ? 'open' : ''}>
+        const nSel = rows.filter(x => fmeaSelected.has(x.id)).length;
+        const ids = rows.map(x => x.id).join(',');
+        return `<details class="bg-white rounded-xl border border-slate-200 overflow-hidden" ${(filterActive || nSel) ? 'open' : ''}>
           <summary class="px-4 py-3 cursor-pointer flex items-center justify-between gap-2 hover:bg-slate-50 select-none">
-            <span class="font-semibold text-slate-800 text-sm">${escapeHtml(g)} <span class="text-slate-400 font-normal">(${rows.length})</span></span>
+            <span class="font-semibold text-slate-800 text-sm flex items-center gap-2"><input type="checkbox" ${nSel && nSel === rows.length ? 'checked' : ''} onclick="event.stopPropagation()" onchange="toggleFmeaSelGroup('${ids}', this.checked)" class="w-4 h-4 accent-navy cursor-pointer" title="Contreng semua di grup ini">${escapeHtml(g)} <span class="text-slate-400 font-normal">(${rows.length})</span>${nSel ? `<span class="text-xs font-semibold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">${nSel} dipilih</span>` : ''}</span>
             <span class="text-xs text-slate-500 whitespace-nowrap">${crit ? crit + ' 🔴 · ' : ''}tertinggi ${rpnBadge(maxRpn)}</span>
           </summary>
           <div class="overflow-x-auto border-t border-slate-100"><table class="w-full">
-            <thead><tr class="bg-slate-50 text-left text-xs font-bold text-slate-600"><th class="px-3 py-2">Equipment</th><th class="px-3 py-2">Mode Kegagalan</th><th class="px-3 py-2">S</th><th class="px-3 py-2">O</th><th class="px-3 py-2">D</th><th class="px-3 py-2">RPN</th><th class="px-3 py-2">Status</th><th class="px-3 py-2"></th></tr></thead>
+            <thead><tr class="bg-slate-50 text-left text-xs font-bold text-slate-600"><th class="px-3 py-2 w-8"></th><th class="px-3 py-2">Equipment</th><th class="px-3 py-2">Mode Kegagalan</th><th class="px-3 py-2">S</th><th class="px-3 py-2">O</th><th class="px-3 py-2">D</th><th class="px-3 py-2">RPN</th><th class="px-3 py-2">Status</th><th class="px-3 py-2"></th></tr></thead>
             <tbody>${rows.map(fmeaRowHtml).join('')}</tbody>
           </table></div>
         </details>`;
       }).join('');
     }
+    function updateFmeaSelInfo() {
+      const el = document.getElementById('fmea-sel-count');
+      if (el) el.textContent = fmeaSelected.size ? `(${fmeaSelected.size} dipilih)` : '';
+      const bar = document.getElementById('fmea-sel-bar');
+      if (bar) { bar.classList.toggle('hidden', !fmeaSelected.size); bar.querySelector('b').textContent = fmeaSelected.size; }
+    }
+    function toggleFmeaSel(id, on) { on ? fmeaSelected.add(id) : fmeaSelected.delete(id); renderFmeaList(); }
+    function toggleFmeaSelGroup(ids, on) { ids.split(',').forEach(id => on ? fmeaSelected.add(id) : fmeaSelected.delete(id)); renderFmeaList(); }
+    function clearFmeaSel() { fmeaSelected.clear(); renderFmeaList(); }
+    window.toggleFmeaSel = toggleFmeaSel; window.toggleFmeaSelGroup = toggleFmeaSelGroup; window.clearFmeaSel = clearFmeaSel;
     let _fmeaDeb;
     function setFmeaFilter(k, v) { fmeaFilter[k] = v; renderFmeaList(); }
     function setFmeaFilterQ(v) { fmeaFilter.q = v; clearTimeout(_fmeaDeb); _fmeaDeb = setTimeout(renderFmeaList, 300); }
@@ -24327,7 +24346,17 @@
     window.cetakKelayakanReport = cetakKelayakanReport;
 
     function cetakFmeaReport() {
-      const list = fmeaFiltered();
+      // Cetak hanya yg dicontreng; kalau belum ada yg dicontreng, tanya dulu sebelum cetak semua hasil filter
+      let list;
+      if (fmeaSelected.size) {
+        list = (window.__fmeaEntries || []).filter(e => fmeaSelected.has(e.id));
+      } else {
+        list = fmeaFiltered();
+        if (!confirm(`Belum ada FMEA yang dicontreng.
+
+Cetak semua ${list.length} FMEA sesuai filter?
+(Batal = contreng dulu yang mau dicetak)`)) return;
+      }
       const kritis = list.filter(e => Number(e.rpn) >= 200).length;
       const tinggi = list.filter(e => Number(e.rpn) >= 100 && Number(e.rpn) < 200).length;
       const maxRpn = list.length ? Math.max(...list.map(e => Number(e.rpn) || 0)) : 0;
