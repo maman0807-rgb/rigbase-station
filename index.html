@@ -1317,20 +1317,24 @@
       return (data || []).filter(e => e.skpi_end_date || e.tgl_expired_sertifikat);
     }
 
-    // Dashboard: SEMUA sertifikat (SKPI & sertifikat lain), 1 baris per sertifikat,
-    // urut dari yang paling cepat berakhir (yang sudah lewat paling atas).
+    // Dashboard: SEMUA izin/sertifikat terbaru per jenis per unit (tab 📜 Sertifikasi,
+    // tabel izin_operasi), urut dari yang paling cepat berakhir (yang sudah lewat paling atas).
+    // Yang belum ada tgl kedaluwarsa dikembalikan terpisah (COC memang tanpa masa berlaku → dilewati).
     async function fetchAllCertificates() {
       const { data, error } = await state.supabase
-        .from('equipment')
-        .select('id, tag_number, nama_equipment, skpi_end_date, tgl_expired_sertifikat')
-        .or('skpi_end_date.not.is.null,tgl_expired_sertifikat.not.is.null');
+        .from('v_izin_operasi')
+        .select('equipment_id, tag_number, nama_equipment, jenis, jenis_nama, nomor, tgl_kedaluwarsa')
+        .eq('terbaru', true);
       if (error) throw error;
-      const rows = [];
-      (data || []).forEach(e => {
-        if (e.skpi_end_date)          rows.push({ ...e, _jenis: 'SKPI',       _exp: e.skpi_end_date });
-        if (e.tgl_expired_sertifikat) rows.push({ ...e, _jenis: 'Sertifikat', _exp: e.tgl_expired_sertifikat });
-      });
-      return rows.sort((a, b) => a._exp.localeCompare(b._exp) || a.tag_number.localeCompare(b.tag_number));
+      const rows = (data || []).map(i => ({
+        id: i.equipment_id, tag_number: i.tag_number, nama_equipment: i.nama_equipment,
+        _jenis: i.jenis, _jenisNama: i.jenis_nama, _nomor: i.nomor, _exp: i.tgl_kedaluwarsa,
+      }));
+      const dated = rows.filter(r => r._exp)
+        .sort((a, b) => a._exp.localeCompare(b._exp) || a.tag_number.localeCompare(b.tag_number));
+      const undated = rows.filter(r => !r._exp && r._jenis !== 'COC')
+        .sort((a, b) => a.tag_number.localeCompare(b.tag_number));
+      return { dated, undated };
     }
 
     // ============================================================
@@ -2547,7 +2551,7 @@
             </div>
             <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
               <h4 class="text-base font-bold text-slate-800 mb-3 flex items-center gap-2">📜 Sertifikat Equipment</h4>
-              <p class="text-xs text-slate-400 mb-3">Semua SKPI & sertifikat, urut dari yang paling cepat berakhir. <span class="text-red-700 font-semibold">Merah</span> = sudah lewat, <span class="text-amber-700 font-semibold">kuning</span> = ≤60 hari.</p>
+              <p class="text-xs text-slate-400 mb-3">Semua izin terbaru (SKPI, COI, PLO, dll. dari tab 📜 Sertifikasi), urut dari yang paling cepat berakhir. <span class="text-red-700 font-semibold">Merah</span> = sudah lewat, <span class="text-amber-700 font-semibold">kuning</span> = ≤60 hari.</p>
               <div id="dash-skpi" class="space-y-2 text-sm max-h-96 overflow-y-auto">Memuat…</div>
             </div>
           </div>
@@ -2589,7 +2593,7 @@
             const [stats, due, skpi, loans, pmHours, pmKm, overhaul, inspAktif, pendingHmPhotos] = await Promise.all([
               fetchDashboardStats(),
               fetchPMDueByHours(0.2).catch(() => []),
-              fetchAllCertificates(),
+              fetchAllCertificates().catch(() => ({ dated: [], undated: [] })),
               fetchAllActiveLoans().catch(() => []),
               fetchPMDueByHours(0.1).catch(() => []),
               fetchPMDueByKm(500).catch(() => []),
@@ -2703,23 +2707,28 @@
                   </div>`;
                 }).join('');
             // SKPI
-            $('#dash-skpi').innerHTML = skpi.length === 0
-              ? '<div class="text-slate-400 text-sm">Belum ada data sertifikat di equipment.</div>'
-              : skpi.map(e => {
-                  const exp = e._exp;
-                  const d = daysUntil(exp);
-                  const color = d < 0 ? 'text-red-700' : (d <= 60 ? 'text-amber-700' : 'text-slate-700');
-                  return `<button onclick="setEquipmentView('detail','${e.id}'); navigate('equipment')" class="w-full text-left flex items-center justify-between hover:bg-slate-50 px-2 py-1.5 rounded">
+            {
+              const certBtn = (e, right) => `<button onclick="setEquipmentView('detail','${e.id}','sertifikasi'); navigate('equipment')" class="w-full text-left flex items-center justify-between hover:bg-slate-50 px-2 py-1.5 rounded">
                     <div class="min-w-0">
-                      <div class="font-semibold text-navy text-sm truncate">${escapeHtml(e.tag_number)} <span class="ml-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-600 align-middle">${e._jenis}</span></div>
-                      <div class="text-xs text-slate-500 truncate">${escapeHtml(e.nama_equipment)}</div>
+                      <div class="font-semibold text-navy text-sm truncate">${escapeHtml(e.tag_number)} <span class="ml-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-600 align-middle" title="${escapeHtml(e._jenisNama || '')}">${escapeHtml(e._jenis)}</span></div>
+                      <div class="text-xs text-slate-500 truncate">${escapeHtml(e.nama_equipment)}${e._nomor ? ' • ' + escapeHtml(e._nomor) : ''}</div>
                     </div>
-                    <div class="text-right flex-shrink-0 ml-2">
-                      <div class="${color} font-semibold text-sm">${fmtDate(exp)}</div>
-                      <div class="text-xs text-slate-500">${d < 0 ? `${-d} hari telat` : `${d} hari lagi`}</div>
-                    </div>
+                    <div class="text-right flex-shrink-0 ml-2">${right}</div>
                   </button>`;
-                }).join('');
+              const listDated = skpi.dated.map(e => {
+                const d = daysUntil(e._exp);
+                const color = d < 0 ? 'text-red-700' : (d <= 60 ? 'text-amber-700' : 'text-slate-700');
+                return certBtn(e, `<div class="${color} font-semibold text-sm">${fmtDate(e._exp)}</div>
+                      <div class="text-xs text-slate-500">${d < 0 ? `${-d} hari telat` : `${d} hari lagi`}</div>`);
+              }).join('');
+              const listUndated = skpi.undated.length ? `<details class="mt-2 pt-2 border-t border-slate-100">
+                  <summary class="text-xs text-slate-500 cursor-pointer select-none">⚠ ${skpi.undated.length} izin belum ada tgl kedaluwarsa — klik untuk lihat & lengkapi</summary>
+                  <div class="space-y-1 mt-1">${skpi.undated.map(e => certBtn(e, '<div class="text-xs text-slate-400">tgl belum diisi</div>')).join('')}</div>
+                </details>` : '';
+              $('#dash-skpi').innerHTML = (skpi.dated.length || skpi.undated.length)
+                ? (listDated || '<div class="text-slate-400 text-sm">Belum ada izin dengan tgl kedaluwarsa.</div>') + listUndated
+                : '<div class="text-slate-400 text-sm">Belum ada data sertifikat. Input di Equipment → tab 📜 Sertifikasi.</div>';
+            }
             // PM berbasis jam (HM)
             $('#dash-pmhours').innerHTML = pmHours.length === 0
               ? '<div class="text-slate-400 text-sm">Tidak ada unit mendekati jam PM.</div>'
