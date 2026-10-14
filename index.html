@@ -1317,6 +1317,22 @@
       return (data || []).filter(e => e.skpi_end_date || e.tgl_expired_sertifikat);
     }
 
+    // Dashboard: SEMUA sertifikat (SKPI & sertifikat lain), 1 baris per sertifikat,
+    // urut dari yang paling cepat berakhir (yang sudah lewat paling atas).
+    async function fetchAllCertificates() {
+      const { data, error } = await state.supabase
+        .from('equipment')
+        .select('id, tag_number, nama_equipment, skpi_end_date, tgl_expired_sertifikat')
+        .or('skpi_end_date.not.is.null,tgl_expired_sertifikat.not.is.null');
+      if (error) throw error;
+      const rows = [];
+      (data || []).forEach(e => {
+        if (e.skpi_end_date)          rows.push({ ...e, _jenis: 'SKPI',       _exp: e.skpi_end_date });
+        if (e.tgl_expired_sertifikat) rows.push({ ...e, _jenis: 'Sertifikat', _exp: e.tgl_expired_sertifikat });
+      });
+      return rows.sort((a, b) => a._exp.localeCompare(b._exp) || a.tag_number.localeCompare(b.tag_number));
+    }
+
     // ============================================================
     // 4f. CRUD: MAINTENANCE LOG, MUTATION LOG, DOCUMENTS
     // ============================================================
@@ -2530,8 +2546,9 @@
               <div id="dash-due" class="space-y-2 text-sm">Memuat…</div>
             </div>
             <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-              <h4 class="text-base font-bold text-slate-800 mb-3 flex items-center gap-2">📜 Sertifikat Hampir Expired (60 hari)</h4>
-              <div id="dash-skpi" class="space-y-2 text-sm">Memuat…</div>
+              <h4 class="text-base font-bold text-slate-800 mb-3 flex items-center gap-2">📜 Sertifikat Equipment</h4>
+              <p class="text-xs text-slate-400 mb-3">Semua SKPI & sertifikat, urut dari yang paling cepat berakhir. <span class="text-red-700 font-semibold">Merah</span> = sudah lewat, <span class="text-amber-700 font-semibold">kuning</span> = ≤60 hari.</p>
+              <div id="dash-skpi" class="space-y-2 text-sm max-h-96 overflow-y-auto">Memuat…</div>
             </div>
           </div>
           <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
@@ -2572,7 +2589,7 @@
             const [stats, due, skpi, loans, pmHours, pmKm, overhaul, inspAktif, pendingHmPhotos] = await Promise.all([
               fetchDashboardStats(),
               fetchPMDueByHours(0.2).catch(() => []),
-              fetchExpiringSkpi(60),
+              fetchAllCertificates(),
               fetchAllActiveLoans().catch(() => []),
               fetchPMDueByHours(0.1).catch(() => []),
               fetchPMDueByKm(500).catch(() => []),
@@ -2687,14 +2704,14 @@
                 }).join('');
             // SKPI
             $('#dash-skpi').innerHTML = skpi.length === 0
-              ? '<div class="text-slate-400 text-sm">Tidak ada sertifikat hampir expired.</div>'
+              ? '<div class="text-slate-400 text-sm">Belum ada data sertifikat di equipment.</div>'
               : skpi.map(e => {
-                  const exp = e.skpi_end_date || e.tgl_expired_sertifikat;
+                  const exp = e._exp;
                   const d = daysUntil(exp);
-                  const color = d < 0 ? 'text-red-700' : (d <= 14 ? 'text-amber-700' : 'text-slate-700');
+                  const color = d < 0 ? 'text-red-700' : (d <= 60 ? 'text-amber-700' : 'text-slate-700');
                   return `<button onclick="setEquipmentView('detail','${e.id}'); navigate('equipment')" class="w-full text-left flex items-center justify-between hover:bg-slate-50 px-2 py-1.5 rounded">
                     <div class="min-w-0">
-                      <div class="font-semibold text-navy text-sm truncate">${escapeHtml(e.tag_number)}</div>
+                      <div class="font-semibold text-navy text-sm truncate">${escapeHtml(e.tag_number)} <span class="ml-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-600 align-middle">${e._jenis}</span></div>
                       <div class="text-xs text-slate-500 truncate">${escapeHtml(e.nama_equipment)}</div>
                     </div>
                     <div class="text-right flex-shrink-0 ml-2">
