@@ -25,7 +25,10 @@
 --     barunya, putuskan manual.
 --   - Kategori lama yang jadi kosong TIDAK dihapus di sini (dihapus di
 --     fase42).
---   - Semua dalam 1 transaksi. Kalau ada error, tidak ada yang berubah.
+--   - CATATAN: SQL Editor Supabase ternyata mengeksekusi tiap perintah
+--     terpisah (BEGIN/COMMIT tidak menahan), jadi kalau error di tengah,
+--     perintah sebelumnya sudah tersimpan. Sudah dijalankan 2026-10-14,
+--     terverifikasi 109/109.
 --     Aman di-run ulang.
 -- ============================================================
 

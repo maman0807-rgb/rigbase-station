@@ -162,23 +162,29 @@ CREATE TRIGGER trg_a0_kaidah_kategori
 --    Pemakaian dicek otomatis di SEMUA tabel yang punya foreign key ke
 --    categories (equipment, performance standard, RCA, dll. — tabel yang
 --    tidak ada di database ini otomatis terlewati).
-CREATE OR REPLACE FUNCTION pg_temp.kategori_dipakai(p_id INT) RETURNS BOOLEAN AS $f$
-DECLARE r record; ada BOOLEAN;
+--    Satu blok DO (bukan fungsi sementara) supaya tetap jalan walaupun
+--    SQL Editor mengeksekusi tiap perintah terpisah.
+DO $f$
+DECLARE kat record; r record; ada BOOLEAN;
 BEGIN
-  FOR r IN SELECT c.conrelid::regclass AS tbl, a.attname AS col
-             FROM pg_constraint c
-             JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = c.conkey[1]
-            WHERE c.contype = 'f' AND c.confrelid = 'categories'::regclass LOOP
-    EXECUTE format('SELECT EXISTS (SELECT 1 FROM %s WHERE %I = $1)', r.tbl, r.col) INTO ada USING p_id;
-    IF ada THEN RETURN true; END IF;
+  FOR kat IN SELECT id, name FROM categories
+              WHERE name IN ('MTU','SCM','Mast Component','Pompa','MUDPUMP Acid',
+                             'Generator (Slickline)','Powerpack (Slickline)','Truck (Slickline)') LOOP
+    ada := false;
+    FOR r IN SELECT c.conrelid::regclass AS tbl, a.attname AS col
+               FROM pg_constraint c
+               JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = c.conkey[1]
+              WHERE c.contype = 'f' AND c.confrelid = 'categories'::regclass LOOP
+      EXECUTE format('SELECT EXISTS (SELECT 1 FROM %s WHERE %I = $1)', r.tbl, r.col) INTO ada USING kat.id;
+      EXIT WHEN ada;
+    END LOOP;
+    IF ada THEN
+      RAISE NOTICE 'Kategori "%" masih dipakai, tidak dihapus', kat.name;
+    ELSE
+      DELETE FROM categories WHERE id = kat.id;
+    END IF;
   END LOOP;
-  RETURN false;
-END $f$ LANGUAGE plpgsql;
-
-DELETE FROM categories c
- WHERE c.name IN ('MTU','SCM','Mast Component','Pompa','MUDPUMP Acid',
-                  'Generator (Slickline)','Powerpack (Slickline)','Truck (Slickline)')
-   AND NOT pg_temp.kategori_dipakai(c.id);
+END $f$;
 
 -- 6. Verifikasi: equipment yang sekarang melanggar kaidah (harus kosong,
 --    kecuali baris terakhir yang berisi ringkasan)
