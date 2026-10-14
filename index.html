@@ -312,6 +312,7 @@
       // Reference data (di-cache saat boot)
       parentUnits: [],
       categories: [],
+      kategoriKaidah: [],   // fase42: kaidah tag/nama → kategori yang boleh
       // Equipment view state
       equipmentList: [],
       equipmentFilters: { parent_unit_id: '', kategori_id: '', status_operasi: '', tipe_kepemilikan: '' },
@@ -832,6 +833,18 @@
       if (c.error) throw c.error;
       state.parentUnits = u.data || [];
       state.categories  = c.data || [];
+      // Kaidah kategori (fase42) — kalau tabel belum ada, form jalan tanpa kunci
+      const k = await state.supabase.from('kategori_kaidah').select('*').eq('aktif', true).order('urutan');
+      state.kategoriKaidah = k.error ? [] : (k.data || []);
+    }
+
+    // Kaidah pertama (urutan terkecil) yang cocok dgn "tag nama" — sama dgn fn_kaidah_kategori di DB
+    function findKategoriKaidah(tag, nama, unit) {
+      const hay = `${tag || ''} ${nama || ''}`;
+      return (state.kategoriKaidah || []).find(k => {
+        if (k.khusus_unit_type && k.khusus_unit_type !== unit?.type) return false;
+        try { return new RegExp(k.pola, 'i').test(hay); } catch { return false; }
+      }) || null;
     }
     function getParentUnitName(id) {
       return state.parentUnits.find(x => x.id === id)?.name || '—';
@@ -1764,6 +1777,19 @@
       const unit = state.parentUnits.find(u => u.id === Number(parentUnitId));
       if (!unit) {
         sel.innerHTML = '<option value="">— pilih Parent Unit dulu —</option>';
+        return;
+      }
+      // Kaidah kategori (fase42): kalau tag/nama cocok kaidah, pilihan dikunci ke kategori yg boleh saja
+      const tag  = document.querySelector('#eq-form input[name="tag_number"]')?.value;
+      const nama = document.querySelector('#eq-form input[name="nama_equipment"]')?.value;
+      const kaidah = findKategoriKaidah(tag, nama, unit);
+      const noteEl0 = sel.parentElement.querySelector('.text-xs.text-slate-500');
+      if (kaidah) {
+        const boleh = state.categories.filter(c => kaidah.kategori_ids.includes(c.id));
+        const pilih = boleh.find(c => c.id == currentValue) || (boleh.length === 1 ? boleh[0] : null);
+        sel.innerHTML = (boleh.length > 1 ? '<option value="">— pilih kategori —</option>' : '') +
+          boleh.map(c => `<option value="${c.id}" ${pilih?.id === c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('');
+        if (noteEl0) noteEl0.textContent = `🔒 Dikunci kaidah: "${nama || tag}" → ${boleh.map(c => c.name).join(' / ')}.`;
         return;
       }
       // Filter: kategori dengan parent_unit_type matching unit.type, atau 'Both'
@@ -11402,6 +11428,23 @@
               renderSpecSection(Number(catSelect.value) || null);
             });
           }
+          // Tag/nama berubah → cek ulang kaidah kategori (fase42)
+          let kaidahTimer = null;
+          const recheckKaidah = () => {
+            clearTimeout(kaidahTimer);
+            kaidahTimer = setTimeout(() => {
+              if (!catSelect) return;
+              const before = catSelect.value;
+              const unitId = Number($('#eq-form select[name="assigned_unit_id"]')?.value) || null;
+              populateCategoryDropdown(unitId, before);
+              if (catSelect.value !== before) {
+                persistSpecBuffer();
+                renderSpecSection(Number(catSelect.value) || null);
+              }
+            }, 300);
+          };
+          $('#eq-form input[name="tag_number"]')?.addEventListener('input', recheckKaidah);
+          $('#eq-form input[name="nama_equipment"]')?.addEventListener('input', recheckKaidah);
           // Listen ke perubahan parent_unit — refresh dua dropdown.
           // Pakai dual event (change + input) supaya pasti detect di semua browser.
           const unitSelect = $('#eq-form select[name="assigned_unit_id"]');
