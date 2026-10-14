@@ -634,11 +634,16 @@
     function getSpecTemplate(kategoriId, eq) {
       const name = getCategoryName(kategoriId) || '';
       const lc = name.toLowerCase();
-      // Special case: kategori Primover bisa Engine ATAU Transmission — smart route via tag
-      if (lc.includes('primover') && eq) {
+      // Special case: kategori Prime Mover (dulu "Primover") bisa Engine ATAU Transmission — smart route via tag
+      if ((lc.includes('prime mover') || lc.includes('primover')) && eq) {
         const tpl = pickPrimoverTemplate(eq);
         if (tpl) return { key: 'Primover-routed', ...tpl };
         return null;
+      }
+      // Pompa mudpump & MUDPUMP Acid dipindah ke Circulating System (fase41) — tetap pakai template centrifugal
+      if (lc.includes('circulating') && eq) {
+        const tag = String(eq.tag_number || '').toUpperCase();
+        if (/^(PUMP-|MP-ACID)/.test(tag)) return { key: 'Pompa', ...CENTRIFUGAL_PUMP_TPL };
       }
       // exact match dulu, lalu partial (case-insensitive)
       if (SPEC_TEMPLATES[name]) return { key: name, ...SPEC_TEMPLATES[name] };
@@ -4355,7 +4360,7 @@
               <select name="parent_unit_type" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">
                 ${['Rig','Standalone','Alat Berat','Kendaraan','Fire & Safety','Both'].map(t => `<option value="${t}" ${existing?.parent_unit_type === t ? 'selected' : ''}>${t}</option>`).join('')}
               </select>
-              <p class="text-xs text-slate-500 mt-1">Rig: equipment di rig. Standalone: MTU/Slickline/Independent. Alat Berat: civil heavy eq. Kendaraan: truk/manlift (KM). Fire & Safety: fire pump portable & damkar. Both: bisa multi-armada.</p>
+              <p class="text-xs text-slate-500 mt-1">Rig: equipment di rig. Standalone: MTU/Slickline/Independent. Alat Berat: civil heavy eq. Kendaraan: truk/manlift (KM). Fire & Safety: fire pump & damkar. Both: bisa multi-armada.</p>
             </div>
           </form>
         `,
@@ -24994,8 +24999,8 @@ Cetak semua ${list.length} FMEA sesuai filter?
             ['ROT', 'Rotating', 'Circulating System, Pompa, Powerpack', 'Reliability'],
             ['STA', 'Static', 'BOP System, Well Control System (accumulator), Tank, Manifold', 'Integrity'],
             ['ELE / ICC', 'Electrical / Instrument', 'Generator Set, Tower Light / Control & Instrumentation', 'Reliability'],
-            ['LFT / TRK', 'Lifting / Truck Fleet', 'Handling Tools, Manlift / Primover, Dump Truck', 'Reliability'],
-            ['SNE / GSP / AUX', 'Safety / General Support / Auxiliaries', 'Fire Pump, Damkar / Alat berat, SCM / Auxilary System', '—'],
+            ['LFT / TRK', 'Lifting / Truck Fleet', 'Handling Tools, Manlift / Prime Mover, Dump Truck', 'Reliability'],
+            ['SNE / GSP / AUX', 'Safety / General Support / Auxiliaries', 'Fire Pump, Damkar / Alat berat, Forklift / Auxiliary System', '—'],
           ])}
           <p>Isi <b>"Di Luar Lingkup AIR karena"</b> hanya untuk aset yang dikecualikan pedoman: kendaraan dinas (non-operasi), unit sewa, Well Integrity, BOT, KSO, atau yang dikelola General Services. Unit ini tetap tercatat, tapi tidak dihitung di dashboard AIR (filter "Dalam lingkup AIR").</p>
 
