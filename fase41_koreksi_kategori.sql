@@ -23,8 +23,8 @@
 --   - kategori_aset (AIR) per equipment TIDAK diubah. Cek hasil
 --     bagian 6 untuk equipment yang AIR-nya beda dari default kategori
 --     barunya, putuskan manual.
---   - Kategori lama yang jadi kosong TIDAK dihapus otomatis (lihat
---     bagian 7, opsional).
+--   - Kategori lama yang jadi kosong TIDAK dihapus di sini (dihapus di
+--     fase42).
 --   - Semua dalam 1 transaksi. Kalau ada error, tidak ada yang berubah.
 --     Aman di-run ulang.
 -- ============================================================
@@ -234,6 +234,22 @@ UPDATE equipment
  WHERE equipment.id = n.id
    AND equipment.nama_equipment IS DISTINCT FROM n.baru;
 
+-- Helper sementara: tabel mana saja yang masih memakai suatu kategori.
+-- Dicari otomatis dari foreign key ke categories, jadi tabel yang tidak
+-- ada di database ini (mis. cspp_kategori_mapping) tidak bikin error.
+CREATE OR REPLACE FUNCTION pg_temp.ref_kategori(p_id INT) RETURNS TEXT AS $f$
+DECLARE r record; n BIGINT; hasil TEXT := '';
+BEGIN
+  FOR r IN SELECT c.conrelid::regclass AS tbl, a.attname AS col
+             FROM pg_constraint c
+             JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = c.conkey[1]
+            WHERE c.contype = 'f' AND c.confrelid = 'categories'::regclass LOOP
+    EXECUTE format('SELECT count(*) FROM %s WHERE %I = $1', r.tbl, r.col) INTO n USING p_id;
+    IF n > 0 THEN hasil := hasil || r.tbl || ': ' || n || '  '; END IF;
+  END LOOP;
+  RETURN NULLIF(btrim(hasil), '');
+END $f$ LANGUAGE plpgsql;
+
 -- 6. Verifikasi (hasil tampil di bawah editor)
 SELECT * FROM (
   SELECT 1 AS urut, 'Usulan: tag tidak ditemukan' AS cek, u.tag AS detail
@@ -256,9 +272,7 @@ SELECT * FROM (
    WHERE e.kategori_aset IS DISTINCT FROM c.kategori_aset_default
   UNION ALL
   SELECT 4, 'Kategori lama sekarang kosong', c.name
-         || ' | perf std: ' || (SELECT count(*) FROM performance_standard p WHERE p.kategori_id = c.id)
-         || ' | cspp: '     || (SELECT count(*) FROM cspp_kategori_mapping m WHERE m.kategori_id = c.id)
-         || ' | rca: '      || (SELECT count(*) FROM rca_records r WHERE r.kategori_id = c.id)
+         || ' | masih dipakai di: ' || COALESCE(pg_temp.ref_kategori(c.id), 'tidak ada')
     FROM categories c
    WHERE c.name IN ('MTU','SCM','Mast Component','Pompa','MUDPUMP Acid',
                     'Generator (Slickline)','Powerpack (Slickline)','Truck (Slickline)')
@@ -274,16 +288,4 @@ SELECT * FROM (
 
 COMMIT;
 
--- ============================================================
--- 7. OPSIONAL, jalankan terpisah setelah hasil di atas OK:
--- hapus kategori lama yang sudah kosong supaya tidak muncul lagi di
--- dropdown. Hanya yang tidak dipakai di mana pun (performance standard
--- & mapping CSPP ikut terhapus kalau ada, makanya dicek dulu).
--- ============================================================
--- DELETE FROM categories c
---  WHERE c.name IN ('MTU','SCM','Mast Component','Pompa','MUDPUMP Acid',
---                   'Generator (Slickline)','Powerpack (Slickline)','Truck (Slickline)')
---    AND NOT EXISTS (SELECT 1 FROM equipment e             WHERE e.kategori_id = c.id)
---    AND NOT EXISTS (SELECT 1 FROM performance_standard p  WHERE p.kategori_id = c.id)
---    AND NOT EXISTS (SELECT 1 FROM cspp_kategori_mapping m WHERE m.kategori_id = c.id)
---    AND NOT EXISTS (SELECT 1 FROM rca_records r           WHERE r.kategori_id = c.id);
+-- 7. Kategori lama yang sudah kosong dihapus di fase42_kaidah_kategori.sql.
