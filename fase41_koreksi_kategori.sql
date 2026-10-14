@@ -43,7 +43,7 @@ BEGIN
     END IF;
     UPDATE categories SET name = r.baru WHERE name = r.lama;
   END LOOP;
-END $;
+END $$;
 
 -- 1b. Fire Pump Portable lama -> Fire Pump Fixed (sekali saja; saat re-run
 --     "Fire Pump Portable" sudah kategori baru, jangan di-rename lagi)
