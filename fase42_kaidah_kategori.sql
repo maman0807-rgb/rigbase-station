@@ -11,7 +11,8 @@
 --
 -- Penegakan:
 --   - Form equipment: kategori otomatis terpilih & terkunci.
---   - Database (trigger): INSERT/UPDATE yang melanggar ditolak,
+--   - Database (trigger): INSERT/UPDATE yang melanggar ditolak; kategori
+--     kosong diisi otomatis kalau kaidahnya cuma 1 pilihan,
 --     termasuk dari import/SQL. Edit equipment yang tidak mengubah
 --     tag/nama/kategori/parent unit tidak dicek.
 --   - Equipment yang tidak cocok kaidah mana pun = bebas pilih
@@ -130,6 +131,16 @@ BEGIN
     RETURN NEW;
   END IF;
 
+  -- Kategori kosong (mis. tambah equipment dari app logbook-equipment yang
+  -- tidak punya isian kategori): isi otomatis kalau kaidahnya cuma 1 pilihan,
+  -- kalau lebih dari 1 dibiarkan kosong seperti sebelumnya.
+  IF NEW.kategori_id IS NULL THEN
+    IF array_length(k.kategori_ids, 1) = 1 THEN
+      NEW.kategori_id := k.kategori_ids[1];
+    END IF;
+    RETURN NEW;
+  END IF;
+
   SELECT string_agg(c.name, ' / ' ORDER BY c.name) INTO boleh
     FROM categories c WHERE c.id = ANY (k.kategori_ids);
   RAISE EXCEPTION 'Kategori tidak sesuai kaidah: "%" harus masuk kategori %.', NEW.nama_equipment, boleh
@@ -138,8 +149,12 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Nama "trg_a0_..." supaya jalan SEBELUM trg_air_equipment_defaults (trigger
+-- BEFORE dijalankan urut abjad), jadi kategori yang diisi otomatis di sini
+-- ikut dapat kategori_aset AIR default.
 DROP TRIGGER IF EXISTS trg_guard_kaidah_kategori ON equipment;
-CREATE TRIGGER trg_guard_kaidah_kategori
+DROP TRIGGER IF EXISTS trg_a0_kaidah_kategori ON equipment;
+CREATE TRIGGER trg_a0_kaidah_kategori
   BEFORE INSERT OR UPDATE OF tag_number, nama_equipment, kategori_id, assigned_unit_id ON equipment
   FOR EACH ROW EXECUTE FUNCTION fn_guard_kaidah_kategori();
 
@@ -173,7 +188,7 @@ SELECT * FROM (
 COMMIT;
 
 -- ROLLBACK (kalau perlu):
--- DROP TRIGGER IF EXISTS trg_guard_kaidah_kategori ON equipment;
+-- DROP TRIGGER IF EXISTS trg_a0_kaidah_kategori ON equipment;
 -- DROP FUNCTION IF EXISTS fn_guard_kaidah_kategori();
 -- DROP FUNCTION IF EXISTS fn_kaidah_kategori(TEXT, TEXT, INT);
 -- DROP TABLE IF EXISTS kategori_kaidah;
