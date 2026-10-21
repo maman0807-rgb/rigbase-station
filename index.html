@@ -902,6 +902,11 @@
       if (error) throw error;
     }
 
+    // Equipment yang SENGAJA tidak ditampilkan dulu di widget Dashboard (PM jam/km, overhaul,
+    // sertifikat). Data & menu lain (Equipment, Kalender, Telegram alert) tetap normal.
+    // Permintaan Maman 2026-10-21: ENGINE-MP-H35KD. Hapus tag dari sini untuk menampilkan lagi.
+    const DASHBOARD_HIDDEN_TAGS = ['ENGINE-MP-H35KD'];
+
     async function fetchDashboardStats() {
       const { data, error } = await state.supabase.from('equipment').select('status_operasi, assigned_unit_id, kategori_id');
       if (error) throw error;
@@ -1086,7 +1091,7 @@
     // PM berbasis JAM (HM): pakai running_hours (diisi mekanik via Logbook) vs last_pm_hours + pm_interval_hours.
     // Hanya unit ber-HM (running_hours > 0) yang dihitung. Tampilkan yang mendekati / sudah lewat jam PM.
     // ratio: 0.2 = warning (threshold flat 100 jam), 0.1 = critical (threshold flat 50 jam) — lihat _threshold di bawah.
-    async function fetchPMDueByHours(ratio = 0.2) {
+    async function fetchPMDueByHours(ratio = 0.2, excludeTags = []) {
       const { data, error } = await state.supabase
         .from('equipment')
         .select('id, tag_number, nama_equipment, assigned_unit_id, status_operasi, running_hours, last_pm_hours, last_pm_date, pm_interval_hours, pm_type, pm_cycle_count, goh_interval_hours, pm_max_interval_days')
@@ -1197,7 +1202,7 @@
       }
 
       return [...generic, ...catRows]
-        .filter(e => e._dueByHM || e._dueByTime)
+        .filter(e => (e._dueByHM || e._dueByTime) && !excludeTags.includes(e.tag_number))
         .sort((a, b) => a._urgency - b._urgency)
         .slice(0, 15);
     }
@@ -1207,7 +1212,7 @@
     // Fallback time-based (pm_max_interval_days) ditambah 2026-08-07 — sebelumnya cuma ada di fetchPMDueByHours,
     // jadi kendaraan yang jarang jalan (KM nggak nambah) tapi udah lama nggak PM nggak pernah muncul di dashboard
     // manapun (kasus nyata: CT-BG8200CE, lewat 76 hari tapi KM masih full karena nggak pernah dipakai).
-    async function fetchPMDueByKm(thresholdKm = 500) {
+    async function fetchPMDueByKm(thresholdKm = 500, excludeTags = []) {
       const { data, error } = await state.supabase
         .from('equipment')
         .select('id, tag_number, nama_equipment, assigned_unit_id, status_operasi, running_hours, last_pm_hours, last_pm_date, pm_interval_hours, pm_type, pm_max_interval_days, pm_cycle_count, goh_interval_hours')
@@ -1231,7 +1236,7 @@
           const _pmType = (() => { const t = getPMTypeByCycle(nextCycle); return (t === 'GOH' && e.goh_interval_hours) ? 'PM3' : t; })();
           return { ...e, _interval: interval, _actualInterval: interval, _pmType, _used: used, _remaining: remaining, _daysRemaining, _dayThreshold, _dueByKm, _dueByTime };
         })
-        .filter(e => e._dueByKm || e._dueByTime)
+        .filter(e => (e._dueByKm || e._dueByTime) && !excludeTags.includes(e.tag_number))
         .sort((a, b) => a._remaining - b._remaining)
         .slice(0, 15);
     }
@@ -1282,7 +1287,7 @@
     }
 
     // Unit yang mendekati/lewat overhaul atau batas umur (berbasis jam).
-    async function fetchOverhaulDue(ratio = 0.05) {
+    async function fetchOverhaulDue(ratio = 0.05, excludeTags = []) {
       const { data, error } = await state.supabase
         .from('equipment')
         .select('id, tag_number, nama_equipment, assigned_unit_id, running_hours, toh_interval_hours, goh_interval_hours, economic_life_hours, last_toh_hours, last_goh_hours, pm_type')
@@ -1292,6 +1297,7 @@
       if (error) throw error;
       const out = [];
       (data || []).forEach(e => {
+        if (excludeTags.includes(e.tag_number)) return;
         const lc = computeLifecycle(e);
         if (!lc) return;
         const tohRem = lc.toh ? lc.toh.remaining : Infinity;
@@ -2592,12 +2598,15 @@
           try {
             const [stats, due, skpi, loans, pmHours, pmKm, overhaul, inspAktif, pendingHmPhotos] = await Promise.all([
               fetchDashboardStats(),
-              fetchPMDueByHours(0.2).catch(() => []),
-              fetchAllCertificates().catch(() => ({ dated: [], undated: [] })),
+              fetchPMDueByHours(0.2, DASHBOARD_HIDDEN_TAGS).catch(() => []),
+              fetchAllCertificates().then(c => ({
+                dated: c.dated.filter(r => !DASHBOARD_HIDDEN_TAGS.includes(r.tag_number)),
+                undated: c.undated.filter(r => !DASHBOARD_HIDDEN_TAGS.includes(r.tag_number)),
+              })).catch(() => ({ dated: [], undated: [] })),
               fetchAllActiveLoans().catch(() => []),
-              fetchPMDueByHours(0.1).catch(() => []),
-              fetchPMDueByKm(500).catch(() => []),
-              fetchOverhaulDue(0.05).catch(() => []),
+              fetchPMDueByHours(0.1, DASHBOARD_HIDDEN_TAGS).catch(() => []),
+              fetchPMDueByKm(500, DASHBOARD_HIDDEN_TAGS).catch(() => []),
+              fetchOverhaulDue(0.05, DASHBOARD_HIDDEN_TAGS).catch(() => []),
               state.supabase.from('v_inspection_downtime').select('*').eq('is_holding', true).order('mulai').then(r => r).catch(() => ({ data: [] })),
               state.profile?.role === 'admin'
                 ? state.supabase.from('hm_photo_reports').select('*').eq('status', 'pending').order('created_at').then(r => r.data || []).catch(() => [])
@@ -21413,8 +21422,21 @@
 
         if (calFilter.viewMode === 'history') {
           // ---- RIWAYAT: kejadian AKTUAL dari downtime_events (bukan proyeksi) ----
+          // Filter Milestone ikut berlaku di Riwayat (sebelumnya cuma filter Rig — pilih "PM" tetap
+          // nampilin breakdown/TS dll, Maman 2026-10-21). Riwayat PM/TOH/GOH semuanya category 'pm',
+          // dibedakan dari kata pertama notes (subKind). SKPI/COC tidak punya riwayat di downtime_events.
+          const histKindMatch = (d) => {
+            if (!calFilter.kind) return true;
+            if (d.category !== 'pm') return false;
+            const sk = d.subKind || '';
+            if (calFilter.kind === 'TOH') return /^TOH/i.test(sk);
+            if (calFilter.kind === 'GOH') return /^GOH/i.test(sk);
+            if (calFilter.kind === 'PM') return !/^(TOH|GOH)/i.test(sk);
+            return false;
+          };
           const histFiltered = historyEvents.filter((d) => {
             if (calFilter.unit_id && String(d.unit_id) !== String(calFilter.unit_id)) return false;
+            if (!histKindMatch(d)) return false;
             return true;
           });
 
