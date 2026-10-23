@@ -1,0 +1,116 @@
+*LAPORAN HARIAN HOIST & HEAVY EQUIPMENT*
+*Kamis, 22/10/2026*
+
+*A. STATUS RIG*
+*BW-100A*| OGN-41 | All Unit standby, unit genset FG wilson & engine rig carier operasi, support tim welding support drilling console, plan moving ke OGN-20
+
+*BW H35KD*| OGN-25 | All unit operasi, Semua unit HHE aman.
+
+*BW KB150A*| KAG-19 I All unit standby, support tim mekanik install gardan, rig sudah landas tapi belum rig up.
+
+*BW KB150B*| GNK-106 | All unit operasi, semua unit hoist aman.
+
+*BW KB150C*| TMT-10 | Test function all unit & RSCL bersama HSE coord, Semua unit HHE aman.
+
+*B. PEKERJAAN*
+*1. ON GOING – Fire pump Ziegler*
+SN/Model  : Portable pump Ziegler LD425/2
+Jenis     : CM (TS unit tidak bisa running)
+HM/RH/KM  : -
+Mulai Pekerjaan : 5/08/2026
+Selesai Pekerjaan : -
+Time :
+Deskripsi pekerjaan: -
+Status    : Tunggu part, Progress 30%
+
+*2. ON GOING – MAN FT-03 BG 8015 CZ*
+SN/Model  : MAN – 20830005312999
+Jenis     : CM (TS low power)
+Mulai Pekerjaan : 02/09/2026
+Selesai Pekerjaan : -
+Time :
+Lokasi : BPK
+PIC  : RAM Hoist
+Deskripsi pekerjaan: - 
+*Status    : tunggu realise SPK, Progress 20%
+
+*3. ON GOING – Genset Perkins MTU*
+SN/Model  : Perkins – DK32000U468058B
+Jenis  : OH (TOH)
+Mulai Pekerjaan : 26/06/2026
+Selesai Pekerjaan : -
+Time :
+Lokasi : BPM
+Deskripsi pekerjaan: - 
+Status : Tunggu part 45%
+
+*4. On going – Unit rear axle - BW KB 150 A*
+Unit        : Rear axle KB 150 A
+Jenis      : TS
+Gejala     : propeller lepas, shaft differential axle patah pada shaft pinion,
+Mulai Pekerjaan : 15/10/2026
+Selesai Pekerjaan : 22/10/2026
+Time : 09.00 - 20.00 WIB
+HM/RH/KM  : 
+Lokasi    : KAG-19 & BPM
+Deskripsi pekerjaan :
+- lanjut, Mobilisasi unit Rear axle ke KAG - 19
+- Safety Briefing bersama hse dan crew
+- Check all around
+- Lifting unit differential Rear axle ke bawah rig carrier 
+- Install Differential axle
+- Install yoke gardan
+- Install propeller shaft 
+- Replace oil Rored 45 liter *ok*
+- Test Function *ok*
+- HouseKeeping Area
+*Note :*
+- BW sudah landas namun belum rig up
+- Jack floor bagian belakang kanan mengalami kebocoran
+- Seal Differential bagian belakang mengalami kebocoran
+*Job Tambahan :*
+- Perbaikan pada foot valve
+*Status : pekerjaan selesai 100%*
+
+*5. Unit engine Truck slickline-02*
+Unit        : Engine Truck
+Jenis      : PM 3
+Gejala     : -
+Mulai Pekerjaan : 22/10/2026
+Selesai Pekerjaan : 22/10/2026
+Time : 09.00 - 13.30 WIB
+HM/RH/KM  : 6744 KM
+Lokasi    : BPM
+Deskripsi pekerjaan :
+- Check all around
+- Replace oil engine
+- Cleaning Air filter
+- Replace fuel filter 1 ea
+- Setting adjuster Air valve High/Low *(OK)*
+- Test running *(OK)*
+*Part :*
+- 1 ea fuel filter
+*Status : pekerjaan selesai 100%*.
+
+*6. NEW JOB – Unit engine Powerpack - slickline-02*
+Unit        : Engine powerpack
+Jenis      : PM 3
+Gejala     : -
+Mulai Pekerjaan : 22/10/2026
+Selesai Pekerjaan : 22/10/2026
+Time : 09.00 - 13.30 WIB
+HM/RH/KM  : 195 H
+Lokasi    : BPM
+Deskripsi pekerjaan :
+- Check All around
+- Replace oil engine
+- Replace 2 ea fuel filter
+- Replace 2 ea oil filter
+- Adjust Vbelt
+- Cleaning Air filter
+- Test Running *(OK)*
+- Housekeeping area
+*Part :*
+- 2 ea fuel filter
+- ⁠2 ea oil filter
+*Status : pekerjaan selesai 100℅*

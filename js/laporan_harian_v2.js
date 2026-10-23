@@ -263,7 +263,10 @@
           continue;
         }
         if (!t.includes('|')) continue;
-        const [u, lok, ...ket] = t.split('|').map(s => s.trim());
+        let [u, lok, ...ket] = t.split('|').map(s => s.trim());
+        // Pemisah kedua salah ketik huruf "I"/"l": "BW KB150A| KAG-19 I All unit standby" (22/10/2026)
+        const mI = !ket.length && /^(\S+)\s+[Il]\s+(.+)$/.exec(lok || '');
+        if (mI) { lok = mI[1]; ket = [mI[2]]; }
         const unit = normalisasiUnit(u);
         hasil.status_rig.push({ unit: unit || u, unit_dikenali: !!unit, lokasi: lok || null, keterangan: ket.join(' | ').trim() || null, rh: null });
         if (!unit) hasil.flags.push({ level: 'cek', pesan: `Status rig: unit "${u}" tidak dikenali` });
@@ -274,13 +277,31 @@
     if (iB >= 0) {
       let blok = null;
       const blokList = [];
+      // Judul tanpa BARU/LANJUT ("5. Unit engine Truck slickline-02") — sebelumnya tidak dikenali,
+      // isinya nyambung ke blok sebelumnya & nomor itu hilang (laporan 22/10/2026). Diterima hanya
+      // kalau nomornya urut DAN baris isi berikutnya berupa field (Unit/Equipment/SN/Jenis — field pembuka blok), supaya daftar
+      // bernomor di dalam deskripsi ("1. Check all around") tidak dikira blok baru.
+      const judulPolosRe = /^(\d+)\s*[.)]\s*(\D.*)$/;
+      const barisBerikutField = (i) => {
+        for (let k = i + 1; k < baris.length && k <= i + 3; k++) {
+          const t = baris[k].teks;
+          if (!t) continue;
+          const mc = /^([^:]{1,40}?)\s*:/.exec(t);
+          return !baris[k].bullet && !!mc && ['unit', 'equipment', 'sn', 'jenis'].includes(kunciLabel(mc[1]));
+        }
+        return false;
+      };
       for (let i = iB + 1; i < baris.length; i++) {
         const b = baris[i];
         const mj = !b.bullet && judulRe.exec(b.teks);
         if (mj) { blok = { no: Number(mj[1]), tipe: normalisasiTipe(mj[2]), tipe_asli: mj[2].trim(), judul: mj[3].trim(), baris: [] }; blokList.push(blok); continue; }
+        const mp = !b.bullet && judulPolosRe.exec(b.teks);
+        if (mp && Number(mp[1]) === (blok ? blok.no + 1 : 1) && barisBerikutField(i)) {
+          blok = { no: Number(mp[1]), tipe: null, tipe_asli: null, judul: mp[2].trim(), baris: [] }; blokList.push(blok); continue;
+        }
         if (blok && b.teks) blok.baris.push(b);
       }
-      blokList.forEach(bl => hasil.pekerjaan.push(parseBlok(bl, tahun)));
+      blokList.forEach(bl => hasil.pekerjaan.push(parseBlok(bl, tahun, hasil.tanggal)));
     } else if (iA < 0) {
       hasil.flags.push({ level: 'cek', pesan: 'Tidak ada status rig maupun blok pekerjaan bernomor yang terbaca' });
     }
@@ -300,7 +321,7 @@
     return hasil;
   }
 
-  function parseBlok(bl, tahun) {
+  function parseBlok(bl, tahun, tglLaporan) {
     const p = {
       no: bl.no, tipe: bl.tipe, tipe_asli: bl.tipe_asli || bl.tipe, judul: bl.judul, catatan: null,
       unit: null, unit_rig: false, equipment: null, judul_ket: null, sn: null,
@@ -393,6 +414,12 @@
     p.status = st.status; p.progress = st.progress; p.status_ket = st.ket; p.status_asli = st.asli;
     p.flags.push(...st.flags);
     if (p.deskripsi.length === 1 && kosong(p.deskripsi[0])) p.deskripsi = [];
+    // Judul tanpa BARU/LANJUT: tebak dari tanggal Mulai (= tanggal laporan → BARU), tandai buat dicek
+    if (!p.tipe) {
+      p.tipe = p.mulai && tglLaporan && p.mulai === tglLaporan ? 'BARU' : 'LANJUT';
+      p.tipe_asli = p.tipe;
+      p.flags.push({ level: 'cek', kode: 'tipe', pesan: `Judul tanpa NEW JOB/ON GOING — dianggap ${p.tipe}` });
+    }
 
     // Validasi — level 'kurang'
     if (!p.equipment) p.flags.push({ level: 'kurang', kode: 'equipment', pesan: 'Equipment tidak ada' });

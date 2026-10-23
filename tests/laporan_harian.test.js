@@ -181,6 +181,19 @@ cek(tc.pekerjaan[1].unit === null && tc.pekerjaan[1].status === 'Tunggu' && tc.p
 const tk = L.parseLaporan(L.TEMPLATE_KOSONG);
 cek(tk.pekerjaan.length === 1 && tk.status_rig.length === 5, 'template kosong tetap bisa dibaca (tidak error)');
 
+console.log('Laporan 22/10/2026: judul tanpa NEW JOB/ON GOING, pemisah "I" di status rig');
+const r22 = L.parseLaporan(fs.readFileSync(path.join(__dirname, 'fixtures/laporan_2026-10-22.txt'), 'utf8'));
+const Q22 = no => r22.pekerjaan.find(p => p.no === no);
+cek(r22.pekerjaan.map(p => p.no).join(',') === '1,2,3,4,5,6', 'nomor 1–6 lengkap (#5 tidak hilang)', r22.pekerjaan.map(p => p.no));
+cek(Q22(5).unit === 'Engine Truck' && Q22(5).jenis === 'PM' && Q22(5).meter_tipe === 'KM' && Q22(5).meter_nilai === 6744, '#5 Engine Truck PM, 6744 KM', [Q22(5).unit, Q22(5).jenis, Q22(5).meter_nilai]);
+cek(Q22(5).tipe === 'BARU' && adaFlag(Q22(5), 'tipe', 'cek'), '#5 dianggap BARU (mulai = tgl laporan) + flag cek');
+cek(Q22(4).jenis === 'CM' && Q22(4).is_ts && Q22(4).meter_nilai === null, '#4 tetap TS, tidak ketimpa isi #5', [Q22(4).jenis, Q22(4).meter_nilai]);
+cek(!Q22(4).deskripsi.some(d => /Replace fuel filter/i.test(d)) && Q22(4).part.length === 0, '#4 tanpa deskripsi & part milik #5', [Q22(4).deskripsi, Q22(4).part]);
+const kb150a = r22.status_rig.find(s => s.unit === 'BW KB150A');
+cek(kb150a.lokasi === 'KAG-19' && /^All unit standby/.test(kb150a.keterangan || ''), 'BW KB150A: "KAG-19 I All unit…" dipisah lokasi/keterangan', kb150a);
+const rDesk = L.parseLaporan('*LAPORAN HARIAN HOIST & HEAVY EQUIPMENT*\n*Kamis, 22/10/2026*\n*B. PEKERJAAN*\n*1. NEW JOB – Genset*\nJenis : PM 3\nDeskripsi pekerjaan :\n1. Check all around\n2. Replace oil\nStatus : selesai 100%');
+cek(rDesk.pekerjaan.length === 1 && rDesk.pekerjaan[0].deskripsi.length === 2, 'daftar bernomor di deskripsi tidak dikira blok baru', rDesk.pekerjaan.map(p => p.no));
+
 console.log('Salinan parser');
 const salinan = fs.readFileSync(path.join(__dirname, '../supabase/functions/_shared/laporan_harian_v2.js'), 'utf8');
 cek(salinan.endsWith(fs.readFileSync(path.join(__dirname, '../js/laporan_harian_v2.js'), 'utf8')), 'salinan Edge Function identik dengan js/laporan_harian_v2.js');
