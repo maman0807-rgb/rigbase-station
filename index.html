@@ -21116,6 +21116,449 @@
       return rates;
     }
 
+    // ============================================================
+    // RENCANA 12 BULAN — proyeksi SEMUA kegiatan PM/TOH/GOH 12 bulan ke depan (bahan anggaran,
+    // biaya dihitung Maman terpisah). Kecepatan pemakaian dari bacaan HM/KM 6 bulan terakhir
+    // (Logbook "Isi HM" + RH Laporan Harian), bukan 30 hari / 1 PM berikutnya seperti proyeksi biasa.
+    // Unit Standby/Scrap/Decommissioned tidak dijadwalkan (Maman 2026-10-30: patokan status saja).
+    // ============================================================
+    const PLAN_EXCLUDED_STATUS = ['Standby', 'Scrap'];
+    const PLAN_EXCLUDED_ASET = ['STANDBY', 'DECOMMISSIONED'];
+    const PLAN_KINDS = ['PM3', 'PM4', 'PM5', 'PM6', 'PM', 'TOH', 'GOH', 'SERT'];
+    const PLAN_KIND_LABEL = { PM3: 'PM3', PM4: 'PM4', PM5: 'PM5', PM6: 'PM6', PM: 'PM lain', TOH: 'TOH', GOH: 'GOH', SERT: 'SKPI/COC' };
+
+    // Asumsi jam/km per hari per kategori — sama dengan fallback proyeksi biasa di renderMaintenanceCalendar.
+    // Asumsi 200 km/hari HANYA untuk kendaraan jalan; komponen rig ber-km (axle/carrier, jarang pindah)
+    // tidak diasumsikan (null) — kalau dipaksa 200 km/hari, FAL/RAL rig jadi PM tiap 5 hari.
+    // Kalau `medianKategori` diberikan (median kecepatan ASLI unit sekategori & sebasis jam/km, min. 2 unit),
+    // itu yang dipakai — angka tetap di bawah kebesaran (genset asumsi 20 j/hari, aslinya 8–14).
+    function asumsiRatePerHari(eq, medianKategori = null) {
+      const catName = (getCategoryName(eq.kategori_id) || '').toLowerCase();
+      if (eq.pm_type === 'km' && !/kendaraan|truck|vehicle|damkar|\bmobil\b|slickline|crane/i.test(catName + ' ' + (eq.nama_equipment || ''))) return null;
+      const med = medianKategori && medianKategori[`${eq.kategori_id}|${eq.pm_type === 'km' ? 'km' : 'jam'}`];
+      if (med) return med;
+      return eq.pm_type === 'km' ? 200
+        : /genset|generator|power|listrik/i.test(catName) ? 20
+        : /hoist|winch|crane|lifting/i.test(catName) ? 10
+        : /kendaraan|truck|vehicle/i.test(catName) ? 10
+        : 8;
+    }
+
+    // Ambil semua halaman query Supabase (batas default 1000 baris/permintaan)
+    async function fetchSemuaHalaman(buildQuery) {
+      let rows = [], from = 0; const pageSize = 1000;
+      while (true) {
+        const { data, error } = await buildQuery().range(from, from + pageSize - 1);
+        if (error) throw error;
+        rows = rows.concat(data || []);
+        if (!data || data.length < pageSize) break;
+        from += pageSize;
+      }
+      return rows;
+    }
+
+    // Kecepatan pemakaian REAL per equipment dari bacaan HM/KM N hari terakhir.
+    // Bacaan = Logbook "Isi HM" (hmBefore + shift_hours) + RH di Laporan Harian, diurutkan per tanggal.
+    // Kecepatan = jumlah kenaikan antar-bacaan yang WAJAR / jumlah harinya. Kenaikan yang mustahil
+    // dibuang: turun (salah ketik/revisi) atau naik > batas per hari (24 jam; 1500 km) — mis. HM yang
+    // awalnya diisi dari 0 lalu lompat ke HM asli (TL-KB150A 13 → 9400) atau typo 19637 utk 1963,7
+    // (FP-100A). Regresi/akhir-awal biasa kacau karena lompatan itu (ketemu 2026-10-30, TL 61 jam/hari).
+    // Syarat: >=3 pasangan wajar, total >=14 hari.
+    async function fetchUsageRates(days = 180, kmIds = new Set()) {
+      const sejakIso = new Date(Date.now() - days * 86400000).toISOString();
+      const sejakTgl = sejakIso.slice(0, 10);
+      const [lb, lh] = await Promise.all([
+        fetchSemuaHalaman(() => state.supabase.from('logbook')
+          .select('equipment_id, created_at, shift_hours, hmBefore:data->>hmBefore')
+          .eq('status', 'approved').eq('data->>kind', 'hm').gte('created_at', sejakIso)
+          .order('created_at', { ascending: true })).catch(() => []),
+        fetchSemuaHalaman(() => state.supabase.from('laporan_harian_entries')
+          .select('equipment_id, rh, laporan_harian!inner(tanggal)')
+          .not('rh', 'is', null).not('equipment_id', 'is', null).gte('laporan_harian.tanggal', sejakTgl)
+          .order('id', { ascending: true })).catch(() => []),
+      ]);
+      const byEq = {};
+      const tambah = (eqId, tMs, v) => {
+        if (!eqId || !(v >= 0) || !isFinite(tMs)) return;
+        (byEq[eqId] = byEq[eqId] || []).push({ t: tMs / 86400000, v });
+      };
+      lb.forEach(r => { if (r.hmBefore != null) tambah(r.equipment_id, new Date(r.created_at).getTime(), Number(r.hmBefore) + (Number(r.shift_hours) || 0)); });
+      lh.forEach(r => tambah(r.equipment_id, new Date((r.laporan_harian?.tanggal || '') + 'T12:00:00+07:00').getTime(), Number(r.rh)));
+      const rates = {};
+      Object.entries(byEq).forEach(([eqId, pts]) => {
+        pts.sort((x, y) => x.t - y.t);
+        const batas = kmIds.has(eqId) ? 1500 : 24;
+        let naik = 0, hari = 0, pasang = 0;
+        for (let i = 1; i < pts.length; i++) {
+          const dt = pts[i].t - pts[i - 1].t, dv = pts[i].v - pts[i - 1].v;
+          if (dt <= 0) continue;
+          if (dv < 0 || dv > batas * Math.max(dt, 0.5)) continue;
+          naik += dv; hari += dt; pasang++;
+        }
+        if (pasang < 3 || hari < 14) return;
+        rates[eqId] = { rate: naik / hari, samples: pts.length, spanDays: Math.round(hari) };
+      });
+      return rates;
+    }
+
+    // Level Cat C7.1 di titik jam tetap (kelipatan 500): level tertinggi yang intervalnya pas membagi titik itu
+    function catC71LevelAt(point) {
+      return [...CAT_C71_TRACKED_LEVELS].reverse().find(lv => point % CAT_C71_PM_LADDER[lv].intervalHm === 0) || 'PM3';
+    }
+
+    // Simulasi 12 bulan per equipment → daftar kegiatan {kind, date, hm, overdue, catatan}
+    function proyeksiKegiatanEquipment(eq, rate, catNext, horizonHari = 365) {
+      const out = [];
+      const todayMs = Date.now();
+      const endMs = todayMs + horizonHari * 86400000;
+      const DAY = 86400000;
+      const rh = Number(eq.running_hours) || 0;
+      const hmPada = (ms) => rh + (rate || 0) * Math.max(0, ms - todayMs) / DAY;
+      const msSaatHm = (target) => rate > 0 ? todayMs + Math.max(0, target - rh) / rate * DAY : Infinity;
+      const isoTgl = (ms) => new Date(ms).toISOString().slice(0, 10);
+      const LIMIT = 60;
+
+      // --- PM ---
+      const isCat = CAT_C71_PM_TAGS.includes(eq.tag_number);
+      if (isCat && catNext && rate > 0) {
+        let point = catNext.nextDue;
+        for (let i = 0; i < LIMIT; i++) {
+          const ms = msSaatHm(point);
+          if (ms > endMs) break;
+          out.push({ kind: catC71LevelAt(point), date: isoTgl(ms), hm: point, overdue: point <= rh });
+          point += CAT_C71_PM_LADDER.PM3.intervalHm;
+        }
+      } else if (eq.pm_type === 'time') {
+        const hari = Number(eq.pm_max_interval_days) || (Number(eq.pm_interval_months) ? Math.round(Number(eq.pm_interval_months) * 30.44) : 0);
+        if (hari > 0) {
+          let next = eq.last_pm_date ? new Date(eq.last_pm_date + 'T00:00:00+07:00').getTime() + hari * DAY : todayMs;
+          const tanpaTgl = !eq.last_pm_date;
+          for (let i = 0; i < LIMIT; i++) {
+            const ms = Math.max(next, todayMs);
+            if (ms > endMs) break;
+            out.push({ kind: 'PM', date: isoTgl(ms), hm: null, overdue: next < todayMs || (tanpaTgl && i === 0), catatan: tanpaTgl && i === 0 ? 'belum ada tgl PM terakhir' : null });
+            next = ms + hari * DAY;
+          }
+        }
+      } else if (eq.pm_type === 'hours' || eq.pm_type === 'km') {
+        const interval = Number(eq.pm_interval_hours) || 0;
+        const maxHari = Number(eq.pm_max_interval_days) || 0;
+        let lastPmHm = Number(eq.last_pm_hours) || 0;
+        let lastPmMs = eq.last_pm_date ? new Date(eq.last_pm_date + 'T00:00:00+07:00').getTime() : null;
+        let cycle = Number(eq.pm_cycle_count) || 0;
+        if (interval > 0 && (rate > 0 || (maxHari && lastPmMs))) {
+          for (let i = 0; i < LIMIT; i++) {
+            const msHm = rate > 0 ? msSaatHm(lastPmHm + interval) : Infinity;
+            const msWaktu = maxHari && lastPmMs != null ? lastPmMs + maxHari * DAY : Infinity;
+            const due = Math.min(msHm, msWaktu);
+            if (!isFinite(due)) break;
+            const ms = Math.max(due, todayMs);
+            if (ms > endMs) break;
+            const t = getPMTypeByCycle(cycle + 1);
+            const tier = (t === 'GOH' && eq.goh_interval_hours) ? 'PM3' : t;
+            const hm = Math.round(hmPada(ms));
+            out.push({ kind: tier === 'GOH' ? 'GOH' : tier, date: isoTgl(ms), hm: rate > 0 ? hm : null, overdue: due <= todayMs, catatan: msWaktu < msHm ? 'batas hari' : null });
+            lastPmHm = rate > 0 ? hm : lastPmHm;
+            lastPmMs = ms;
+            cycle = tier === 'GOH' ? 0 : cycle + 1;
+          }
+        }
+      }
+
+      // --- GOH & TOH (berbasis jam), GOH mereset hitungan TOH ---
+      if (rate > 0 && eq.pm_type !== 'km') {
+        const gohInt = Number(eq.goh_interval_hours) || 0;
+        const gohPoints = [];
+        if (gohInt > 0) {
+          let base = Number(eq.last_goh_hours) || 0;
+          for (let i = 0; i < LIMIT; i++) {
+            const target = Math.max(base + gohInt, rh);
+            const ms = msSaatHm(target);
+            if (ms > endMs) break;
+            out.push({ kind: 'GOH', date: isoTgl(ms), hm: Math.round(target), overdue: base + gohInt <= rh });
+            gohPoints.push(target);
+            base = target;
+          }
+        }
+        const tohInt = Number(eq.toh_interval_hours) || 0;
+        if (tohInt > 0) {
+          let base = Number(eq.last_toh_hours ?? eq.last_goh_hours ?? 0) || 0;
+          for (let i = 0; i < LIMIT; i++) {
+            const target = Math.max(base + tohInt, rh);
+            const goh = gohPoints.find(g => g > base && g <= target);
+            if (goh != null) { base = goh; continue; }
+            const ms = msSaatHm(target);
+            if (ms > endMs) break;
+            out.push({ kind: 'TOH', date: isoTgl(ms), hm: Math.round(target), overdue: base + tohInt <= rh });
+            base = target;
+          }
+        }
+      }
+      return out;
+    }
+
+    async function buildCalendarPlanHtml(certEvents) {
+      const { data: eqs, error } = await state.supabase.from('equipment').select(
+        'id, tag_number, nama_equipment, assigned_unit_id, kategori_id, status_operasi, status_aset, ' +
+        'running_hours, pm_type, pm_interval_hours, pm_interval_months, pm_max_interval_days, ' +
+        'last_pm_hours, last_pm_date, pm_cycle_count, toh_interval_hours, last_toh_hours, ' +
+        'goh_interval_hours, last_goh_hours, follow_parent_hm, parent_equipment_id');
+      if (error) throw error;
+      const rates = await fetchUsageRates(180, new Set((eqs || []).filter(e => e.pm_type === 'km').map(e => e.id)));
+      // Median kecepatan asli per kategori (dipakai sebagai asumsi unit sekategori yang datanya kurang)
+      const perKat = {};
+      (eqs || []).forEach(e => { if (rates[e.id] && rates[e.id].rate > 0) (perKat[`${e.kategori_id}|${e.pm_type === 'km' ? 'km' : 'jam'}`] = perKat[`${e.kategori_id}|${e.pm_type === 'km' ? 'km' : 'jam'}`] || []).push(rates[e.id].rate); });
+      const medianKategori = {};
+      Object.entries(perKat).forEach(([k, arr]) => { if (arr.length < 2) return; arr.sort((a, b) => a - b); const m = arr.length >> 1; medianKategori[k] = arr.length % 2 ? arr[m] : (arr[m - 1] + arr[m]) / 2; });
+      const eqById = Object.fromEntries((eqs || []).map(e => [e.id, e]));
+
+      // Cat C7.1: level berikutnya dari cat_c71_pm_log (sama seperti Dashboard/Kalender)
+      const catEquip = (eqs || []).filter(e => CAT_C71_PM_TAGS.includes(e.tag_number));
+      const catNextByEqId = {};
+      if (catEquip.length) {
+        let catLogs = [];
+        try {
+          const { data: logs } = await state.supabase.from('cat_c71_pm_log').select('equipment_id, level, done_at_hm').in('equipment_id', catEquip.map(e => e.id));
+          catLogs = logs || [];
+        } catch (e) { /* tabel belum ada → anggap belum pernah dicatat */ }
+        catEquip.forEach(e => {
+          const lastDoneByLevel = {};
+          catLogs.filter(l => l.equipment_id === e.id).forEach(l => {
+            const h = Number(l.done_at_hm) || 0;
+            if (!(l.level in lastDoneByLevel) || h > lastDoneByLevel[l.level]) lastDoneByLevel[l.level] = h;
+          });
+          const cur = Number(e.running_hours || 0);
+          const levels = CAT_C71_PM_ORDER.map(level => ({ level, lastDone: lastDoneByLevel[level] || 0 }));
+          catNextByEqId[e.id] = getCatC71NextLevel(levels, cur);
+        });
+      }
+
+      const now = new Date();
+      const months = [];
+      for (let i = 0; i < 12; i++) { const d = new Date(now.getFullYear(), now.getMonth() + i, 1); months.push({ ym: ymLocal(d), date: d }); }
+      const ymSet = new Set(months.map(m => m.ym));
+
+      const kegiatan = [];          // semua kegiatan terjadwal
+      const dikecualikan = [];      // status Standby/Scrap/Decommissioned
+      const belumBisa = [];         // punya jadwal PM tapi tidak bisa diproyeksikan
+      const perEq = [];             // ringkasan per equipment
+      (eqs || []).forEach(eq => {
+        if (calFilter.unit_id && String(eq.assigned_unit_id) !== String(calFilter.unit_id)) return;
+        const punyaJadwal = ['hours', 'km', 'time'].includes(eq.pm_type) && (Number(eq.pm_interval_hours) > 0 || Number(eq.pm_max_interval_days) > 0 || Number(eq.pm_interval_months) > 0 || Number(eq.toh_interval_hours) > 0 || Number(eq.goh_interval_hours) > 0);
+        if (!punyaJadwal) return;
+        if (PLAN_EXCLUDED_STATUS.includes(eq.status_operasi) || PLAN_EXCLUDED_ASET.includes(eq.status_aset)) { dikecualikan.push(eq); return; }
+
+        // Sumber kecepatan: data asli → ikut HM induk → asumsi kategori (hanya kalau HM sudah pernah terisi)
+        let rate = 0, sumber = null, info = '';
+        const own = rates[eq.id];
+        const parentRate = eq.follow_parent_hm && eq.parent_equipment_id ? rates[eq.parent_equipment_id] : null;
+        if (own) { rate = own.rate; sumber = 'asli'; info = `${own.samples} bacaan, ${own.spanDays} hari`; }
+        else if (parentRate) { rate = parentRate.rate; sumber = 'induk'; info = `ikut HM ${eqById[eq.parent_equipment_id]?.tag_number || 'induk'}`; }
+        else if (Number(eq.running_hours) > 0 && eq.pm_type !== 'time' && asumsiRatePerHari(eq, medianKategori)) {
+          rate = asumsiRatePerHari(eq, medianKategori); sumber = 'asumsi';
+          info = medianKategori[`${eq.kategori_id}|${eq.pm_type === 'km' ? 'km' : 'jam'}`] ? 'median unit sekategori (data asli)' : 'asumsi kategori (angka tetap)';
+        }
+        else if (eq.pm_type === 'time') { sumber = 'waktu'; info = 'jadwal kalender'; }
+
+        const list = proyeksiKegiatanEquipment(eq, rate, catNextByEqId[eq.id]);
+        if (!list.length && !sumber) { belumBisa.push(eq); return; }
+        const unitName = getParentUnitName(eq.assigned_unit_id);
+        const satuan = eq.pm_type === 'km' ? 'km' : 'jam';
+        list.forEach(k => kegiatan.push({ ...k, eq, unitName, sumber, rate, info, satuan }));
+        perEq.push({ eq, unitName, sumber, rate, info, satuan, list });
+      });
+
+      // Sertifikat (SKPI/COC) berakhir dalam 12 bulan — perpanjangan juga kegiatan beranggaran
+      (certEvents || []).forEach(c => {
+        if (calFilter.unit_id && String(c.eq.assigned_unit_id) !== String(calFilter.unit_id)) return;
+        kegiatan.push({ kind: 'SERT', date: c.date, hm: null, overdue: c.overdue, catatan: c.kind, eq: c.eq, unitName: c.unitName, sumber: 'waktu', rate: 0, info: `${c.kind} berakhir`, satuan: '' });
+      });
+
+      const lolosKind = (k) => {
+        if (!calFilter.kind) return true;
+        if (calFilter.kind === 'PM') return ['PM3', 'PM4', 'PM5', 'PM6', 'PM'].includes(k.kind);
+        if (calFilter.kind === 'SKPI' || calFilter.kind === 'COC') return k.kind === 'SERT' && k.catatan === calFilter.kind;
+        return k.kind === calFilter.kind;
+      };
+      const tampil = kegiatan.filter(k => ymSet.has(k.date.slice(0, 7)) && lolosKind(k))
+        .sort((a, b) => a.date.localeCompare(b.date) || a.eq.tag_number.localeCompare(b.eq.tag_number));
+      window.__calendarPlanEvents = tampil;
+
+      // Rekap per bulan × jenis, dipisah data asli/induk/waktu vs asumsi
+      const isAsumsi = (k) => k.sumber === 'asumsi';
+      const rekap = {};
+      months.forEach(m => { rekap[m.ym] = {}; PLAN_KINDS.forEach(kd => { rekap[m.ym][kd] = { pasti: 0, asumsi: 0 }; }); });
+      tampil.forEach(k => { const c = rekap[k.date.slice(0, 7)][k.kind]; if (isAsumsi(k)) c.asumsi++; else c.pasti++; });
+      const kolom = PLAN_KINDS.filter(kd => tampil.some(k => k.kind === kd));
+      const sel = (c) => !c.pasti && !c.asumsi ? '<span class="text-slate-300">–</span>'
+        : `<b>${c.pasti}</b>${c.asumsi ? ` <span class="text-slate-400 text-xs" title="dari unit dengan kecepatan asumsi">+${c.asumsi}≈</span>` : ''}`;
+      const sum = (arr) => arr.reduce((s, c) => ({ pasti: s.pasti + c.pasti, asumsi: s.asumsi + c.asumsi }), { pasti: 0, asumsi: 0 });
+      const selectedYM = ymSet.has(calFilter.startMonth) ? calFilter.startMonth : months[0].ym;
+      const barisBulan = months.map(m => {
+        const tot = sum(kolom.map(kd => rekap[m.ym][kd]));
+        const lbl = m.date.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
+        return `<tr class="border-b border-slate-100 hover:bg-slate-50 cursor-pointer ${m.ym === selectedYM ? 'bg-navy/5' : ''}" onclick="selectCalMonth('${m.ym}')">
+          <td class="px-3 py-2 text-sm font-semibold text-slate-700 whitespace-nowrap">${escapeHtml(lbl)}</td>
+          ${kolom.map(kd => `<td class="px-3 py-2 text-sm text-center">${sel(rekap[m.ym][kd])}</td>`).join('')}
+          <td class="px-3 py-2 text-sm text-center bg-slate-50">${sel(tot)}</td>
+        </tr>`;
+      }).join('');
+      const totKolom = kolom.map(kd => sum(months.map(m => rekap[m.ym][kd])));
+      const totAll = sum(totKolom);
+      const tabelRekap = `
+        <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div class="px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between flex-wrap gap-2">
+            <h4 class="font-bold text-slate-800">📊 Rekap kegiatan per bulan (12 bulan ke depan)</h4>
+            <span class="text-xs text-slate-500">Angka tebal = data asli/induk/kalender · <span class="text-slate-400">+n≈</span> = dari unit asumsi · Klik bulan → daftar unit</span>
+          </div>
+          ${tampil.length ? `<div class="overflow-x-auto"><table class="w-full">
+            <thead><tr class="bg-slate-50 text-xs font-bold text-slate-600 border-b border-slate-200">
+              <th class="px-3 py-2 text-left">Bulan</th>
+              ${kolom.map(kd => `<th class="px-3 py-2 text-center">${PLAN_KIND_LABEL[kd]}</th>`).join('')}
+              <th class="px-3 py-2 text-center bg-slate-100">Total</th>
+            </tr></thead>
+            <tbody>${barisBulan}</tbody>
+            <tfoot><tr class="bg-slate-100 font-bold border-t-2 border-slate-300">
+              <td class="px-3 py-2 text-sm">Total 12 bulan</td>
+              ${totKolom.map(c => `<td class="px-3 py-2 text-sm text-center">${sel(c)}</td>`).join('')}
+              <td class="px-3 py-2 text-sm text-center">${sel(totAll)}</td>
+            </tr></tfoot>
+          </table></div>` : `<div class="p-8 text-center text-slate-400 text-sm">Tidak ada kegiatan terjadwal untuk filter ini.</div>`}
+        </div>`;
+
+      const sumberBadge = (k) => {
+        const r = k.rate ? `${fmtNumber(Math.round(k.rate * 10) / 10)} ${k.satuan}/hari` : '';
+        if (k.sumber === 'asli') return `<span class="text-emerald-700" title="${escapeAttr(k.info)}">📊 ${r}</span>`;
+        if (k.sumber === 'induk') return `<span class="text-blue-700" title="${escapeAttr(k.info)}">🔗 ${r}</span>`;
+        if (k.sumber === 'asumsi') return `<span class="text-slate-400" title="Belum cukup bacaan HM/KM 6 bulan — ${escapeAttr(k.info)}">≈ ${r}</span>`;
+        return `<span class="text-slate-500" title="${escapeAttr(k.info)}">📅 kalender</span>`;
+      };
+      const kindBadge = (k) => {
+        const cls = k.kind === 'GOH' ? 'bg-red-100 text-red-700' : k.kind === 'TOH' ? 'bg-amber-100 text-amber-700' : k.kind === 'SERT' ? 'bg-slate-100 text-slate-700' : 'bg-green-100 text-green-700';
+        return `<span class="px-2 py-0.5 rounded-full text-xs font-semibold ${cls}">${escapeHtml(k.kind === 'SERT' ? k.catatan : k.kind)}</span>`;
+      };
+      const bulanIni = tampil.filter(k => k.date.slice(0, 7) === selectedYM);
+      const lblSel = new Date(selectedYM + '-01T00:00:00').toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
+      const daftarBulan = `
+        <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div class="px-4 py-3 bg-slate-50 border-b border-slate-200">
+            <h4 class="font-bold text-slate-800">📋 Daftar kegiatan: <span class="text-navy">${escapeHtml(lblSel)}</span> (${bulanIni.length})</h4>
+          </div>
+          ${bulanIni.length ? `<div class="overflow-x-auto"><table class="w-full">
+            <thead><tr class="bg-slate-50 text-left text-xs font-bold text-slate-600 border-b border-slate-200">
+              <th class="px-3 py-2">#</th><th class="px-3 py-2">Equipment</th><th class="px-3 py-2">Rig</th>
+              <th class="px-3 py-2 text-center">Kegiatan</th><th class="px-3 py-2 text-center">Tgl Est</th>
+              <th class="px-3 py-2 text-center">HM/KM Est</th><th class="px-3 py-2">Kecepatan</th><th class="px-3 py-2">Ket.</th>
+            </tr></thead>
+            <tbody>${bulanIni.map((k, i) => `
+              <tr class="border-b border-slate-100 hover:bg-slate-50 cursor-pointer ${k.overdue ? 'bg-red-50/50' : ''}" onclick="setEquipmentView('detail','${k.eq.id}'); navigate('equipment')">
+                <td class="px-3 py-2 text-sm text-slate-500">${i + 1}</td>
+                <td class="px-3 py-2 text-sm"><div class="font-mono font-bold text-navy">${escapeHtml(k.eq.tag_number)}</div><div class="text-xs text-slate-500">${escapeHtml(k.eq.nama_equipment || '')}</div></td>
+                <td class="px-3 py-2 text-sm text-slate-600 whitespace-nowrap">${escapeHtml(k.unitName || '-')}</td>
+                <td class="px-3 py-2 text-center">${kindBadge(k)}</td>
+                <td class="px-3 py-2 text-sm text-center whitespace-nowrap">${fmtDate(k.date)}</td>
+                <td class="px-3 py-2 text-sm text-center whitespace-nowrap">${k.hm != null ? fmtNumber(k.hm, ' ' + k.satuan) : '–'}</td>
+                <td class="px-3 py-2 text-xs whitespace-nowrap">${sumberBadge(k)}</td>
+                <td class="px-3 py-2 text-xs text-slate-500">${k.overdue ? '<span class="text-red-600 font-semibold">sudah lewat</span> ' : ''}${escapeHtml(k.kind === 'SERT' ? '' : (k.catatan || ''))}</td>
+              </tr>`).join('')}</tbody>
+          </table></div>` : `<div class="p-8 text-center text-slate-400 text-sm">Tidak ada kegiatan di bulan ini.</div>`}
+        </div>`;
+
+      // Per equipment (total 12 bulan) — untuk anggaran per unit
+      const perEqTampil = perEq.map(p => ({ ...p, list: p.list.filter(k => ymSet.has(k.date.slice(0, 7)) && lolosKind(k)) }))
+        .filter(p => p.list.length)
+        .sort((a, b) => b.list.length - a.list.length || a.eq.tag_number.localeCompare(b.eq.tag_number));
+      const kolomEq = PLAN_KINDS.filter(kd => kd !== 'SERT' && perEqTampil.some(p => p.list.some(k => k.kind === kd)));
+      const tabelPerEq = `
+        <details class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <summary class="px-4 py-3 bg-slate-50 cursor-pointer font-bold text-slate-800">🔧 Rekap per equipment (${perEqTampil.length} unit)</summary>
+          <div class="overflow-x-auto"><table class="w-full">
+            <thead><tr class="bg-slate-50 text-xs font-bold text-slate-600 border-b border-slate-200">
+              <th class="px-3 py-2 text-left">Equipment</th><th class="px-3 py-2 text-left">Rig</th><th class="px-3 py-2 text-left">Kecepatan</th>
+              ${kolomEq.map(kd => `<th class="px-3 py-2 text-center">${PLAN_KIND_LABEL[kd]}</th>`).join('')}
+              <th class="px-3 py-2 text-center">Total</th>
+            </tr></thead>
+            <tbody>${perEqTampil.map(p => `
+              <tr class="border-b border-slate-100 hover:bg-slate-50">
+                <td class="px-3 py-2 text-sm"><span class="font-mono font-bold text-navy">${escapeHtml(p.eq.tag_number)}</span> <span class="text-xs text-slate-500">${escapeHtml(p.eq.nama_equipment || '')}</span></td>
+                <td class="px-3 py-2 text-sm text-slate-600 whitespace-nowrap">${escapeHtml(p.unitName || '-')}</td>
+                <td class="px-3 py-2 text-xs whitespace-nowrap">${sumberBadge(p)}</td>
+                ${kolomEq.map(kd => { const n = p.list.filter(k => k.kind === kd).length; return `<td class="px-3 py-2 text-sm text-center">${n || '<span class="text-slate-300">–</span>'}</td>`; }).join('')}
+                <td class="px-3 py-2 text-sm text-center font-bold">${p.list.length}</td>
+              </tr>`).join('')}</tbody>
+          </table></div>
+        </details>`;
+
+      const daftarTag = (arr, ket) => arr.length ? arr.map(e => `<span class="inline-block px-2 py-0.5 m-0.5 rounded bg-slate-100 text-xs font-mono" title="${escapeAttr((e.nama_equipment || '') + (ket ? ' — ' + ket(e) : ''))}">${escapeHtml(e.tag_number)}</span>`).join('') : '<span class="text-xs text-slate-400">Tidak ada</span>';
+      const infoLain = `
+        <details class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <summary class="px-4 py-3 bg-slate-50 cursor-pointer font-bold text-slate-800">⛔ Tidak dijadwalkan — status Standby/Scrap/Decommissioned (${dikecualikan.length})</summary>
+          <div class="p-3">${daftarTag(dikecualikan, e => `${e.status_operasi || '-'} / ${e.status_aset || '-'}`)}</div>
+        </details>
+        <details class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <summary class="px-4 py-3 bg-slate-50 cursor-pointer font-bold text-slate-800">❔ Belum bisa dihitung — HM/KM masih 0 & belum ada bacaan 6 bulan (${belumBisa.length})</summary>
+          <div class="p-3 text-xs text-slate-500 mb-1">Isi HM/KM unit ini (Logbook / Laporan Harian) supaya ikut terjadwal.</div>
+          <div class="px-3 pb-3">${daftarTag(belumBisa)}</div>
+        </details>`;
+
+      const nAsli = perEq.filter(p => p.sumber === 'asli' || p.sumber === 'induk').length;
+      const nAsumsi = perEq.filter(p => p.sumber === 'asumsi').length;
+      const kpi = `
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div class="bg-white rounded-xl border border-slate-300 p-4 text-center">
+            <div class="text-3xl font-extrabold text-slate-800">${totAll.pasti + totAll.asumsi}</div>
+            <div class="text-xs font-semibold text-slate-700 mt-1">📋 TOTAL KEGIATAN</div>
+            <div class="text-[10px] text-slate-500">12 bulan · ${totAll.asumsi} dari unit asumsi</div>
+          </div>
+          <div class="bg-white rounded-xl border border-emerald-300 p-4 text-center">
+            <div class="text-3xl font-extrabold text-emerald-700">${nAsli}</div>
+            <div class="text-xs font-semibold text-emerald-700 mt-1">📊 UNIT DATA ASLI</div>
+            <div class="text-[10px] text-slate-500">bacaan HM/KM 6 bln (termasuk ikut induk)</div>
+          </div>
+          <div class="bg-white rounded-xl border border-slate-300 p-4 text-center">
+            <div class="text-3xl font-extrabold text-slate-500">${nAsumsi}</div>
+            <div class="text-xs font-semibold text-slate-600 mt-1">≈ UNIT ASUMSI</div>
+            <div class="text-[10px] text-slate-500">bacaan kurang, pakai jam/hari kategori</div>
+          </div>
+          <div class="bg-white rounded-xl border border-amber-300 p-4 text-center">
+            <div class="text-3xl font-extrabold text-amber-700">${dikecualikan.length + belumBisa.length}</div>
+            <div class="text-xs font-semibold text-amber-700 mt-1">⛔ TIDAK DIJADWALKAN</div>
+            <div class="text-[10px] text-slate-500">${dikecualikan.length} status · ${belumBisa.length} belum ada HM</div>
+          </div>
+        </div>`;
+      const note = `
+        <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800">
+          💡 <b>Cara hitung:</b> kecepatan pemakaian = tren bacaan HM/KM <b>6 bulan terakhir</b> (Logbook Isi HM + RH Laporan Harian, min. 3 bacaan dalam ≥14 hari).
+          Tiap PM dihitung berurutan selama 12 bulan dengan tingkat sesuai siklus (PM3/PM4/PM5/PM6/GOH; Genset Cat C7.1 ikut jadwal Trakindo), dan batas hari (<i>pm_max_interval_days</i>) dipakai kalau lebih cepat dari HM.
+          TOH/GOH dari interval jam. PM yang sudah lewat dijadwalkan bulan ini. Unit 🔗 ikut kecepatan HM induknya. Biaya tidak dihitung di sini.
+        </div>`;
+      return kpi + '<div class="mt-4"></div>' + tabelRekap + '<div class="mt-4"></div>' + daftarBulan
+        + '<div class="mt-4 space-y-3">' + tabelPerEq + infoLain + '</div><div class="mt-4"></div>' + note;
+    }
+
+    function exportCalendarPlanExcel() {
+      const events = window.__calendarPlanEvents || [];
+      if (!events.length) { toast('Tidak ada kegiatan untuk di-export.', 'warn'); return; }
+      const sumberTxt = { asli: 'Data asli 6 bln', induk: 'Ikut HM induk', asumsi: 'Asumsi kategori', waktu: 'Kalender' };
+      const rows = [['Bulan', 'Tag', 'Nama Equipment', 'Rig', 'Kegiatan', 'Tgl Est', 'HM/KM Est', 'Satuan', 'Kecepatan/hari', 'Sumber kecepatan', 'Keterangan']];
+      events.forEach(k => {
+        const monthLbl = new Date(k.date.slice(0, 7) + '-01T00:00:00').toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
+        rows.push([monthLbl, k.eq.tag_number, k.eq.nama_equipment || '', k.unitName || '', k.kind === 'SERT' ? k.catatan : k.kind, k.date,
+          k.hm != null ? k.hm : '', k.satuan, k.rate ? Math.round(k.rate * 10) / 10 : '', sumberTxt[k.sumber] || '',
+          [k.overdue ? 'sudah lewat' : '', k.kind === 'SERT' ? '' : (k.catatan || '')].filter(Boolean).join(', ')]);
+      });
+      const csv = rows.map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+      const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `rencana-maintenance-12-bulan-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast('Excel/CSV ter-download.', 'success');
+    }
+    window.exportCalendarPlanExcel = exportCalendarPlanExcel;
+
     async function renderMaintenanceCalendar() {
       const host = document.getElementById('calendar-host');
       if (!host) return;
@@ -21410,12 +21853,21 @@
               <button onclick="setCalFilter('viewMode', 'rig')" class="px-3 py-2 rounded-lg text-sm font-medium ${calFilter.viewMode === 'rig' ? 'bg-navy text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}">🏭 Per Rig</button>
               <button onclick="setCalFilter('viewMode', 'urgency')" class="px-3 py-2 rounded-lg text-sm font-medium ${calFilter.viewMode === 'urgency' ? 'bg-navy text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}">⚡ Per Urgency</button>
               <button onclick="setCalFilter('viewMode', 'history')" class="px-3 py-2 rounded-lg text-sm font-medium ${calFilter.viewMode === 'history' ? 'bg-navy text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}">🕐 Riwayat</button>
+              <button onclick="setCalFilter('viewMode', 'plan')" class="px-3 py-2 rounded-lg text-sm font-medium ${calFilter.viewMode === 'plan' ? 'bg-navy text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}" title="Semua kegiatan PM/TOH/GOH 12 bulan ke depan dari kebiasaan pemakaian 6 bulan — bahan anggaran">📊 Rencana 12 Bulan</button>
             </div>
             <div class="ml-auto flex gap-2">
               <button onclick="exportCalendarExcel()" class="px-3 py-2 bg-navy hover:bg-navy-700 text-white rounded-lg text-sm font-medium">📥 Excel</button>
               <button onclick="openPrintCalendarModal()" class="btn-cetak">🖨 Print PDF</button>
             </div>
           </div>`;
+
+        // Mode Rencana 12 Bulan: tampilan & perhitungan sendiri (buildCalendarPlanHtml), sertifikat ikut dari `events`
+        if (calFilter.viewMode === 'plan') {
+          host.innerHTML = filterBar + '<div class="mt-4"></div>' + '<div class="p-6 text-center text-slate-400 text-sm">Menghitung rencana 12 bulan…</div>';
+          const planHtml = await buildCalendarPlanHtml(events.filter(e => e.kind === 'SKPI' || e.kind === 'COC'));
+          host.innerHTML = filterBar + '<div class="mt-4"></div>' + planHtml;
+          return;
+        }
 
         // 8-10. KPI, month grid, detail content — beda total untuk mode Riwayat vs proyeksi
         let kpiBar, monthsGrid, detailContent = '';
@@ -21809,6 +22261,7 @@
 
     function exportCalendarExcel() {
       if (calFilter.viewMode === 'history') { exportCalendarHistoryExcel(); return; }
+      if (calFilter.viewMode === 'plan') { exportCalendarPlanExcel(); return; }
       const events = window.__calendarEvents || [];
       if (!events.length) { toast('Tidak ada event untuk di-export.', 'warn'); return; }
       // Group by month
@@ -21878,6 +22331,7 @@
     // Modal scope picker untuk print Calendar — pilih bulan/tahun/semua
     function openPrintCalendarModal() {
       if (calFilter.viewMode === 'history') { openPrintCalendarHistoryModal(); return; }
+      if (calFilter.viewMode === 'plan') { toast('Rencana 12 Bulan: pakai tombol 📥 Excel untuk bahan anggaran.', 'info'); return; }
       const events = window.__calendarEvents || [];
       if (!events.length) { toast('Tidak ada event untuk dicetak.', 'warn'); return; }
       const now = new Date();
