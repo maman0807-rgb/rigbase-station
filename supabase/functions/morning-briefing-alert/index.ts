@@ -93,19 +93,21 @@ serve(async (_req) => {
     // PM berbasis WAKTU yang SUDAH LEWAT (pm_type=time, mis. Fire Pump Fixed, TT):
     // last_pm_date + pm_max_interval_days (atau pm_interval_months x 30) < hari ini.
     // Ditambah 2026-11-20 — sebelumnya briefing cuma ngitung PM-jam, unit basis waktu gak pernah muncul.
+    // Unit basis JAM/KM yang diisi "Maks Hari Sejak PM" ikut dicek dari sisi waktu (fallback waktu).
     const { data: timeEq } = await sb.from("equipment")
-      .select("id, tag_number, assigned_unit_id, status_operasi, last_pm_date, pm_max_interval_days, pm_interval_months")
-      .eq("pm_type", "time")
+      .select("id, tag_number, assigned_unit_id, status_operasi, pm_type, last_pm_date, pm_max_interval_days, pm_interval_months")
+      .or("pm_type.eq.time,and(pm_type.in.(hours,km),pm_max_interval_days.not.is.null)")
       .not("last_pm_date", "is", null);
     const today0 = new Date(); today0.setHours(0, 0, 0, 0);
     const timeOverdue: any[] = [];
     (timeEq || []).forEach((e) => {
       if (["Down", "Scrap"].includes(e.status_operasi) || isSnoozed(e.id, "PM")) return;
-      const maxDays = Number(e.pm_max_interval_days) || (Number(e.pm_interval_months) || 0) * 30;
+      const isTime = e.pm_type === "time";
+      const maxDays = Number(e.pm_max_interval_days) || (isTime ? (Number(e.pm_interval_months) || 0) * 30 : 0);
       if (!maxDays) return;
       const last = new Date(e.last_pm_date); last.setHours(0, 0, 0, 0);
       const rem = maxDays - Math.floor((today0.getTime() - last.getTime()) / 86400000);
-      if (rem < 0) timeOverdue.push({ ...e, _rem: rem });
+      if (rem < 0) timeOverdue.push({ ...e, _rem: rem, _basis: isTime ? "" : (e.pm_type === "km" ? " (basis KM)" : " (basis HM)") });
     });
     timeOverdue.sort((a, b) => a._rem - b._rem);
 
@@ -148,7 +150,7 @@ serve(async (_req) => {
       lines.push(`\n⏰ <b>PM BERBASIS WAKTU LEWAT (${timeOverdue.length})</b>`);
       timeOverdue.slice(0, 10).forEach((e) => {
         const unit = unitName[e.assigned_unit_id] || "—";
-        lines.push(`• <b>${e.tag_number}</b> @ ${unit} — PM lewat ${-e._rem} hari`);
+        lines.push(`• <b>${e.tag_number}</b> @ ${unit} — PM lewat ${-e._rem} hari${e._basis}`);
       });
       if (timeOverdue.length > 10) lines.push(`<i>...dan ${timeOverdue.length - 10} lainnya</i>`);
     }

@@ -2068,10 +2068,15 @@
 
         // 1b. PM berbasis WAKTU (Fire Pump Fixed, TT, dll.) — sisa ≤10% batas hari atau sudah lewat
         const pmTimeTg = await fetchPMDueByTime(DASHBOARD_HIDDEN_TAGS).catch(() => ({ due: [], undated: [] }));
+        // + kendaraan basis KM yang due karena batas hari (KM belum nyampe). Unit basis HM yg due
+        //   karena batas hari sudah ikut di PM CRITICAL di atas (fetchPMDueByHours).
+        const kmByTime = (await fetchPMDueByKm(500, DASHBOARD_HIDDEN_TAGS).catch(() => []))
+          .filter(e => e._dueByTime && !e._dueByKm).map(e => ({ ...e, _basis: ' (basis KM)' }));
+        pmTimeTg.due = [...pmTimeTg.due, ...kmByTime].sort((a, b) => a._daysRemaining - b._daysRemaining);
         if (pmTimeTg.due.length) {
           const lines = pmTimeTg.due.slice(0, MAX_TG).map(e => {
             const d = e._daysRemaining;
-            const status = d < 0 ? `⛔ LEWAT ${Math.abs(d)} hari` : `⏰ Sisa ${d} hari`;
+            const status = (d < 0 ? `⛔ LEWAT ${Math.abs(d)} hari` : `⏰ Sisa ${d} hari`) + (e._basis || '');
             return `  • <b>${escapeHtml(e.tag_number)}</b> [${escapeHtml(getParentUnitName(e.assigned_unit_id))}] — ${status}`;
           }).join('\n');
           sections.push(`⏰ <b>PM BERBASIS WAKTU — ${pmTimeTg.due.length} Equipment</b>\n${lines}${sisaTg(pmTimeTg.due)}\n📅 Jadwalkan PM kalender.`);

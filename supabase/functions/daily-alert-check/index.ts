@@ -127,18 +127,21 @@ serve(async (_req) => {
     // (atau pm_interval_months x 30). Sama dgn panel "PM Berbasis Waktu" di Dashboard app:
     // tampil kalau sisa <=10% batas hari (min 7) atau sudah lewat. Ditambah 2026-11-20 — sebelumnya
     // report ini cuma PM-jam, jadi semua unit basis waktu gak pernah muncul di Telegram.
+    // Unit basis JAM/KM yang diisi "Maks Hari Sejak PM" ikut dicek dari sisi waktu juga (mana duluan:
+    // HM/KM atau batas hari) — sama dgn fallback waktu di Dashboard (fetchPMDueByHours/ByKm).
     const { data: timeEq } = await sb.from("equipment")
-      .select("tag_number, nama_equipment, assigned_unit_id, status_operasi, last_pm_date, pm_max_interval_days, pm_interval_months")
-      .eq("pm_type", "time");
+      .select("tag_number, nama_equipment, assigned_unit_id, status_operasi, pm_type, last_pm_date, pm_max_interval_days, pm_interval_months")
+      .or("pm_type.eq.time,and(pm_type.in.(hours,km),pm_max_interval_days.not.is.null)");
     const pmTimeDue: any[] = [];
     let pmTimeUndated = 0;
     (timeEq || []).forEach((e) => {
       if (["Down", "Scrap"].includes(e.status_operasi)) return;
-      const maxDays = Number(e.pm_max_interval_days) || (Number(e.pm_interval_months) || 0) * 30;
+      const isTime = e.pm_type === "time";
+      const maxDays = Number(e.pm_max_interval_days) || (isTime ? (Number(e.pm_interval_months) || 0) * 30 : 0);
       if (!maxDays) return;
-      if (!e.last_pm_date) { pmTimeUndated++; return; }
+      if (!e.last_pm_date) { if (isTime) pmTimeUndated++; return; }
       const rem = maxDays + daysUntil(e.last_pm_date);  // daysUntil(tgl lampau) negatif = hari sejak PM
-      if (rem <= Math.max(7, Math.round(maxDays * 0.1))) pmTimeDue.push({ ...e, _rem: rem });
+      if (rem <= Math.max(7, Math.round(maxDays * 0.1))) pmTimeDue.push({ ...e, _rem: rem, _basis: isTime ? "" : (e.pm_type === "km" ? " · basis KM" : " · basis HM") });
     });
     pmTimeDue.sort((a, b) => a._rem - b._rem);
     overhaulDue.sort((a, b) => a._rem - b._rem);
@@ -190,7 +193,7 @@ serve(async (_req) => {
       lines.push(`\n⏰ <b>PM Berbasis Waktu (${pmTimeDue.length})</b>`);
       pmTimeDue.slice(0, 15).forEach((e) => {
         const st = e._rem < 0 ? `⛔ LEWAT ${-e._rem} hari` : `sisa ${e._rem} hari`;
-        lines.push(`• <b>${e.tag_number}</b> @ ${unitName[e.assigned_unit_id] || "—"} — ${st} (PM terakhir ${fmtDate(e.last_pm_date)})`);
+        lines.push(`• <b>${e.tag_number}</b> @ ${unitName[e.assigned_unit_id] || "—"} — ${st} (PM terakhir ${fmtDate(e.last_pm_date)}${e._basis})`);
       });
       if (pmTimeDue.length > 15) lines.push(`<i>...dan ${pmTimeDue.length - 15} lainnya (lihat Dashboard)</i>`);
     }
