@@ -100,7 +100,9 @@ serve(async (_req) => {
         const rem = pmInt - (rh - (Number(e.last_pm_hours) || 0));
         // Threshold flat 100 jam — samakan dgn kartu "Mendekati Maintenance PM" di dashboard app
         // (disepakati 2026-08-04, lihat commit 9ac53c5), biar alert & tampilan app konsisten.
-        if (rem >= 0 && rem <= 100) pmHoursDue.push({ ...e, _rem: rem });
+        // Termasuk yang SUDAH LEWAT (rem < 0) — dulu cuma 0..100, jadi unit overdue 0-50 jam
+        // gak muncul di report mana pun (morning briefing baru ambil lewat >50 jam). 2026-11-20
+        if (rem <= 100) pmHoursDue.push({ ...e, _rem: rem });
       }
       const tohInt = Number(e.toh_interval_hours) || 0;
       const gohInt = Number(e.goh_interval_hours) || 0;
@@ -120,6 +122,25 @@ serve(async (_req) => {
       }
     });
     pmHoursDue.sort((a, b) => a._rem - b._rem);
+
+    // PM berbasis WAKTU (pm_type=time, mis. Fire Pump Fixed, TT): last_pm_date + pm_max_interval_days
+    // (atau pm_interval_months x 30). Sama dgn panel "PM Berbasis Waktu" di Dashboard app:
+    // tampil kalau sisa <=10% batas hari (min 7) atau sudah lewat. Ditambah 2026-11-20 — sebelumnya
+    // report ini cuma PM-jam, jadi semua unit basis waktu gak pernah muncul di Telegram.
+    const { data: timeEq } = await sb.from("equipment")
+      .select("tag_number, nama_equipment, assigned_unit_id, status_operasi, last_pm_date, pm_max_interval_days, pm_interval_months")
+      .eq("pm_type", "time");
+    const pmTimeDue: any[] = [];
+    let pmTimeUndated = 0;
+    (timeEq || []).forEach((e) => {
+      if (["Down", "Scrap"].includes(e.status_operasi)) return;
+      const maxDays = Number(e.pm_max_interval_days) || (Number(e.pm_interval_months) || 0) * 30;
+      if (!maxDays) return;
+      if (!e.last_pm_date) { pmTimeUndated++; return; }
+      const rem = maxDays + daysUntil(e.last_pm_date);  // daysUntil(tgl lampau) negatif = hari sejak PM
+      if (rem <= Math.max(7, Math.round(maxDays * 0.1))) pmTimeDue.push({ ...e, _rem: rem });
+    });
+    pmTimeDue.sort((a, b) => a._rem - b._rem);
     overhaulDue.sort((a, b) => a._rem - b._rem);
     nearEOL.sort((a, b) => b._pct - a._pct);
 
@@ -158,11 +179,22 @@ serve(async (_req) => {
 
     if (pmHoursDue.length > 0) {
       lines.push(`\n🟡 <b>PERLU PLAN — PM Berbasis Jam (${pmHoursDue.length})</b>`);
-      pmHoursDue.slice(0, 10).forEach((e) => {
-        lines.push(`• <b>${e.tag_number}</b> @ ${unitName[e.assigned_unit_id] || "—"} — sisa ${Math.round(e._rem)} jam`);
+      pmHoursDue.slice(0, 15).forEach((e) => {
+        const st = e._rem < 0 ? `⛔ LEWAT ${Math.round(-e._rem)} jam` : `sisa ${Math.round(e._rem)} jam`;
+        lines.push(`• <b>${e.tag_number}</b> @ ${unitName[e.assigned_unit_id] || "—"} — ${st}`);
       });
-      if (pmHoursDue.length > 10) lines.push(`<i>...dan ${pmHoursDue.length - 10} lainnya</i>`);
+      if (pmHoursDue.length > 15) lines.push(`<i>...dan ${pmHoursDue.length - 15} lainnya (lihat Dashboard)</i>`);
     }
+
+    if (pmTimeDue.length > 0) {
+      lines.push(`\n⏰ <b>PM Berbasis Waktu (${pmTimeDue.length})</b>`);
+      pmTimeDue.slice(0, 15).forEach((e) => {
+        const st = e._rem < 0 ? `⛔ LEWAT ${-e._rem} hari` : `sisa ${e._rem} hari`;
+        lines.push(`• <b>${e.tag_number}</b> @ ${unitName[e.assigned_unit_id] || "—"} — ${st} (PM terakhir ${fmtDate(e.last_pm_date)})`);
+      });
+      if (pmTimeDue.length > 15) lines.push(`<i>...dan ${pmTimeDue.length - 15} lainnya (lihat Dashboard)</i>`);
+    }
+    if (pmTimeUndated > 0) lines.push(`<i>📅 ${pmTimeUndated} unit basis waktu belum ada tanggal PM terakhir.</i>`);
 
     if (overhaulDue.length > 0) {
       lines.push(`\n🟡 <b>PERLU PLAN — Overhaul (${overhaulDue.length})</b>`);
@@ -181,7 +213,7 @@ serve(async (_req) => {
       lines.push(`<i>💡 Masuk CAPEX planning kalau >85% umur.</i>`);
     }
 
-    if ((skpi?.length || 0) + (maint?.length || 0) + (down?.length || 0) + pmHoursDue.length + overhaulDue.length + nearEOL.length === 0) {
+    if ((skpi?.length || 0) + (maint?.length || 0) + (down?.length || 0) + pmHoursDue.length + pmTimeDue.length + overhaulDue.length + nearEOL.length === 0) {
       lines.push(`\n✅ <b>Semua aman.</b> Tidak ada SKPI expired, maintenance due, overhaul, atau equipment Down hari ini.`);
     }
 
@@ -192,14 +224,14 @@ serve(async (_req) => {
     // Log ke alert_log
     await sb.from("alert_log").insert({
       alert_type: "daily-check",
-      message: `Daily alert: ${skpi?.length || 0} SKPI, ${maint?.length || 0} maintenance, ${down?.length || 0} down, ${pmHoursDue.length} PM-jam, ${overhaulDue.length} overhaul, ${nearEOL.length} near-EOL`,
+      message: `Daily alert: ${skpi?.length || 0} SKPI, ${maint?.length || 0} maintenance, ${down?.length || 0} down, ${pmHoursDue.length} PM-jam, ${pmTimeDue.length} PM-waktu, ${overhaulDue.length} overhaul, ${nearEOL.length} near-EOL`,
       sent_to: CHAT_ID,
       status: "sent",
     });
 
     return new Response(JSON.stringify({
       ok: true,
-      counts: { skpi: skpi?.length || 0, maintenance: maint?.length || 0, down: down?.length || 0, pmHours: pmHoursDue.length, overhaul: overhaulDue.length, nearEOL: nearEOL.length }
+      counts: { skpi: skpi?.length || 0, maintenance: maint?.length || 0, down: down?.length || 0, pmHours: pmHoursDue.length, pmTime: pmTimeDue.length, overhaul: overhaulDue.length, nearEOL: nearEOL.length }
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
     return new Response(JSON.stringify({ ok: false, error: String(err) }), {

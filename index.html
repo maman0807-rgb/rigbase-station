@@ -1103,7 +1103,9 @@
         // tapi gak pernah nongol di Dashboard krn ke-filter di sini duluan (Maman 2026-10-01).
         .or('running_hours.gt.0,pm_max_interval_days.not.is.null')
         .neq('pm_type', 'km')
-        .neq('pm_type', 'plo');  // exclude PLO dari analisa PM-jam
+        .neq('pm_type', 'plo')   // exclude PLO dari analisa PM-jam
+        .neq('pm_type', 'time'); // basis WAKTU punya panel sendiri (fetchPMDueByTime) — interval jam-nya
+                                 // kosong, jadi dulu dihitung default 250 HM & numpuk di list ini (2026-11-20)
       if (error) throw error;
       const generic = (data || [])
         .map(e => {
@@ -1203,8 +1205,7 @@
 
       return [...generic, ...catRows]
         .filter(e => (e._dueByHM || e._dueByTime) && !excludeTags.includes(e.tag_number))
-        .sort((a, b) => a._urgency - b._urgency)
-        .slice(0, 15);
+        .sort((a, b) => a._urgency - b._urgency); // semua ditampilkan (dulu dipotong 15 — unit lain jadi gak kelihatan, 2026-11-20)
     }
 
     // PM berbasis KM: utk Damkar, Slickline truck, Kendaraan (pm_type='km').
@@ -1237,8 +1238,33 @@
           return { ...e, _interval: interval, _actualInterval: interval, _pmType, _used: used, _remaining: remaining, _daysRemaining, _dayThreshold, _dueByKm, _dueByTime };
         })
         .filter(e => (e._dueByKm || e._dueByTime) && !excludeTags.includes(e.tag_number))
-        .sort((a, b) => a._remaining - b._remaining)
-        .slice(0, 15);
+        .sort((a, b) => a._remaining - b._remaining); // semua ditampilkan (dulu dipotong 15 — unit lain jadi gak kelihatan, 2026-11-20)
+    }
+
+    // PM berbasis WAKTU (pm_type='time', mis. Fire Pump Fixed, TT): jatuh tempo = last_pm_date +
+    // pm_max_interval_days (atau pm_interval_months × 30 kalau maks hari kosong). Due kalau sisa
+    // ≤10% batas hari (min 7 hari) — threshold sama dgn fallback waktu di fetchPMDueByHours.
+    // Unit tanpa tanggal PM terakhir dikembalikan terpisah (undated) supaya tetap kelihatan.
+    async function fetchPMDueByTime(excludeTags = []) {
+      const { data, error } = await state.supabase
+        .from('equipment')
+        .select('id, tag_number, nama_equipment, assigned_unit_id, status_operasi, last_pm_date, pm_max_interval_days, pm_interval_months, pm_type')
+        .eq('pm_type', 'time');
+      if (error) throw error;
+      const rows = (data || []).filter(e => !['Down', 'Scrap'].includes(e.status_operasi) && !excludeTags.includes(e.tag_number));
+      const due = [], undated = [];
+      rows.forEach(e => {
+        const maxDays = Number(e.pm_max_interval_days) || (Number(e.pm_interval_months) || 0) * 30;
+        if (!maxDays) return;
+        if (!e.last_pm_date) { undated.push({ ...e, _maxDays: maxDays }); return; }
+        const daysSince = Math.floor((Date.now() - new Date(e.last_pm_date).getTime()) / 86400000);
+        const daysRemaining = maxDays - daysSince;
+        const dayThreshold = Math.max(7, Math.round(maxDays * 0.1));
+        if (daysRemaining <= dayThreshold) due.push({ ...e, _maxDays: maxDays, _daysRemaining: daysRemaining, _dayThreshold: dayThreshold });
+      });
+      due.sort((a, b) => a._daysRemaining - b._daysRemaining);
+      undated.sort((a, b) => a.tag_number.localeCompare(b.tag_number));
+      return { due, undated };
     }
 
     // PM berbasis PLO: Persetujuan Layak Operasi — min 3 thn (warning), maks 4 thn (overdue).
@@ -2023,15 +2049,32 @@
 
         // 1. PM Critical (≤ 10% interval tiap unit atau sudah lewat)
         const pmCritical = await fetchPMDueByHours(0.1).catch(() => []);
+        // List gak dipotong lagi di fetch (2026-11-20) — di pesan Telegram dibatasi 20 baris + "dan N lainnya"
+        // supaya gak lewat batas 4096 karakter.
+        const MAX_TG = 20;
+        const sisaTg = (arr) => arr.length > MAX_TG ? `\n  <i>...dan ${arr.length - MAX_TG} lainnya (lihat Dashboard)</i>` : '';
         if (pmCritical.length) {
-          const lines = pmCritical.map(e => {
+          const lines = pmCritical.slice(0, MAX_TG).map(e => {
             const rem = e._remaining;
-            const status = rem <= 0
+            const status = e._dueByTime && !e._dueByHM
+              ? (e._daysRemaining <= 0 ? `⏰ LEWAT ${Math.abs(Math.round(e._daysRemaining))} hari` : `⏰ Sisa ${Math.round(e._daysRemaining)} hari`)
+              : rem <= 0
               ? `⛔ LEWAT ${Math.abs(Math.round(rem))} HM`
               : `⚠️ Sisa ${Math.round(rem)} HM`;
             return `  • <b>${escapeHtml(e.tag_number)}</b> [${escapeHtml(getParentUnitName(e.assigned_unit_id))}] — ${status}`;
           }).join('\n');
-          sections.push(`🔧 <b>PM CRITICAL — ${pmCritical.length} Equipment</b>\n${lines}\n📦 Siapkan part &amp; jadwalkan PM segera.`);
+          sections.push(`🔧 <b>PM CRITICAL — ${pmCritical.length} Equipment</b>\n${lines}${sisaTg(pmCritical)}\n📦 Siapkan part &amp; jadwalkan PM segera.`);
+        }
+
+        // 1b. PM berbasis WAKTU (Fire Pump Fixed, TT, dll.) — sisa ≤10% batas hari atau sudah lewat
+        const pmTimeTg = await fetchPMDueByTime(DASHBOARD_HIDDEN_TAGS).catch(() => ({ due: [], undated: [] }));
+        if (pmTimeTg.due.length) {
+          const lines = pmTimeTg.due.slice(0, MAX_TG).map(e => {
+            const d = e._daysRemaining;
+            const status = d < 0 ? `⛔ LEWAT ${Math.abs(d)} hari` : `⏰ Sisa ${d} hari`;
+            return `  • <b>${escapeHtml(e.tag_number)}</b> [${escapeHtml(getParentUnitName(e.assigned_unit_id))}] — ${status}`;
+          }).join('\n');
+          sections.push(`⏰ <b>PM BERBASIS WAKTU — ${pmTimeTg.due.length} Equipment</b>\n${lines}${sisaTg(pmTimeTg.due)}\n📅 Jadwalkan PM kalender.`);
         }
 
         // 2. SKPI / Sertifikat ≤ 30 hari
@@ -2553,7 +2596,7 @@
             <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
               <h4 class="text-base font-bold text-slate-800 mb-3 flex items-center gap-2">🔧 Mendekati Maintenance PM</h4>
               <p class="text-xs text-slate-400 mb-3">Equipment dengan sisa ≤100 HM, atau sisa ≤10% dari batas hari (kalau nggak jalan-jalan).</p>
-              <div id="dash-due" class="space-y-2 text-sm">Memuat…</div>
+              <div id="dash-due" class="space-y-2 text-sm max-h-[36rem] overflow-y-auto">Memuat…</div>
             </div>
             <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
               <h4 class="text-base font-bold text-slate-800 mb-3 flex items-center gap-2">📜 Sertifikat Equipment</h4>
@@ -2564,12 +2607,17 @@
           <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
             <h4 class="text-base font-bold text-slate-800 mb-3 flex items-center gap-2">⏱️ PM Berbasis Jam (mendekati / lewat)</h4>
             <p class="text-xs text-slate-400 mb-3">Dari jam jalan (HM) yang diisi mekanik via Logbook.</p>
-            <div id="dash-pmhours" class="space-y-2 text-sm">Memuat…</div>
+            <div id="dash-pmhours" class="space-y-2 text-sm max-h-96 overflow-y-auto">Memuat…</div>
           </div>
           <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
             <h4 class="text-base font-bold text-slate-800 mb-3 flex items-center gap-2">🛻 PM Berbasis KM (Kendaraan)</h4>
             <p class="text-xs text-slate-400 mb-3">Damkar, slickline truck, kendaraan dinas. Interval default 5.000 km bila belum diisi.</p>
-            <div id="dash-pmkm" class="space-y-2 text-sm">Memuat…</div>
+            <div id="dash-pmkm" class="space-y-2 text-sm max-h-96 overflow-y-auto">Memuat…</div>
+          </div>
+          <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+            <h4 class="text-base font-bold text-slate-800 mb-3 flex items-center gap-2">⏰ PM Berbasis Waktu (Kalender)</h4>
+            <p class="text-xs text-slate-400 mb-3">Basis pemakaian <b>time</b> (mis. Fire Pump Fixed, TT): jatuh tempo = tanggal PM terakhir + Maks Hari Sejak PM. Tampil kalau sisa ≤10% batas hari atau sudah lewat.</p>
+            <div id="dash-pmtime" class="space-y-2 text-sm max-h-96 overflow-y-auto">Memuat…</div>
           </div>
           <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
             <h4 class="text-base font-bold text-slate-800 mb-3 flex items-center gap-2">🔧 Equipment Mendekati / Melewati Jadwal TOH/GOH</h4>
@@ -2596,7 +2644,7 @@
 
         (async () => {
           try {
-            const [stats, due, skpi, loans, pmHours, pmKm, overhaul, inspAktif, pendingHmPhotos] = await Promise.all([
+            const [stats, due, skpi, loans, pmHours, pmKm, overhaul, inspAktif, pendingHmPhotos, pmTime] = await Promise.all([
               fetchDashboardStats(),
               fetchPMDueByHours(0.2, DASHBOARD_HIDDEN_TAGS).catch(() => []),
               fetchAllCertificates().then(c => ({
@@ -2611,6 +2659,7 @@
               state.profile?.role === 'admin'
                 ? state.supabase.from('hm_photo_reports').select('*').eq('status', 'pending').order('created_at').then(r => r.data || []).catch(() => [])
                 : Promise.resolve([]),
+              fetchPMDueByTime(DASHBOARD_HIDDEN_TAGS).catch(() => ({ due: [], undated: [] })),
             ]);
             // Lampirkan HM sistem saat ini ke tiap Foto HM pending — admin perlu bandingkan
             // sebelum approve, bukan cuma lihat angka foto doang.
@@ -2629,7 +2678,7 @@
               ${statCard('Total Equipment', fmtNumber(stats.total),   ICONS.wrench,  'bg-blue-100 text-blue-700')}
               ${statCard('Aktif',           fmtNumber(stats.aktif),   ICONS.check,   'bg-green-100 text-green-700')}
               ${statCard('Down',            fmtNumber(stats.down),    ICONS.warning, 'bg-red-100 text-red-700')}
-              ${statCard('Warning PM', fmtNumber(due.length) + (pmHours.length ? ` (${pmHours.length} kritis)` : ''), ICONS.bell, 'bg-orange-100 text-orange-700')}
+              ${statCard('Warning PM', fmtNumber(due.length + pmKm.length + pmTime.due.length) + (pmHours.length ? ` (${pmHours.length} kritis)` : ''), ICONS.bell, 'bg-orange-100 text-orange-700')}
             `;
             // Foto HM menunggu approval (admin only) — approve di sini langsung update running_hours (= Revisi HM)
             const hmPhotoWrap = $('#dash-hmphoto-wrap');
@@ -2757,6 +2806,27 @@
                 }).join('');
             // PM berbasis km (Kendaraan) — badge tier & tombol Siapkan Part/Cetak Form/Catat PM Selesai,
             // sama seperti kartu PM berbasis jam (lihat _pmColors/pmBadge di atas), cuma satuannya KM.
+            // PM berbasis waktu (kalender) — panel sendiri, terpisah dari HM (2026-11-20)
+            $('#dash-pmtime').innerHTML = (pmTime.due.length === 0
+              ? '<div class="text-slate-400 text-sm">Tidak ada unit basis waktu yang mendekati jadwal PM.</div>'
+              : pmTime.due.map(e => {
+                  const d = e._daysRemaining;
+                  const over = d < 0;
+                  const cls = over ? 'border-red-300 bg-red-50' : d <= Math.round(e._dayThreshold * 0.5) ? 'border-amber-300 bg-amber-50' : 'border-yellow-200 bg-yellow-50';
+                  const txt = over ? 'text-red-700 font-bold' : 'text-amber-700 font-semibold';
+                  const jatuh = new Date(new Date(e.last_pm_date).getTime() + e._maxDays * 86400000);
+                  return `<button onclick="setEquipmentView('detail','${e.id}'); navigate('equipment')" class="w-full text-left flex items-center justify-between border ${cls} rounded-lg px-3 py-2 hover:opacity-80">
+                    <div class="min-w-0">
+                      <div class="font-semibold text-navy text-sm truncate">${escapeHtml(e.tag_number)}</div>
+                      <div class="text-xs text-slate-500 truncate">${escapeHtml(e.nama_equipment || '')} • ${escapeHtml(getParentUnitName(e.assigned_unit_id))}</div>
+                    </div>
+                    <div class="text-right flex-shrink-0 ml-2">
+                      <div class="${txt} text-sm">${over ? `⏰ LEWAT ${fmtNumber(-d, ' hari')}` : `⏰ sisa ${fmtNumber(d, ' hari')}`}</div>
+                      <div class="text-xs text-slate-500">PM terakhir ${fmtDate(e.last_pm_date)} · tiap ${fmtNumber(e._maxDays, ' hari')} · jatuh tempo ${fmtDate(jatuh.toISOString().slice(0, 10))}</div>
+                    </div>
+                  </button>`;
+                }).join(''))
+              + (pmTime.undated.length ? `<details class="mt-2"><summary class="cursor-pointer text-xs text-slate-500 font-semibold">📅 ${pmTime.undated.length} unit belum ada tanggal PM terakhir — isi di Edit Equipment supaya bisa dijadwalkan</summary><div class="mt-1 space-y-1">${pmTime.undated.map(e => `<button onclick="setEquipmentView('detail','${e.id}'); navigate('equipment')" class="w-full text-left text-xs px-2 py-1 rounded hover:bg-slate-50"><b class="text-navy">${escapeHtml(e.tag_number)}</b> <span class="text-slate-500">${escapeHtml(e.nama_equipment || '')} • ${escapeHtml(getParentUnitName(e.assigned_unit_id))}</span></button>`).join('')}</div></details>` : '');
             $('#dash-pmkm').innerHTML = pmKm.length === 0
               ? '<div class="text-slate-400 text-sm">Tidak ada kendaraan mendekati km PM. (Isi pm_interval_hours sbg interval km, atau pakai default 5.000 km.)</div>'
               : pmKm.map(e => {

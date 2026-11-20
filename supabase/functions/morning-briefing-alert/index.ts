@@ -90,6 +90,25 @@ serve(async (_req) => {
     });
     overdue.sort((a, b) => a._rem - b._rem); // urutan: paling parah dulu
 
+    // PM berbasis WAKTU yang SUDAH LEWAT (pm_type=time, mis. Fire Pump Fixed, TT):
+    // last_pm_date + pm_max_interval_days (atau pm_interval_months x 30) < hari ini.
+    // Ditambah 2026-11-20 — sebelumnya briefing cuma ngitung PM-jam, unit basis waktu gak pernah muncul.
+    const { data: timeEq } = await sb.from("equipment")
+      .select("id, tag_number, assigned_unit_id, status_operasi, last_pm_date, pm_max_interval_days, pm_interval_months")
+      .eq("pm_type", "time")
+      .not("last_pm_date", "is", null);
+    const today0 = new Date(); today0.setHours(0, 0, 0, 0);
+    const timeOverdue: any[] = [];
+    (timeEq || []).forEach((e) => {
+      if (["Down", "Scrap"].includes(e.status_operasi) || isSnoozed(e.id, "PM")) return;
+      const maxDays = Number(e.pm_max_interval_days) || (Number(e.pm_interval_months) || 0) * 30;
+      if (!maxDays) return;
+      const last = new Date(e.last_pm_date); last.setHours(0, 0, 0, 0);
+      const rem = maxDays - Math.floor((today0.getTime() - last.getTime()) / 86400000);
+      if (rem < 0) timeOverdue.push({ ...e, _rem: rem });
+    });
+    timeOverdue.sort((a, b) => a._rem - b._rem);
+
     // Equipment Down aktif
     const { data: down } = await sb.from("equipment")
       .select("tag_number, nama_equipment, assigned_unit_id")
@@ -104,7 +123,7 @@ serve(async (_req) => {
       .order("start_at", { ascending: true });
 
     // Skip alert kalau tidak ada apa-apa
-    const total = overdue.length + (down?.length || 0) + (ongoingDt?.length || 0);
+    const total = overdue.length + timeOverdue.length + (down?.length || 0) + (ongoingDt?.length || 0);
     if (total === 0) {
       return new Response(JSON.stringify({ ok: true, skipped: "no critical items" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" }
@@ -123,6 +142,15 @@ serve(async (_req) => {
         lines.push(`• <b>${e.tag_number}</b> @ ${unit} — ${e._kind} lewat ${Math.round(-e._rem)}j`);
       });
       if (overdue.length > 10) lines.push(`<i>...dan ${overdue.length - 10} lainnya</i>`);
+    }
+
+    if (timeOverdue.length > 0) {
+      lines.push(`\n⏰ <b>PM BERBASIS WAKTU LEWAT (${timeOverdue.length})</b>`);
+      timeOverdue.slice(0, 10).forEach((e) => {
+        const unit = unitName[e.assigned_unit_id] || "—";
+        lines.push(`• <b>${e.tag_number}</b> @ ${unit} — PM lewat ${-e._rem} hari`);
+      });
+      if (timeOverdue.length > 10) lines.push(`<i>...dan ${timeOverdue.length - 10} lainnya</i>`);
     }
 
     if (ongoingDt && ongoingDt.length > 0) {
@@ -154,14 +182,14 @@ serve(async (_req) => {
     // Log ke alert_log
     await sb.from("alert_log").insert({
       alert_type: "morning-briefing",
-      message: `Briefing pagi: ${overdue.length} overdue, ${ongoingDt?.length || 0} ongoing downtime, ${down?.length || 0} status Down`,
+      message: `Briefing pagi: ${overdue.length} overdue, ${timeOverdue.length} PM-waktu lewat, ${ongoingDt?.length || 0} ongoing downtime, ${down?.length || 0} status Down`,
       sent_to: CHAT_ID,
       status: "sent",
     });
 
     return new Response(JSON.stringify({
       ok: true,
-      counts: { overdue: overdue.length, ongoingDt: ongoingDt?.length || 0, down: down?.length || 0 }
+      counts: { overdue: overdue.length, timeOverdue: timeOverdue.length, ongoingDt: ongoingDt?.length || 0, down: down?.length || 0 }
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
     return new Response(JSON.stringify({ ok: false, error: String(err) }), {
