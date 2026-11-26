@@ -21642,7 +21642,7 @@
         const [{ data: eqs, error }, hmTrends] = await Promise.all([
           state.supabase.from('equipment').select(
             'id, tag_number, nama_equipment, assigned_unit_id, kategori_id, ' +
-            'running_hours, pm_type, pm_interval_hours, last_pm_hours, ' +
+            'running_hours, pm_type, pm_interval_hours, last_pm_hours, pm_cycle_count, ' +
             'toh_interval_hours, last_toh_hours, goh_interval_hours, last_goh_hours, ' +
             'economic_life_hours, ' +
             'skpi_end_date, tgl_expired_sertifikat, next_maintenance_date'
@@ -21755,8 +21755,14 @@
           if (pmInt > 0 && rh > 0) {
             const sisa = isCatC71 ? catNext.remaining : (pmInt - (rh - (Number(eq.last_pm_hours) || 0)));
             if (sisa < pmInt * 1.2) { // sampai 20% over limit
+              // Level PM (PM3/PM4/PM5/PM6) — sama dgn widget Dashboard (fetchPMDueByHours/Km):
+              // Cat C7.1 dari ladder Trakindo, lainnya dari siklus pm_cycle_count+1. Dulu Calendar &
+              // hardcopy cuma nulis "PM" tanpa level (Maman 2026-11-26).
+              const pmLevel = isCatC71
+                ? catNext.level
+                : (() => { const t = getPMTypeByCycle((Number(eq.pm_cycle_count) || 0) + 1); return (t === 'GOH' && eq.goh_interval_hours) ? 'PM3' : t; })();
               events.push({
-                eq, unitName, kind: 'PM',
+                eq, unitName, kind: 'PM', pmLevel,
                 date: projectDate(sisa) || now.toISOString().slice(0, 10),
                 sisa, overdue: sisa < 0,
                 color: sisa < 0 ? 'bg-red-500' : sisa < 200 ? 'bg-amber-500' : 'bg-green-500',
@@ -22189,7 +22195,7 @@
                   return `<tr class="border-b border-slate-100 hover:bg-slate-50 cursor-pointer ${u2.rowBg}" onclick="setEquipmentView('detail','${e.eq.id}'); navigate('equipment')">
                     <td class="px-3 py-2 text-sm"><div class="font-mono font-bold text-navy">${escapeHtml(e.eq.tag_number)}</div><div class="text-xs text-slate-500">${escapeHtml(e.eq.nama_equipment || '')}</div></td>
                     <td class="px-3 py-2 text-sm text-slate-600">${escapeHtml(e.unitName)}</td>
-                    <td class="px-3 py-2 text-center text-sm font-bold whitespace-nowrap">${e.icon} ${e.kind}</td>
+                    <td class="px-3 py-2 text-center text-sm font-bold whitespace-nowrap">${e.icon} ${escapeHtml(e.pmLevel || e.kind)}</td>
                     <td class="px-3 py-2 text-center text-sm whitespace-nowrap">${fmtDate(e.date)}</td>
                     <td class="px-3 py-2 text-center text-sm whitespace-nowrap">${hariSampai(e)}</td>
                     <td class="px-3 py-2 text-right text-sm whitespace-nowrap">${sisaText(e)}</td>
@@ -22245,7 +22251,7 @@
                   const u2 = urgencyOf(e);
                   return `<tr class="border-b border-slate-100 hover:bg-slate-50 cursor-pointer ${u2.rowBg}" onclick="setEquipmentView('detail','${e.eq.id}'); navigate('equipment')">
                     <td class="px-3 py-2 text-sm"><div class="font-mono font-bold text-navy">${escapeHtml(e.eq.tag_number)}</div><div class="text-xs text-slate-500">${escapeHtml(e.eq.nama_equipment || '')}</div></td>
-                    <td class="px-3 py-2 text-center text-sm font-bold whitespace-nowrap">${e.icon} ${e.kind}</td>
+                    <td class="px-3 py-2 text-center text-sm font-bold whitespace-nowrap">${e.icon} ${escapeHtml(e.pmLevel || e.kind)}</td>
                     <td class="px-3 py-2 text-center text-sm whitespace-nowrap">${fmtDate(e.date)}</td>
                     <td class="px-3 py-2 text-center text-sm whitespace-nowrap">${hariSampai(e)}</td>
                     <td class="px-3 py-2 text-right text-sm whitespace-nowrap">${sisaText(e)}</td>
@@ -22263,7 +22269,7 @@
               <td class="px-3 py-2 text-sm text-slate-500">${i + 1}</td>
               <td class="px-3 py-2 text-sm"><div class="font-mono font-bold text-navy">${escapeHtml(e.eq.tag_number)}</div><div class="text-xs text-slate-500">${escapeHtml(e.eq.nama_equipment || '')}</div></td>
               <td class="px-3 py-2 text-sm text-slate-600 whitespace-nowrap">${escapeHtml(e.unitName)}</td>
-              <td class="px-3 py-2 text-sm text-center font-bold whitespace-nowrap">${e.icon} ${e.kind}</td>
+              <td class="px-3 py-2 text-sm text-center font-bold whitespace-nowrap">${e.icon} ${escapeHtml(e.pmLevel || e.kind)}</td>
               <td class="px-3 py-2 text-sm text-center whitespace-nowrap">${fmtDate(e.date)}</td>
               <td class="px-3 py-2 text-sm text-center whitespace-nowrap">${hariSampai(e)}</td>
               <td class="px-3 py-2 text-sm text-right whitespace-nowrap">${sisaText(e)}</td>
@@ -22356,7 +22362,7 @@
             ? (e.sisa < 0 ? `lewat ${-e.sisa} hari` : `${e.sisa} hari lagi`)
             : (e.sisa < 0 ? `lewat ${Math.round(-e.sisa)} jam` : `sisa ${Math.round(e.sisa)} jam`);
           const status = e.overdue ? 'OVERDUE' : 'PLAN';
-          rows.push([monthLbl, e.eq.tag_number, e.eq.nama_equipment || '', e.unitName, e.kind, e.date, sisaTxt, status]);
+          rows.push([monthLbl, e.eq.tag_number, e.eq.nama_equipment || '', e.unitName, e.pmLevel || e.kind, e.date, sisaTxt, status]);
         });
       });
       // CSV
@@ -22639,7 +22645,7 @@
             <td style="text-align:center">${i + 1}</td>
             <td><b>${escapeHtml(e.eq.tag_number)}</b><br><span style="color:#64748b;font-size:10px">${escapeHtml(e.eq.nama_equipment || '')}</span></td>
             <td style="text-align:center;font-size:11px">${escapeHtml(e.unitName)}</td>
-            <td style="text-align:center;font-weight:bold">${e.kind}</td>
+            <td style="text-align:center;font-weight:bold">${escapeHtml(e.pmLevel || e.kind)}</td>
             <td style="text-align:center;font-size:11px;white-space:nowrap">${fmtDate(e.date)}<br><span style="color:#64748b;font-size:10px">${daysTxt}</span></td>
             <td style="text-align:center;font-weight:bold;white-space:nowrap">${sisaTxt}</td>
             <td style="font-size:11px;line-height:1.4">${escapeHtml(actionHint(e.kind, e.eq))}</td>
