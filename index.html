@@ -2610,7 +2610,10 @@
             </div>
           </div>
           <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-            <h4 class="text-base font-bold text-slate-800 mb-3 flex items-center gap-2">⏱️ PM Berbasis Jam (mendekati / lewat)</h4>
+            <div class="flex items-center justify-between gap-2 mb-3 flex-wrap">
+              <h4 class="text-base font-bold text-slate-800 flex items-center gap-2">⏱️ PM Berbasis Jam (mendekati / lewat)</h4>
+              <button onclick="showExportPMDueModal()" class="inline-flex items-center gap-1 text-xs bg-navy text-white px-3 py-1.5 rounded-lg font-semibold hover:opacity-80" title="Export semua PM jatuh tempo (HM, KM, Waktu) ke Excel/PDF untuk dibagikan ke tim & SPV">📤 Export PM (Excel/PDF)</button>
+            </div>
             <p class="text-xs text-slate-400 mb-3">Dari jam jalan (HM) yang diisi mekanik via Logbook.</p>
             <div id="dash-pmhours" class="space-y-2 text-sm max-h-96 overflow-y-auto">Memuat…</div>
           </div>
@@ -3906,6 +3909,150 @@
       }
     }
     window.savePMWaktuDone = savePMWaktuDone;
+
+    // ============================================================
+    // EXPORT DAFTAR PM JATUH TEMPO (Excel / PDF) — 2026-11-28
+    // Sumber data SAMA persis dgn panel Dashboard (fetchPMDueByHours 0.1 / Km 500 / Time),
+    // supaya yg di-share ke tim & SPV = yg Maman lihat di layar. Status LEWAT duluan.
+    // Kolom PIC / Rencana / Keterangan SPV sengaja kosong — diisi tim saat dibagikan.
+    // ============================================================
+    async function collectPMDueRows() {
+      const [hm, km, tm] = await Promise.all([
+        fetchPMDueByHours(0.1, DASHBOARD_HIDDEN_TAGS).catch(() => []),
+        fetchPMDueByKm(500, DASHBOARD_HIDDEN_TAGS).catch(() => []),
+        fetchPMDueByTime(DASHBOARD_HIDDEN_TAGS).catch(() => ({ due: [], undated: [] })),
+      ]);
+      const fmtD = d => d ? new Date(d).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }) : '-';
+      const addDays = (d, n) => new Date(new Date(d).getTime() + n * 86400000);
+      const rows = [];
+      const meterRow = (e, basis, u) => {
+        const byTimeOnly = e._dueByTime && !(basis === 'HM' ? e._dueByHM : e._dueByKm);
+        const val = byTimeOnly ? e._daysRemaining : e._remaining;
+        const sat = byTimeOnly ? 'hari' : u;
+        const lewat = val < 0;
+        rows.push({
+          basis, tag: e.tag_number, nama: e.nama_equipment || '', unit: getParentUnitName(e.assigned_unit_id) || '-',
+          tier: e._pmType || 'PM', lewat, angka: Math.abs(Math.round(val)), satuan: sat,
+          statusTxt: lewat ? `LEWAT ${fmtNumber(Math.abs(Math.round(val)), ' ' + sat)}` : `Sisa ${fmtNumber(Math.round(val), ' ' + sat)}`,
+          posisi: `${fmtNumber(Number(e.running_hours) || 0, ' ' + u)}`,
+          interval: `${fmtNumber(e._interval, ' ' + u)}${e.pm_max_interval_days ? ` / ${e.pm_max_interval_days} hari` : ''}`,
+          terakhir: `${e.last_pm_hours != null ? fmtNumber(Number(e.last_pm_hours), ' ' + u) : '-'}${e.last_pm_date ? ' (' + fmtD(e.last_pm_date) + ')' : ''}`,
+          jatuhTempo: byTimeOnly ? fmtD(addDays(e.last_pm_date, Number(e.pm_max_interval_days))) : `${fmtNumber(e._nextPmAt ?? ((Number(e.running_hours) || 0) + e._remaining), ' ' + u)}`,
+          ket: byTimeOnly ? `Due karena waktu (${u} baru terpakai ${fmtNumber(Math.round(e._used || 0), ' ' + u)})` : '',
+          urut: byTimeOnly ? val / Math.max(1, e._dayThreshold || 1) : val / Math.max(1, e._threshold || 100),
+        });
+      };
+      hm.forEach(e => meterRow(e, 'HM', 'jam'));
+      km.forEach(e => meterRow(e, 'KM', 'km'));
+      (tm.due || []).forEach(e => {
+        const d = e._daysRemaining, lewat = d < 0;
+        rows.push({
+          basis: 'Waktu', tag: e.tag_number, nama: e.nama_equipment || '', unit: getParentUnitName(e.assigned_unit_id) || '-',
+          tier: 'PM', lewat, angka: Math.abs(d), satuan: 'hari',
+          statusTxt: lewat ? `LEWAT ${fmtNumber(-d, ' hari')}` : `Sisa ${fmtNumber(d, ' hari')}`,
+          posisi: '-', interval: `${fmtNumber(e._maxDays, ' hari')}`,
+          terakhir: fmtD(e.last_pm_date), jatuhTempo: fmtD(addDays(e.last_pm_date, e._maxDays)), ket: '',
+          urut: d / Math.max(1, e._dayThreshold),
+        });
+      });
+      // LEWAT dulu (paling lama lewat di atas), lalu yang mendekati (paling mendesak di atas)
+      rows.sort((a, b) => (a.lewat === b.lewat) ? a.urut - b.urut : (a.lewat ? -1 : 1));
+      return { rows, undated: tm.undated || [] };
+    }
+
+    function showExportPMDueModal() {
+      openModal({
+        title: '📤 Export Daftar PM Jatuh Tempo',
+        body: `<div class="space-y-3 text-sm">
+          <p class="text-slate-600">Isi sama dengan panel PM di Dashboard (HM, KM, Waktu) — unit yang <b class="text-red-700">sudah lewat</b> di atas, lalu yang <b class="text-amber-700">mendekati</b>.</p>
+          <label class="flex items-center gap-2"><input type="checkbox" id="pmx-lewat-only" class="rounded"> Hanya yang <b>sudah lewat</b></label>
+          <p class="text-[11px] text-slate-400">Kolom PIC, Rencana Tanggal & Keterangan SPV dibiarkan kosong untuk diisi tim.</p>
+        </div>`,
+        footer: `<button onclick="closeModal()" class="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 text-sm">Batal</button>
+                 <button onclick="exportPMDue('pdf')" class="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm font-semibold">📄 PDF</button>
+                 <button onclick="exportPMDue('xlsx')" class="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-semibold">📊 Excel</button>`,
+        maxWidth: 'max-w-md',
+      });
+    }
+    window.showExportPMDueModal = showExportPMDueModal;
+
+    async function exportPMDue(fmt) {
+      const lewatOnly = !!document.getElementById('pmx-lewat-only')?.checked;
+      // Buka window PDF SEBELUM await — kalau setelah await, browser HP sering blokir pop-up
+      const win = fmt === 'pdf' ? window.open('', '_blank') : null;
+      if (fmt === 'pdf' && !win) { toast('Pop-up diblokir browser. Izinkan pop-up untuk Export PDF.', 'error'); return; }
+      if (win) win.document.write('<p style="font-family:Arial;padding:24px">Menyiapkan laporan…</p>');
+      try {
+        let { rows, undated } = await collectPMDueRows();
+        if (lewatOnly) rows = rows.filter(r => r.lewat);
+        const nLewat = rows.filter(r => r.lewat).length, nDekat = rows.length - nLewat;
+        const now = new Date();
+        const tglFile = now.toISOString().slice(0, 10);
+        const tglTxt = now.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+        const who = state.profile?.full_name || state.profile?.email || '';
+        if (!rows.length) { if (win) win.close(); toast(lewatOnly ? 'Tidak ada PM yang lewat 👍' : 'Tidak ada PM jatuh tempo 👍', 'success'); return; }
+
+        if (fmt === 'xlsx') {
+          const data = rows.map((r, i) => ({
+            'No': i + 1, 'Basis': r.basis, 'Tag': r.tag, 'Nama Equipment': r.nama, 'Unit/Rig': r.unit, 'Tier PM': r.tier,
+            'Status': r.lewat ? 'LEWAT' : 'Mendekati', 'Lewat/Sisa': r.lewat ? -r.angka : r.angka, 'Satuan': r.satuan,
+            'Posisi HM/KM Saat Ini': r.posisi, 'Interval': r.interval, 'PM Terakhir': r.terakhir, 'Jatuh Tempo': r.jatuhTempo,
+            'Keterangan Sistem': r.ket, 'PIC': '', 'Rencana Tgl PM': '', 'Keterangan SPV': '',
+          }));
+          const wb = XLSX.utils.book_new();
+          const ws = XLSX.utils.json_to_sheet(data);
+          ws['!cols'] = [4, 7, 18, 30, 16, 8, 11, 10, 7, 16, 18, 22, 16, 34, 16, 14, 28].map(w => ({ wch: w }));
+          ws['!autofilter'] = { ref: ws['!ref'] };
+          XLSX.utils.book_append_sheet(wb, ws, 'PM Jatuh Tempo');
+          const info = [['Daftar PM Jatuh Tempo — eRAMHoist'], ['RAM Field Prabumulih'], ['Tanggal', tglTxt], ['Dicetak oleh', who],
+            ['Sudah lewat', nLewat], ['Mendekati', nDekat], ['Total', rows.length], [],
+            ['Catatan', 'Lewat/Sisa negatif = sudah lewat. Satuan "hari" = due karena batas waktu.']];
+          if (undated.length) info.push([], ['Unit basis waktu tanpa tanggal PM terakhir (tidak bisa dijadwalkan):'], ...undated.map(u => [u.tag_number, u.nama_equipment || '']));
+          XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(info), 'Info');
+          XLSX.writeFile(wb, `PM_Jatuh_Tempo_${tglFile}.xlsx`);
+          toast(`Excel diunduh — ${rows.length} unit (${nLewat} lewat)`, 'success');
+          closeModal();
+          return;
+        }
+
+        const esc = escapeHtml;
+        const tr = rows.map((r, i) => `<tr class="${r.lewat ? 'lewat' : ''}">
+          <td style="text-align:center">${i + 1}</td><td>${esc(r.basis)}</td><td><b>${esc(r.tag)}</b><div class="s">${esc(r.nama)}</div></td>
+          <td>${esc(r.unit)}</td><td style="text-align:center">${esc(r.tier)}</td>
+          <td class="st">${esc(r.statusTxt)}</td><td>${esc(r.posisi)}</td><td>${esc(r.interval)}</td><td>${esc(r.terakhir)}</td><td>${esc(r.jatuhTempo)}${r.ket ? `<div class="s">${esc(r.ket)}</div>` : ''}</td>
+          <td></td><td></td></tr>`).join('');
+        const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>PM Jatuh Tempo ${tglFile}</title>
+          <style>
+            *{box-sizing:border-box} body{font-family:Arial,Helvetica,sans-serif;color:#1f2937;padding:18px;font-size:10.5px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+            @page{size:A4 landscape;margin:10mm}
+            .kop{border-bottom:3px solid #11335d;padding-bottom:8px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:flex-end}
+            h2{margin:0;color:#11335d;font-size:16px} .sub{color:#64748b;font-size:10px}
+            .sum{display:flex;gap:8px;margin:8px 0 10px} .box{border:1px solid #e2e8f0;border-radius:6px;padding:6px 12px} .box b{font-size:15px;display:block}
+            .r b{color:#b91c1c} .a b{color:#b45309}
+            table{width:100%;border-collapse:collapse} th{background:#11335d;color:#fff;padding:5px 6px;text-align:left;font-size:9.5px}
+            td{padding:4px 6px;border-bottom:1px solid #e5e7eb;vertical-align:top} tr{page-break-inside:avoid}
+            tr.lewat td{background:#fef2f2} tr.lewat .st{color:#b91c1c;font-weight:bold} .st{color:#b45309;font-weight:600;white-space:nowrap}
+            .s{color:#64748b;font-size:9px} .ttd{display:flex;justify-content:flex-end;gap:60px;margin-top:24px;text-align:center;page-break-inside:avoid} .ttd div{width:180px} .ttd .line{margin-top:50px;border-top:1px solid #333}
+            .foot{margin-top:12px;font-size:8.5px;color:#94a3b8}
+          </style></head><body>
+          <div class="kop"><div><h2>Daftar PM Jatuh Tempo${lewatOnly ? ' — Sudah Lewat' : ''}</h2><div class="sub">RAM Hoist &amp; Heavy Equipment — RAM Field Prabumulih</div></div>
+            <div class="sub" style="text-align:right">Tanggal: <b>${esc(tglTxt)}</b><br>Dicetak oleh: ${esc(who)}</div></div>
+          <div class="sum"><div class="box r"><b>${nLewat}</b>Sudah lewat</div>${lewatOnly ? '' : `<div class="box a"><b>${nDekat}</b>Mendekati</div>`}<div class="box"><b>${rows.length}</b>Total unit</div></div>
+          <table><thead><tr><th>No</th><th>Basis</th><th>Equipment</th><th>Unit/Rig</th><th>Tier</th><th>Status</th><th>Posisi Saat Ini</th><th>Interval</th><th>PM Terakhir</th><th>Jatuh Tempo</th><th style="width:90px">PIC</th><th style="width:90px">Rencana Tgl</th></tr></thead>
+          <tbody>${tr}</tbody></table>
+          ${undated.length ? `<div class="foot" style="color:#64748b">⚠ ${undated.length} unit basis waktu belum ada tanggal PM terakhir: ${undated.map(u => esc(u.tag_number)).join(', ')}</div>` : ''}
+          <div class="ttd"><div>Dibuat oleh,<div class="line"></div>${esc(who)}</div><div>Diketahui,<div class="line"></div>Supervisor</div></div>
+          <div class="foot">Dicetak dari eRAMHoist — ${esc(now.toLocaleString('id-ID'))}</div>
+          </body></html>`;
+        win.document.open(); win.document.write(html); win.document.close(); win.focus();
+        setTimeout(() => win.print(), 500);
+        closeModal();
+      } catch (err) {
+        if (win) win.close();
+        toast('Gagal export: ' + err.message, 'error');
+      }
+    }
+    window.exportPMDue = exportPMDue;
 
     function exportPMPartsPDF() {
       const d = window._pmPartsData;
